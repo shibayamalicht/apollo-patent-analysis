@@ -1,0 +1,13 @@
+streamlit
+pandas
+numpy
+scikit-learn
+plotly
+matplotlib
+japanize-matplotlib
+janome
+sentence-transformers
+umap-learn
+hdbscan
+wordcloud
+openpyxl
