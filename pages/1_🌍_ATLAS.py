@@ -1,218 +1,222 @@
-# ==================================================================
-# --- 1. ライブラリのインポート ---
-# ==================================================================
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
+import japanize_matplotlib
 import warnings
 import re
-
-# グラフ描画
-import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
-import plotly.express as px
-import japanize_matplotlib # 日本語化
 
 # 警告を非表示
 warnings.filterwarnings('ignore')
 
 # ==================================================================
-# --- 2. ATLAS専用ヘルパー関数 ---
+# --- 1. 設定・ヘルパー関数 ---
 # ==================================================================
+
+def get_theme_config(theme_name):
+    """
+    選択されたテーマに応じたCSSスタイルとPlotlyテンプレート設定を返す
+    """
+    themes = {
+        "APOLLO Standard": {
+            "bg_color": "#ffffff",
+            "text_color": "#333333",
+            "sidebar_bg": "#f8f9fa",
+            "plotly_template": "plotly_white",
+            "color_sequence": px.colors.qualitative.G10,
+            "accent_color": "#003366",
+            "css": """
+                html, body { background-color: #ffffff; color: #333333; }
+                [data-testid="stSidebar"] { background-color: #f8f9fa; }
+                [data-testid="stHeader"] { background-color: #ffffff; }
+                h1, h2, h3 { color: #003366; }
+            """
+        },
+        "Modern Presentation": {
+            "bg_color": "#fdfdfd",
+            "text_color": "#2c3e50",
+            "sidebar_bg": "#eaeaea",
+            "plotly_template": "plotly_white",
+            "color_sequence": ["#264653", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51", "#8ab17d"],
+            "accent_color": "#264653",
+            "css": """
+                html, body { background-color: #fdfdfd; color: #2c3e50; font-family: "Helvetica Neue", Arial, sans-serif; }
+                [data-testid="stSidebar"] { background-color: #eaeaea; }
+                [data-testid="stHeader"] { background-color: #fdfdfd; }
+                h1, h2, h3 { color: #264653; font-family: "Georgia", serif; }
+                .stButton>button { background-color: #264653; color: white; border-radius: 0px; }
+            """
+        }
+    }
+    return themes.get(theme_name, themes["APOLLO Standard"])
 
 @st.cache_data
 def parse_ipc_atlas(ipc, level):
-    """IPCコードを指定されたレベルに解析する内部関数"""
-    ipc = str(ipc).strip().upper()
+    """IPCコードを指定されたレベル（サブクラス/メイングループ）に解析・正規化する"""
+    if not isinstance(ipc, str):
+        return ""
+    ipc = ipc.strip().upper()
     
-    if level == 1:  # サブクラス
+    if level == 1:  # サブクラス (例: H01L)
         return ipc[:4]
-    elif level == 2:  # メイングループ
+    elif level == 2:  # メイングループ (例: H01L 21/00)
         match = re.match(r'([A-H][0-9]{2}[A-Z]\s*[0-9]+)', ipc)
         return f"{match.group(1).strip()}/00" if match else ipc
-    else:  # サブグループ
+    else:
         return ipc
 
 @st.cache_data
-def create_application_trend_chart(df_stats, start_year, end_year):
-    """(MAP 1) 出願件数時系列推移"""
-    yearly_counts = df_stats['year'].value_counts().sort_index()
-    if yearly_counts.empty:
-        return "有効な出願年データがありません。"
-    plot_data = yearly_counts.reindex(range(int(start_year), int(end_year) + 1), fill_value=0)
-    if plot_data.empty:
-        return "指定期間にデータがありません。"
+def create_treemap_data(df_stats, start_year, end_year, mode="ipc"):
+    """ツリーマップ描画用の階層データを生成する"""
+    # 期間フィルタ適用済みのデータを使用することを想定
+    df_target = df_stats.copy()
     
-    plt.style.use('seaborn-v0_8-talk')
-    fig, ax = plt.subplots(figsize=(16, 8))
-    bars = ax.bar(plot_data.index, plot_data.values, color='steelblue')
-    ax.set_title(f'出願件数時系列推移 ({int(start_year)}年～{int(end_year)}年)', fontsize=20, pad=20)
-    ax.set_xlabel('出願年', fontsize=14); ax.set_ylabel('出願件数', fontsize=14)
-    ax.grid(axis='y', linestyle='--', alpha=0.7)
-    ax.xaxis.set_major_locator(MaxNLocator(integer=True)); plt.setp(ax.get_xticklabels(), rotation=45)
-    ax.set_ylim(bottom=0)
-    for bar in bars:
-        height = bar.get_height()
-        if height > 0:
-            ax.annotate(f'{int(height)}', xy=(bar.get_x() + bar.get_width() / 2, height), xytext=(0, 3), textcoords="offset points", ha='center', va='bottom')
-    plt.tight_layout()
-    return fig
-
-@st.cache_data
-def create_assignee_ranking_map(df_stats, num_to_display, start_year, end_year):
-    """(MAP 2) 出願人ランキング"""
-    assignee_counts = df_stats['applicant_main'].explode().str.strip().value_counts()
-    data_to_plot = assignee_counts.head(int(num_to_display)).sort_values(ascending=True)
-
-    if data_to_plot.empty:
-        return "集計結果がありません。"
-    
-    plt.style.use('seaborn-v0_8-talk')
-    fig, ax = plt.subplots(figsize=(12, max(5, 0.4 * len(data_to_plot))))
-    bars = ax.barh(data_to_plot.index, data_to_plot.values, color='steelblue')
-    ax.set_title(f'出願人ランキング ({int(start_year)}年～{int(end_year)}年)', fontsize=20, pad=20)
-    ax.set_xlabel('特許件数', fontsize=14); ax.set_ylabel('出願人名', fontsize=14)
-    for bar in bars:
-        width = bar.get_width()
-        ax.text(width + width * 0.01, bar.get_y() + bar.get_height()/2, f'{int(width)}', ha='left', va='center', fontsize=12)
-    ax.set_xlim(right=ax.get_xlim()[1] * 1.15)
-    ax.grid(axis='x', linestyle='--', alpha=0.6)
-    plt.tight_layout()
-    return fig
-
-@st.cache_data
-def create_ipc_ranking_map(df_stats, ipc_level_tuple, num_to_display, start_year, end_year):
-    """(MAP 3) IPCランキング"""
-    ipc_level, level_name = ipc_level_tuple
-    ipc_exploded = df_stats['ipc_normalized'].explode().dropna()
-    ipc_parsed = ipc_exploded.apply(lambda x: parse_ipc_atlas(x, ipc_level))
-    ipc_counts = ipc_parsed.value_counts()
-    data_to_plot = ipc_counts.head(int(num_to_display)).sort_values(ascending=True)
-
-    if data_to_plot.empty:
-        return "集計結果がありません。"
+    if mode == "ipc":
+        # IPC階層: Section -> Class -> Subclass
+        df_exploded = df_target['ipc_normalized'].explode().dropna().astype(str).str.upper()
         
-    plt.style.use('seaborn-v0_8-talk')
-    fig, ax = plt.subplots(figsize=(12, max(5, 0.4 * len(data_to_plot))))
-    bars = ax.barh(data_to_plot.index, data_to_plot.values, color='darkgreen')
-    ax.set_title(f'IPCランキング ({level_name}レベル, {int(start_year)}年～{int(end_year)}年)', fontsize=20, pad=20)
-    ax.set_xlabel('特許件数', fontsize=14); ax.set_ylabel('IPC', fontsize=14)
-    for bar in bars:
-        width = bar.get_width()
-        ax.text(width + width * 0.01, bar.get_y() + bar.get_height()/2, f'{int(width)}', ha='left', va='center', fontsize=12)
-    ax.set_xlim(right=ax.get_xlim()[1] * 1.15)
-    ax.grid(axis='x', linestyle='--', alpha=0.6)
-    plt.tight_layout()
+        data = []
+        for ipc in df_exploded:
+            if len(ipc) >= 4:
+                section = ipc[0]
+                ipc_class = ipc[:3]
+                subclass = ipc[:4]
+                data.append([section, ipc_class, subclass])
+        
+        df_tree = pd.DataFrame(data, columns=['Section', 'Class', 'Subclass'])
+        df_tree['count'] = 1
+        return df_tree
+        
+    elif mode == "applicant":
+        # 出願人シェア
+        df_exploded = df_target['applicant_main'].explode().dropna()
+        df_tree = df_exploded.value_counts().reset_index()
+        df_tree.columns = ['Applicant', 'count']
+        # 視認性のため上位50件に限定
+        df_tree = df_tree.head(50)
+        df_tree['Root'] = 'Total'
+        return df_tree
+
+def update_fig_layout(fig, title, height=600, theme_config=None):
+    """Plotlyグラフのレイアウトをテーマに合わせて共通設定する"""
+    if theme_config is None:
+        return fig
+        
+    fig.update_layout(
+        template=theme_config["plotly_template"],
+        title=title,
+        paper_bgcolor=theme_config["bg_color"],
+        plot_bgcolor=theme_config["bg_color"],
+        font_color=theme_config["text_color"],
+        height=height
+    )
     return fig
 
-@st.cache_data
-def create_assignee_year_bubble(df_stats, num_to_display, start_year, end_year):
-    """(MAP 4) 出願人×年 バブル（デュアル表示）"""
-    assignees_exploded = df_stats.explode('applicant_main')
-    assignees_exploded['assignee_parsed'] = assignees_exploded['applicant_main'].str.strip()
-    top_assignees = assignees_exploded['assignee_parsed'].value_counts().head(int(num_to_display)).index.tolist()
-    
-    plot_data = assignees_exploded[assignees_exploded['assignee_parsed'].isin(top_assignees)]
-    plot_data = plot_data.groupby(['year', 'assignee_parsed']).size().reset_index(name='件数')
-
-    if plot_data.empty:
-        return "集計結果が空のため、このマップはスキップします。", None
-
-    assignee_rank_map = {name: i for i, name in enumerate(top_assignees[::-1])}
-    plot_data['y_rank'] = plot_data['assignee_parsed'].map(assignee_rank_map)
-    cmap = plt.get_cmap('Set2', len(top_assignees))
-    
-    # 対数スケール
-    fig1, ax1 = plt.subplots(figsize=(16, max(8, 0.6 * len(top_assignees))))
-    ax1.scatter(x=plot_data['year'], y=plot_data['y_rank'], s=np.log1p(plot_data['件数']) * 80, c=plot_data['y_rank'], cmap=cmap, alpha=0.8)
-    for _, row in plot_data.iterrows(): ax1.text(row['year'], row['y_rank'], row['件数'], ha='center', va='center', fontsize=9, color='black')
-    ax1.set_yticks(range(len(top_assignees))); ax1.set_yticklabels(top_assignees[::-1])
-    ax1.set_title(f'出願年別 出願人動向 (対数スケール) - {int(start_year)}年～{int(end_year)}年', fontsize=20, pad=20)
-    ax1.set_xlabel('出願年', fontsize=14); ax1.set_ylabel('出願人', fontsize=14)
-    ax1.grid(True, linestyle='--', alpha=0.7); ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
-    plt.tight_layout()
-    
-    # 実数スケール
-    fig2, ax2 = plt.subplots(figsize=(16, max(8, 0.6 * len(top_assignees))))
-    ax2.scatter(x=plot_data['year'], y=plot_data['y_rank'], s=plot_data['件数'] * 40, c=plot_data['y_rank'], cmap=cmap, alpha=0.8)
-    for _, row in plot_data.iterrows(): ax2.text(row['year'], row['y_rank'], row['件数'], ha='center', va='center', fontsize=9, color='black')
-    ax2.set_yticks(range(len(top_assignees))); ax2.set_yticklabels(top_assignees[::-1])
-    ax2.set_title(f'出願年別 出願人動向 (実数スケール) - {int(start_year)}年～{int(end_year)}年', fontsize=20, pad=20)
-    ax2.set_xlabel('出願年', fontsize=14); ax2.set_ylabel('出願人', fontsize=14)
-    ax2.grid(True, linestyle='--', alpha=0.7); ax2.xaxis.set_major_locator(MaxNLocator(integer=True))
-    plt.tight_layout()
-    
-    return fig1, fig2
-
-@st.cache_data
-def create_ipc_assignee_bubble(df_stats, ipc_level_tuple, num_ipcs, num_assignees, start_year, end_year):
-    """(MAP 5) IPC×出願人 バブル（デュアル表示）"""
-    ipc_level, level_name = ipc_level_tuple
-
-    df_exploded = df_stats.explode('applicant_main').explode('ipc_normalized')
-    df_exploded.dropna(subset=['applicant_main', 'ipc_normalized'], inplace=True)
-    
-    df_exploded['assignee_parsed'] = df_exploded['applicant_main'].str.strip()
-    df_exploded['ipc_parsed'] = df_exploded['ipc_normalized'].apply(lambda x: parse_ipc_atlas(x, ipc_level))
-    
-    top_assignees = df_exploded['assignee_parsed'].value_counts().head(int(num_assignees)).index.tolist()
-    top_ipcs = df_exploded['ipc_parsed'].value_counts().head(int(num_ipcs)).index.tolist()
-
-    df_top = df_exploded[
-        df_exploded['assignee_parsed'].isin(top_assignees) & 
-        df_exploded['ipc_parsed'].isin(top_ipcs)
-    ]
-    
-    plot_data = df_top.groupby(['assignee_parsed', 'ipc_parsed']).size().reset_index(name='件数')
-    if plot_data.empty:
-        return "集計結果が空のため、このマップはスキップします。", None
-
-    ipc_rank_map = {ipc: i for i, ipc in enumerate(top_ipcs)}
-    assignee_rank_map = {name: i for i, name in enumerate(top_assignees[::-1])}
-    plot_data['x_rank'] = plot_data['ipc_parsed'].map(ipc_rank_map)
-    plot_data['y_rank'] = plot_data['assignee_parsed'].map(assignee_rank_map)
-    cmap = plt.get_cmap('Set2', len(top_assignees))
-
-    # 対数スケール
-    fig1, ax1 = plt.subplots(figsize=(max(16, 0.8 * len(top_ipcs)), max(8, 0.5 * len(top_assignees))))
-    ax1.scatter(x=plot_data['x_rank'], y=plot_data['y_rank'], s=np.log1p(plot_data['件数']) * 100, c=plot_data['y_rank'], cmap=cmap, alpha=0.8)
-    for _, row in plot_data.iterrows(): ax1.text(row['x_rank'], row['y_rank'], row['件数'], ha='center', va='center', fontsize=9, color='black')
-    ax1.set_xticks(range(len(top_ipcs))); ax1.set_xticklabels(top_ipcs, rotation=90)
-    ax1.set_yticks(range(len(top_assignees))); ax1.set_yticklabels(top_assignees[::-1])
-    ax1.set_title(f'IPC × 出願人 ポートフォリオ (対数スケール) - {int(start_year)}年～{int(end_year)}年', fontsize=20, pad=20)
-    ax1.set_xlabel(f'IPC ({level_name})', fontsize=14); ax1.set_ylabel('出願人', fontsize=14)
-    ax1.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
-
-    # 実数スケール
-    fig2, ax2 = plt.subplots(figsize=(max(16, 0.8 * len(top_ipcs)), max(8, 0.5 * len(top_assignees))))
-    ax2.scatter(x=plot_data['x_rank'], y=plot_data['y_rank'], s=plot_data['件数'] * 40, c=plot_data['y_rank'], cmap=cmap, alpha=0.8)
-    for _, row in plot_data.iterrows(): ax2.text(row['x_rank'], row['y_rank'], row['件数'], ha='center', va='center', fontsize=9, color='black')
-    ax2.set_xticks(range(len(top_ipcs))); ax2.set_xticklabels(top_ipcs, rotation=90)
-    ax2.set_yticks(range(len(top_assignees))); ax2.set_yticklabels(top_assignees[::-1])
-    ax2.set_title(f'IPC × 出願人 ポートフォリオ (実数スケール) - {int(start_year)}年～{int(end_year)}年', fontsize=20, pad=20)
-    ax2.set_xlabel(f'IPC ({level_name})', fontsize=14); ax2.set_ylabel('出願人', fontsize=14)
-    ax2.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    
-    return fig1, fig2
-
 
 # ==================================================================
-# --- 3. Streamlit UI ---
+# --- 2. アプリケーション初期化 & UI構成 ---
 # ==================================================================
+
 st.set_page_config(
     page_title="APOLLO | ATLAS",
     page_icon="🌍",
     layout="wide"
 )
 
+# 共通CSSの適用
+st.markdown("""
+<style>
+    /* 基本フォント設定 */
+    html, body { 
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
+    }
+    
+    /* サイドバー設定 */
+    [data-testid="stSidebar"] h1 {
+        color: #003366;
+        font-weight: 900 !important;
+        font-size: 2.5rem !important;
+    }
+    
+    /* 標準ナビゲーション非表示 */
+    [data-testid="stSidebarNav"] {
+        display: none !important;
+    }
+    
+    /* レイアウト調整 */
+    [data-testid="stSidebar"] .block-container {
+        padding-top: 2rem;
+        padding-bottom: 1rem;
+    }
+    .block-container { 
+        padding-top: 2rem; 
+        padding-bottom: 2rem; 
+    }
+    
+    /* ボタン・タブのスタイル */
+    .stButton>button {
+        font-weight: 600;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #f0f2f6;
+        border-radius: 8px 8px 0 0;
+        padding: 10px 15px;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #ffffff;
+        border-bottom: 2px solid #003366;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# --- サイドバー ---
+with st.sidebar:
+    st.title("APOLLO") 
+    st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
+    st.markdown("---")
+    
+    st.subheader("Home")
+    st.page_link("Home.py", label="Mission Control", icon="🛰️")
+    
+    st.subheader("Modules")
+    st.page_link("pages/1_🌍_ATLAS.py", label="ATLAS", icon="🌍")
+    st.page_link("pages/2_💡_CORE.py", label="CORE", icon="💡")
+    st.page_link("pages/3_🚀_Saturn_V.py", label="Saturn V", icon="🚀")
+    st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
+    st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
+    
+    st.markdown("---")
+    st.caption("ナビゲーション:")
+    st.caption("1. Mission Control でデータをアップロードし、前処理を実行します。")
+    st.caption("2. 上のリストから分析モジュールを選択します。")
+    st.markdown("---")
+    st.caption("© 2025 しばやま")
+
+# --- メインエリア ---
 st.title("🌍 ATLAS")
 st.markdown("出願年、出願人、IPCなどの基本的な統計グラフを作成します。")
 
+# テーマ選択
+col_theme, _ = st.columns([1, 3])
+with col_theme:
+    selected_theme = st.selectbox(
+        "表示テーマ:",
+        ["APOLLO Standard", "Modern Presentation"],
+        key="atlas_theme_selector"
+    )
+
+theme_config = get_theme_config(selected_theme)
+st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
+
+
 # ==================================================================
-# --- 4. セッション状態の確認 ---
+# --- 3. データロード & 前処理チェック ---
 # ==================================================================
+
 if not st.session_state.get("preprocess_done", False):
     st.error("分析データがありません。")
     st.warning("先に「Mission Control」（メインページ）でファイルをアップロードし、「分析エンジン起動」を実行してください。")
@@ -221,76 +225,33 @@ else:
     try:
         df_main = st.session_state.df_main
         col_map = st.session_state.col_map
-        delimiters = st.session_state.delimiters
+        # 必須カラムの存在確認
+        required_cols = ['year', 'applicant_main', 'ipc_normalized']
+        if not all(col in df_main.columns for col in required_cols):
+            missing = [col for col in required_cols if col not in df_main.columns]
+            st.error(f"エラー: 必要なカラム {missing} が見つかりません。Mission Controlで前処理を再実行してください。")
+            st.stop()
     except Exception as e:
-        st.error(f"セッションデータの読み込みに失敗しました: {e}")
+        st.error(f"データの読み込みに失敗しました: {e}")
         st.stop()
-        
-required_cols = ['year', 'applicant_main', 'ipc_normalized']
-if not all(col in df_main.columns for col in required_cols):
-    st.error("エラー: Mission Controlでの前処理（出願年、出願人、IPCの正規化）が完了していないようです。")
-    st.info(f"不足カラム: {[col for col in required_cols if col not in df_main.columns]}")
-    st.stop()
 
 # ==================================================================
-# --- 5. ATLAS アプリケーション ---
+# --- 4. 分析アプリケーション ---
 # ==================================================================
 
-ATLAS_FIG_KEYS = [
-    'atlas_fig_map1', 
-    'atlas_fig_map2', 
-    'atlas_fig_map3',
-    'atlas_fig_map4a', 
-    'atlas_fig_map4b',
-    'atlas_fig_map5a',
-    'atlas_fig_map5b'
-]
-
-for key in ATLAS_FIG_KEYS:
-    if key not in st.session_state:
-        st.session_state[key] = None
-
-def clear_all_atlas_figs():
-    for key in ATLAS_FIG_KEYS:
-        if key in st.session_state:
-            st.session_state[key] = None
-
-def clear_specific_atlas_fig(key):
-    if key in st.session_state:
-        st.session_state[key] = None
-
-def clear_specific_atlas_figs(keys_list):
-    for key in keys_list:
-        if key in st.session_state:
-            st.session_state[key] = None
-
-# --- A. 共通フィルタ ---
+# --- 共通フィルタ ---
 st.subheader("共通フィルタ設定")
-st.info("ここで設定した期間が、以下の全てのタブの集計対象となります。")
 
 min_year = int(df_main['year'].min())
 max_year = int(df_main['year'].max())
 
 col1, col2 = st.columns(2)
 with col1:
-    stats_start_year = st.number_input(
-        '集計開始年:', 
-        min_value=min_year, 
-        max_value=max_year, 
-        value=min_year, 
-        key="atlas_start_year",
-        on_change=clear_all_atlas_figs 
-    )
+    stats_start_year = st.number_input('集計開始年:', min_value=min_year, max_value=max_year, value=min_year, key="atlas_start_year")
 with col2:
-    stats_end_year = st.number_input(
-        '集計終了年:', 
-        min_value=min_year, 
-        max_value=max_year, 
-        value=max_year, 
-        key="atlas_end_year",
-        on_change=clear_all_atlas_figs 
-    )
+    stats_end_year = st.number_input('集計終了年:', min_value=min_year, max_value=max_year, value=max_year, key="atlas_end_year")
 
+# フィルタ適用
 try:
     df_filtered = df_main[
         (df_main['year'] >= int(stats_start_year)) & 
@@ -298,194 +259,196 @@ try:
     ].copy()
     st.success(f"集計対象: {int(stats_start_year)}年～{int(stats_end_year)}年 (全 {len(df_filtered)} 件)")
 except Exception as e:
-    st.error(f"期間の絞り込みに失敗しました: {e}")
-    df_filtered = pd.DataFrame() 
+    st.error(f"期間フィルタの適用に失敗しました: {e}")
+    df_filtered = pd.DataFrame()
 
 st.markdown("---")
 
-
-# --- B. 各グラフ用のタブ ---
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+# --- 各分析タブ ---
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "件数推移", 
     "出願人ランキング", 
     "IPCランキング", 
     "出願人×年 バブル", 
-    "IPC×出願人 バブル"
+    "IPC×出願人 バブル",
+    "構成比マップ (Treemap)"
 ])
 
-# --- 件数推移 ---
+# 1. 件数推移
 with tab1:
     st.subheader("出願件数時系列推移")
-    
     if st.button("件数推移グラフを描画", key="atlas_run_map1"):
         if df_filtered.empty:
-            st.warning("該当するデータがありません。")
-            st.session_state.atlas_fig_map1 = None
+            st.warning("データがありません。")
         else:
-            with st.spinner("グラフを作成中..."):
-                fig = create_application_trend_chart(df_filtered, stats_start_year, stats_end_year)
-                st.session_state.atlas_fig_map1 = fig
-    
-    if st.session_state.atlas_fig_map1:
-        if isinstance(st.session_state.atlas_fig_map1, str):
-            st.warning(st.session_state.atlas_fig_map1)
-        else:
-            st.pyplot(st.session_state.atlas_fig_map1)
+            yearly_counts = df_filtered['year'].value_counts().sort_index()
+            # 指定期間の全範囲を埋める（0件の年も表示）
+            plot_data = yearly_counts.reindex(range(int(stats_start_year), int(stats_end_year) + 1), fill_value=0)
+            
+            fig = px.bar(
+                x=plot_data.index, 
+                y=plot_data.values,
+                labels={'x': '出願年', 'y': '出願件数'},
+                color_discrete_sequence=[theme_config["color_sequence"][0]]
+            )
+            update_fig_layout(fig, f'出願件数時系列推移 ({int(stats_start_year)}年～{int(stats_end_year)}年)', theme_config=theme_config)
+            st.plotly_chart(fig, use_container_width=True)
 
-# --- 出願人ランキング ---
+# 2. 出願人ランキング
 with tab2:
     st.subheader("出願人ランキング")
-    num_to_display_map2 = st.number_input(
-        "表示する出願人数:", 
-        min_value=1, 
-        value=20, 
-        key="atlas_num_apps_map2",
-        on_change=clear_specific_atlas_fig, args=('atlas_fig_map2',)
-    )
+    num_to_display_map2 = st.number_input("表示人数:", min_value=1, value=20, key="atlas_num_apps_map2")
 
     if st.button("出願人ランキングを描画", key="atlas_run_map2"):
         if df_filtered.empty:
-            st.warning("該当するデータがありません。")
-            st.session_state.atlas_fig_map2 = None
+            st.warning("データがありません。")
         else:
-            with st.spinner("グラフを作成中..."):
-                fig = create_assignee_ranking_map(df_filtered, num_to_display_map2, stats_start_year, stats_end_year)
-                st.session_state.atlas_fig_map2 = fig
-    
-    if st.session_state.atlas_fig_map2:
-        if isinstance(st.session_state.atlas_fig_map2, str):
-            st.warning(st.session_state.atlas_fig_map2)
-        else:
-            st.pyplot(st.session_state.atlas_fig_map2)
+            assignee_counts = df_filtered['applicant_main'].explode().str.strip().value_counts().head(int(num_to_display_map2))
+            assignee_counts = assignee_counts.sort_values(ascending=True)
+            
+            fig = px.bar(
+                x=assignee_counts.values,
+                y=assignee_counts.index,
+                orientation='h',
+                labels={'x': '特許件数', 'y': '出願人'},
+                color_discrete_sequence=[theme_config["color_sequence"][1]]
+            )
+            update_fig_layout(fig, f'出願人ランキング ({int(stats_start_year)}年～{int(stats_end_year)}年)', 
+                            height=max(600, len(assignee_counts)*30), theme_config=theme_config)
+            st.plotly_chart(fig, use_container_width=True)
 
-# --- IPCランキング ---
+# 3. IPCランキング
 with tab3:
     st.subheader("IPCランキング")
-    
-    ipc_level_map3 = st.selectbox(
-        "IPC集計レベル:", 
-        options=[(1, "サブクラス (A01B)"), (2, "メイングループ (A01B 1/00)"), (3, "サブグループ (A01B 1/02)")], 
-        format_func=lambda x: x[1],
-        key="atlas_ipc_level_map3",
-        on_change=clear_specific_atlas_fig, args=('atlas_fig_map3',)
-    )
-    num_to_display_map3 = st.number_input(
-        "表示するIPC数:", 
-        min_value=1, 
-        value=20, 
-        key="atlas_num_ipcs_map3",
-        on_change=clear_specific_atlas_fig, args=('atlas_fig_map3',)
-    )
+    ipc_level_map3 = st.selectbox("IPCレベル:", [(1, "サブクラス (A01B)"), (2, "メイングループ (A01B 1/00)"), (3, "サブグループ (A01B 1/02)")], format_func=lambda x: x[1], key="atlas_ipc_level_map3")
+    num_to_display_map3 = st.number_input("表示IPC数:", min_value=1, value=20, key="atlas_num_ipcs_map3")
 
     if st.button("IPCランキングを描画", key="atlas_run_map3"):
         if df_filtered.empty:
-            st.warning("該当するデータがありません。")
-            st.session_state.atlas_fig_map3 = None
+            st.warning("データがありません。")
         else:
-            with st.spinner("グラフを作成中..."):
-                fig = create_ipc_ranking_map(df_filtered, ipc_level_map3, num_to_display_map3, stats_start_year, stats_end_year)
-                st.session_state.atlas_fig_map3 = fig
+            ipc_exploded = df_filtered['ipc_normalized'].explode().dropna()
+            ipc_parsed = ipc_exploded.apply(lambda x: parse_ipc_atlas(x, ipc_level_map3[0]))
+            ipc_counts = ipc_parsed.value_counts().head(int(num_to_display_map3)).sort_values(ascending=True)
+            
+            fig = px.bar(
+                x=ipc_counts.values,
+                y=ipc_counts.index,
+                orientation='h',
+                labels={'x': '特許件数', 'y': 'IPC分類'},
+                color_discrete_sequence=[theme_config["color_sequence"][2]]
+            )
+            update_fig_layout(fig, f'IPCランキング ({ipc_level_map3[1]})', 
+                            height=max(600, len(ipc_counts)*30), theme_config=theme_config)
+            st.plotly_chart(fig, use_container_width=True)
 
-    if st.session_state.atlas_fig_map3:
-        if isinstance(st.session_state.atlas_fig_map3, str):
-            st.warning(st.session_state.atlas_fig_map3)
-        else:
-            st.pyplot(st.session_state.atlas_fig_map3)
-
-
-# --- 出願人×年 バブル ---
+# 4. 出願人×年 バブル
 with tab4:
     st.subheader("出願人 × 年 バブルチャート")
-    num_to_display_map4 = st.number_input(
-        "表示する出願人数:", 
-        min_value=1, 
-        value=10, 
-        key="atlas_num_apps_map4",
-        on_change=clear_specific_atlas_figs, args=(['atlas_fig_map4a', 'atlas_fig_map4b'],)
-    )
+    num_to_display_map4 = st.number_input("表示人数:", min_value=1, value=10, key="atlas_num_apps_map4")
 
     if st.button("出願人×年 バブルを描画", key="atlas_run_map4"):
-        if df_filtered.empty:
-            st.warning("該当するデータがありません。")
-            st.session_state.atlas_fig_map4a = None
-            st.session_state.atlas_fig_map4b = None
+        assignees_exploded = df_filtered.explode('applicant_main')
+        assignees_exploded['assignee_parsed'] = assignees_exploded['applicant_main'].str.strip()
+        top_assignees = assignees_exploded['assignee_parsed'].value_counts().head(int(num_to_display_map4)).index.tolist()
+        
+        plot_data = assignees_exploded[assignees_exploded['assignee_parsed'].isin(top_assignees)]
+        plot_data = plot_data.groupby(['year', 'assignee_parsed']).size().reset_index(name='件数')
+        
+        if plot_data.empty:
+            st.warning("データがありません。")
         else:
-            with st.spinner("グラフを作成中..."):
-                fig1, fig2 = create_assignee_year_bubble(df_filtered, num_to_display_map4, stats_start_year, stats_end_year)
-                st.session_state.atlas_fig_map4a = fig1
-                st.session_state.atlas_fig_map4b = fig2
+            fig = px.scatter(
+                plot_data, 
+                x='year', 
+                y='assignee_parsed', 
+                size='件数',
+                color='assignee_parsed',
+                labels={'year': '出願年', 'assignee_parsed': '出願人', '件数': '件数'},
+                color_discrete_sequence=theme_config["color_sequence"],
+                category_orders={"assignee_parsed": top_assignees}
+            )
+            update_fig_layout(fig, '出願年別 出願人動向', height=700, theme_config=theme_config)
+            st.plotly_chart(fig, use_container_width=True)
 
-    if st.session_state.atlas_fig_map4a:
-        if isinstance(st.session_state.atlas_fig_map4a, str):
-            st.warning(st.session_state.atlas_fig_map4a)
-        else:
-            st.subheader("対数スケール")
-            st.pyplot(st.session_state.atlas_fig_map4a)
-            st.subheader("実数スケール")
-            st.pyplot(st.session_state.atlas_fig_map4b)
-
-
-# --- IPC×出願人 バブル ---
+# 5. IPC×出願人 バブル
 with tab5:
     st.subheader("IPC × 出願人 バブルチャート")
-    
     col1, col2, col3 = st.columns(3)
     with col1:
-        ipc_level_map5 = st.selectbox(
-            "IPC集計レベル (Y軸):", 
-            options=[(1, "サブクラス (A01B)"), (2, "メイングループ (A01B 1/00)"), (3, "サブグループ (A01B 1/02)")], 
-            format_func=lambda x: x[1],
-            key="atlas_ipc_level_map5",
-            on_change=clear_specific_atlas_figs, args=(['atlas_fig_map5a', 'atlas_fig_map5b'],)
-        )
+        ipc_level_map5 = st.selectbox("IPCレベル:", [(1, "サブクラス"), (2, "メイングループ")], format_func=lambda x: x[1], key="atlas_ipc_level_map5")
     with col2:
-        num_ipcs_map5 = st.number_input(
-            "IPC表示件数 (Y軸):", 
-            min_value=1, 
-            value=15, 
-            key="atlas_num_ipcs_map5",
-            on_change=clear_specific_atlas_figs, args=(['atlas_fig_map5a', 'atlas_fig_map5b'],)
-        )
+        num_ipcs_map5 = st.number_input("IPC数 (Y軸):", min_value=1, value=15, key="atlas_num_ipcs_map5")
     with col3:
-        num_apps_map5 = st.number_input(
-            "出願人表示件数 (X軸):", 
-            min_value=1, 
-            value=15, 
-            key="atlas_num_apps_map5",
-            on_change=clear_specific_atlas_figs, args=(['atlas_fig_map5a', 'atlas_fig_map5b'],)
-        )
+        num_apps_map5 = st.number_input("出願人数 (X軸):", min_value=1, value=15, key="atlas_num_apps_map5")
 
     if st.button("IPC×出願人 バブルを描画", key="atlas_run_map5"):
-        if df_filtered.empty:
-            st.warning("該当するデータがありません。")
-            st.session_state.atlas_fig_map5a = None
-            st.session_state.atlas_fig_map5b = None
-        else:
-            with st.spinner("グラフを作成中..."):
-                fig1, fig2 = create_ipc_assignee_bubble(
-                    df_filtered, 
-                    ipc_level_map5, 
-                    num_ipcs_map5, 
-                    num_apps_map5, 
-                    stats_start_year, 
-                    stats_end_year
-                )
-                st.session_state.atlas_fig_map5a = fig1
-                st.session_state.atlas_fig_map5b = fig2
+        df_exploded = df_filtered.explode('applicant_main').explode('ipc_normalized')
+        df_exploded.dropna(subset=['applicant_main', 'ipc_normalized'], inplace=True)
+        
+        df_exploded['assignee_parsed'] = df_exploded['applicant_main'].str.strip()
+        df_exploded['ipc_parsed'] = df_exploded['ipc_normalized'].apply(lambda x: parse_ipc_atlas(x, ipc_level_map5[0]))
+        
+        top_assignees = df_exploded['assignee_parsed'].value_counts().head(int(num_apps_map5)).index.tolist()
+        top_ipcs = df_exploded['ipc_parsed'].value_counts().head(int(num_ipcs_map5)).index.tolist()
 
-    if st.session_state.atlas_fig_map5a:
-        if isinstance(st.session_state.atlas_fig_map5a, str):
-            st.warning(st.session_state.atlas_fig_map5a)
+        df_top = df_exploded[
+            df_exploded['assignee_parsed'].isin(top_assignees) & 
+            df_exploded['ipc_parsed'].isin(top_ipcs)
+        ]
+        
+        plot_data = df_top.groupby(['assignee_parsed', 'ipc_parsed']).size().reset_index(name='件数')
+        
+        if plot_data.empty:
+            st.warning("データがありません。")
         else:
-            st.subheader("対数スケール")
-            st.pyplot(st.session_state.atlas_fig_map5a)
-            st.subheader("実数スケール")
-            st.pyplot(st.session_state.atlas_fig_map5b)
+            fig = px.scatter(
+                plot_data,
+                x='assignee_parsed',
+                y='ipc_parsed',
+                size='件数',
+                color='ipc_parsed',
+                labels={'assignee_parsed': '出願人', 'ipc_parsed': 'IPC分類', '件数': '件数'},
+                color_discrete_sequence=theme_config["color_sequence"],
+                category_orders={"ipc_parsed": top_ipcs}
+            )
+            update_fig_layout(fig, f'IPC ({ipc_level_map5[1]}) × 出願人 ポートフォリオ', height=800, theme_config=theme_config)
+            st.plotly_chart(fig, use_container_width=True)
 
-# --- 共通サイドバーフッター ---
-st.sidebar.markdown("---") 
-st.sidebar.caption("ナビゲーション:")
-st.sidebar.caption("1. Mission Control でデータをアップロードし、前処理を実行します。")
-st.sidebar.caption("2. 左のリストから分析モジュールを選択します。")
-st.sidebar.markdown("---")
-st.sidebar.caption("© 2025 しばやま")
+# 6. 構成比マップ (Treemap)
+with tab6:
+    st.subheader("構成比マップ (Treemap)")
+    tree_mode = st.radio("表示モード:", ["IPC階層 (技術分野)", "出願人シェア"], horizontal=True, key="atlas_tree_mode")
+    
+    if st.button("ツリーマップを描画", key="atlas_run_treemap"):
+        with st.spinner("作成中..."):
+            if tree_mode == "IPC階層 (技術分野)":
+                df_tree = create_treemap_data(df_filtered, stats_start_year, stats_end_year, mode="ipc")
+                if df_tree.empty:
+                    st.warning("IPCデータがありません。")
+                else:
+                    fig = px.treemap(
+                        df_tree, 
+                        path=['Section', 'Class', 'Subclass'], 
+                        values='count',
+                        color='Section',
+                        color_discrete_sequence=theme_config["color_sequence"]
+                    )
+                    update_fig_layout(fig, 'IPC階層構造マップ', height=700, theme_config=theme_config)
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+            elif tree_mode == "出願人シェア":
+                df_tree = create_treemap_data(df_filtered, stats_start_year, stats_end_year, mode="applicant")
+                if df_tree.empty:
+                    st.warning("出願人データがありません。")
+                else:
+                    fig = px.treemap(
+                        df_tree,
+                        path=['Root', 'Applicant'],
+                        values='count',
+                        color='count',
+                        color_continuous_scale='Blues',
+                        labels={'Applicant': '出願人', 'count': '件数', 'Root': '全体'}
+                    )
+                    update_fig_layout(fig, '出願人シェアマップ', height=700, theme_config=theme_config)
+                    st.plotly_chart(fig, use_container_width=True)

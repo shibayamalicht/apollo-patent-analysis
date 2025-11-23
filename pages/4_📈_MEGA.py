@@ -18,16 +18,72 @@ import hdbscan
 warnings.filterwarnings('ignore')
 
 # ==================================================================
-# --- 2. ヘルパー関数 (MEGA分析ロジック) ---
+# --- 2. デザインテーマ管理 (共通) ---
 # ==================================================================
+
+def get_theme_config(theme_name):
+    """テーマに応じたCSSとPlotly設定を返す"""
+    themes = {
+        "APOLLO Standard": {
+            "bg_color": "#ffffff",
+            "text_color": "#333333",
+            "sidebar_bg": "#f8f9fa",
+            "plotly_template": "plotly_white",
+            "color_sequence": px.colors.qualitative.G10,
+            "accent_color": "#003366",
+            "css": """
+                html, body { background-color: #ffffff; color: #333333; }
+                [data-testid="stSidebar"] { background-color: #f8f9fa; }
+                [data-testid="stHeader"] { background-color: #ffffff; }
+                h1, h2, h3 { color: #003366; }
+            """
+        },
+        "Modern Presentation": {
+            "bg_color": "#fdfdfd",
+            "text_color": "#2c3e50",
+            "sidebar_bg": "#eaeaea",
+            "plotly_template": "plotly_white",
+            "color_sequence": ["#264653", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51", "#8ab17d"],
+            "accent_color": "#264653",
+            "css": """
+                html, body { background-color: #fdfdfd; color: #2c3e50; font-family: "Helvetica Neue", Arial, sans-serif; }
+                [data-testid="stSidebar"] { background-color: #eaeaea; }
+                [data-testid="stHeader"] { background-color: #fdfdfd; }
+                h1, h2, h3 { color: #264653; font-family: "Georgia", serif; }
+                .stButton>button { background-color: #264653; color: white; border-radius: 0px; }
+            """
+        }
+    }
+    return themes.get(theme_name, themes["APOLLO Standard"])
+
+def update_fig_layout(fig, title, height=800, theme_config=None):
+    """Plotlyグラフの共通レイアウト設定"""
+    if theme_config is None:
+        return fig
+    fig.update_layout(
+        template=theme_config["plotly_template"],
+        title=title,
+        paper_bgcolor=theme_config["bg_color"],
+        plot_bgcolor=theme_config["bg_color"],
+        font_color=theme_config["text_color"],
+        height=height
+    )
+    return fig
+
+# ==================================================================
+# --- 3. ヘルパー関数 (MEGA分析ロジック) ---
+# ==================================================================
+
 @st.cache_data
 def _get_top_words_from_dense_vector(dense_vector, feature_names, top_n=5):
+    """特徴ベクトルから上位の単語を抽出する"""
     indices = np.argsort(dense_vector)[::-1]
     top_words = [feature_names[i] for i in indices[:top_n]]
     return ", ".join(top_words)
 
 @st.cache_data
 def _calculate_cagr(row, cagr_end_year_val):
+    """年平均成長率 (CAGR) を計算する"""
     valid_years = row[row > 0].index
     if not any(valid_years):
         return np.nan
@@ -49,23 +105,30 @@ def _calculate_cagr(row, cagr_end_year_val):
     if num_years <= 0:
          return np.nan
 
-    return ((end_value / start_value) ** (1 / num_years)) - 1
+    try:
+        return ((end_value / start_value) ** (1 / num_years)) - 1
+    except:
+        return np.nan
 
 @st.cache_data
 def _calculate_metrics(pivot_df, cagr_end_year, y_axis_years, current_year, past_offset=0):
+    """動態分析マップ（バブルチャート）の座標（X, Y, Size）を計算する"""
     target_cagr_end = cagr_end_year - past_offset
     target_current_year = current_year - past_offset
 
+    # Y軸: 直近N年間の件数
     y_start = target_current_year - y_axis_years + 1
     y_cols = [col for col in pivot_df.columns if col >= y_start and col <= target_current_year]
     y_axis = pivot_df[y_cols].sum(axis=1) if y_cols else pd.Series(0, index=pivot_df.index)
 
+    # バブルサイズ: 累積件数
     if past_offset == 0:
         bubble_size = pivot_df.sum(axis=1)
     else:
         bubble_cols = [col for col in pivot_df.columns if col <= target_current_year]
         bubble_size = pivot_df[bubble_cols].sum(axis=1) if bubble_cols else pd.Series(0, index=pivot_df.index)
 
+    # X軸: 成長率 (CAGR)
     cagr_cols = [col for col in pivot_df.columns if col <= target_cagr_end]
     if not cagr_cols:
         x_axis = pd.Series(np.nan, index=pivot_df.index)
@@ -80,6 +143,7 @@ def _calculate_metrics(pivot_df, cagr_end_year, y_axis_years, current_year, past
 
 @st.cache_data
 def _prepare_momentum_data(df_main, axis_col):
+    """分析軸に基づいてデータを集計し、ピボットテーブルを作成する"""
     df = df_main[['app_num_main', 'year', axis_col]].copy()
     df.dropna(subset=['app_num_main', 'year', axis_col], inplace=True)
 
@@ -88,6 +152,7 @@ def _prepare_momentum_data(df_main, axis_col):
     df_exploded.dropna(subset=[axis_col], inplace=True)
     df_exploded = df_exploded[df_exploded[axis_col] != '']
 
+    # 重複排除（同一番号・同一軸での重複カウント防止）
     df_unique = df_exploded.drop_duplicates(subset=['app_num_main', axis_col], keep='first')
 
     pivot_df = pd.pivot_table(df_unique, index=axis_col, columns='year', aggfunc='size', fill_value=0)
@@ -95,6 +160,7 @@ def _prepare_momentum_data(df_main, axis_col):
     return pivot_df
 
 def _get_hover_template_mode1(past_offset, is_past=False):
+    """Plotlyホバーテンプレート生成 (詳細モード)"""
     if is_past:
         return f"""<b>%{{customdata[2]}}</b> (過去)<br>
 <br>
@@ -115,6 +181,7 @@ Bubble (総件数): %{{customdata[1]:,}}<br>
 <extra></extra>"""
 
 def _get_hover_template_mode2(past_offset, is_past=False):
+    """Plotlyホバーテンプレート生成 (簡易モード)"""
     if is_past:
         return ""
     else:
@@ -129,8 +196,13 @@ Bubble (総件数): %{{customdata[1]:,}}<br>
 過去 Y ({past_offset}年前): %{{customdata[3]:,.0f}}<br>
 <extra></extra>"""
 
+@st.cache_data
+def convert_df_to_csv(df):
+    """データフレームをCSVバイナリに変換"""
+    return df.to_csv(encoding='utf-8-sig').encode('utf-8-sig')
+
 # ==================================================================
-# --- 3. Streamlit UI ---
+# --- 4. Streamlit UI構成 ---
 # ==================================================================
 
 st.set_page_config(
@@ -139,12 +211,62 @@ st.set_page_config(
     layout="wide"
 )
 
+# --- サイドバー ---
+with st.sidebar:
+    st.title("APOLLO") 
+    st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
+    st.markdown("---")
+    
+    st.subheader("Home")
+    st.page_link("Home.py", label="Mission Control", icon="🛰️")
+    
+    st.subheader("Modules")
+    st.page_link("pages/1_🌍_ATLAS.py", label="ATLAS", icon="🌍")
+    st.page_link("pages/2_💡_CORE.py", label="CORE", icon="💡")
+    st.page_link("pages/3_🚀_Saturn_V.py", label="Saturn V", icon="🚀")
+    st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
+    st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
+    
+    st.markdown("---")
+    st.caption("ナビゲーション:\n1. Mission Control でデータをアップロードし、前処理を実行します。\n2. 上のリストから分析モジュールを選択します。")
+    st.markdown("---")
+    st.caption("© 2025 しばやま")
+
+# --- CSS注入 ---
+st.markdown("""
+<style>
+    html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    [data-testid="stSidebar"] h1 { color: #003366; font-weight: 900 !important; font-size: 2.5rem !important; }
+    [data-testid="stSidebarNav"] { display: none !important; }
+    [data-testid="stSidebar"] .block-container { padding-top: 2rem; padding-bottom: 1rem; }
+    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+    .stButton>button { font-weight: 600; }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [data-baseweb="tab"] { background-color: #f0f2f6; border-radius: 8px 8px 0 0; padding: 10px 15px; }
+    .stTabs [aria-selected="true"] { background-color: #ffffff; border-bottom: 2px solid #003366; }
+</style>
+""", unsafe_allow_html=True)
+
+# --- メインコンテンツ ---
 st.title("📈 MEGA")
 st.markdown("技術動態（マクロ）と技術ポートフォリオ（ミクロ）を分析します。")
 
+# テーマ選択
+col_theme, col_dummy = st.columns([1, 3])
+with col_theme:
+    selected_theme = st.selectbox(
+        "表示テーマ:",
+        ["APOLLO Standard", "Modern Presentation"],
+        key="mega_theme_selector"
+    )
+
+theme_config = get_theme_config(selected_theme)
+st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
+
 # ==================================================================
-# --- 4. セッション状態の確認 ---
+# --- 5. データロード & 初期化 ---
 # ==================================================================
+
 if not st.session_state.get("preprocess_done", False):
     st.error("分析データがありません。")
     st.warning("先に「Mission Control」（メインページ）でファイルをアップロードし、「分析エンジン起動」を実行してください。")
@@ -161,7 +283,7 @@ else:
         st.stop()
 
 # ==================================================================
-# --- 5. MEGA アプリケーション ---
+# --- 6. MEGA アプリケーション ---
 # ==================================================================
 
 tab_b, tab_c, tab_d = st.tabs([
@@ -170,22 +292,27 @@ tab_b, tab_c, tab_d = st.tabs([
     "Data Export"
 ])
 
-# --- B. 動態分析 ---
+# --- A. 動態分析 (PULSE) ---
 with tab_b:
     st.subheader("分析パラメータ")
 
     col1, col2 = st.columns(2)
     with col1:
+        # Fタームの有無に応じた選択肢
+        axis_options = [
+            ('出願人', 'applicant_main'),
+            ('IPC (メイングループ)', 'ipc_main_group')
+        ]
+        if st.session_state.col_map.get('fterm'):
+            axis_options.append(('Fターム (テーマコード)', 'fterm_main'))
+
         analysis_axis = st.selectbox(
             "分析軸:",
-            options=[
-                ('出願人', 'applicant_main'),
-                ('IPC (メイングループ)', 'ipc_main_group'),
-                ('Fターム (テーマコード)', 'fterm_main')
-            ],
+            options=axis_options,
             format_func=lambda x: x[0], 
             key="mega_analysis_axis"
         )
+        
         yaxis_slider = st.slider("Y軸 (現在) の集計年数:", min_value=1, max_value=10, value=5, key="mega_yaxis")
         cagr_end_year = st.number_input("X軸 (過去の勢い) 計算の最終年:", value=datetime.datetime.now().year - 1, key="mega_cagr_year")
 
@@ -208,7 +335,7 @@ with tab_b:
 
         with st.spinner("動態分析マップを計算中..."):
             try:
-                # --- 1. パラメータとデータの準備 ---
+                # 1. パラメータ準備
                 axis_col = analysis_axis[1]
                 axis_label = analysis_axis[0]
                 y_axis_years = int(yaxis_slider)
@@ -216,13 +343,13 @@ with tab_b:
                 current_year = datetime.datetime.now().year
                 min_patents_threshold = int(min_patents)
 
-                # --- 2. 分析軸データの前処理 ---
+                # 2. データ集計
                 pivot_df = _prepare_momentum_data(df_main, axis_col)
                 if pivot_df.empty:
                     st.error(f"エラー: 分析軸 ({axis_label}) の有効なデータがありません。")
                     st.stop()
 
-                # --- 4. 分析指標の計算 ---
+                # 3. 指標計算 (現在と過去)
                 x_present, y_present, bubble_present = _calculate_metrics(
                     pivot_df, cagr_end_year, y_axis_years, current_year, past_offset=0
                 )
@@ -230,7 +357,7 @@ with tab_b:
                     pivot_df, cagr_end_year, y_axis_years, current_year, past_offset=past_offset
                 )
 
-                # --- 3. ハイライトUIの更新 ---
+                # 4. ハイライトUI更新
                 options_with_counts = [
                     (f"{name} ({int(count)}件)", name)
                     for name, count in bubble_present.sort_index().items()
@@ -245,7 +372,7 @@ with tab_b:
                 st.session_state.cagr_start_year_min = cagr_start_year_min
                 st.session_state.cagr_end_year_val = cagr_end_year
 
-                # --- 5. 最終データフレームの作成 ---
+                # 5. 結果DF作成
                 df_result = pd.DataFrame({
                     'X_Present': x_present, 'Y_Present': y_present, 'Bubble_Present': bubble_present,
                     'X_Past': x_past, 'Y_Past': y_past, 'Bubble_Past': bubble_past
@@ -262,7 +389,7 @@ with tab_b:
                     st.error(f"エラー: フィルタリング（最小{min_patents_threshold}件）後の分析結果が0件です。")
                     st.stop()
 
-                # --- 6. 4象限への分類 ---
+                # 6. 4象限分類
                 x_threshold = df_result['X_Present'].mean() if not df_result.empty else 0
                 y_threshold = df_result['Y_Present'].mean() if not df_result.empty else 0
                 st.session_state.mega_x_threshold = x_threshold
@@ -282,7 +409,7 @@ with tab_b:
 
                 df_result['Group_Auto'] = df_result.apply(assign_relative_label, axis=1)
 
-                # --- 7. 結果を保存 ---
+                # 7. 保存
                 st.session_state.df_momentum_result = df_result.copy()
                 st.session_state.mega_axis_label = axis_label
                 st.session_state.mega_past_offset = past_offset
@@ -302,6 +429,7 @@ with tab_b:
                 import traceback
                 st.exception(traceback.format_exc())
 
+    # --- ラベル編集 & 描画 ---
     st.subheader("ラベル編集")
 
     base_color_map = {
@@ -318,19 +446,11 @@ with tab_b:
         st.session_state.mega_group_map_custom = {}
         col1, col2 = st.columns(2)
         with col1:
-            st.session_state.mega_group_map_custom['リーダー (Leaders)'] = st.text_input(
-                "リーダー (Leaders)", "リーダー (Leaders)", key="label_leader"
-            )
-            st.session_state.mega_group_map_custom['新興・高ポテンシャル (Emerging)'] = st.text_input(
-                "新興・高ポテンシャル (Emerging)", "新興・高ポテンシャル (Emerging)", key="label_emerging"
-            )
+            st.session_state.mega_group_map_custom['リーダー (Leaders)'] = st.text_input("リーダー (Leaders)", "リーダー (Leaders)", key="label_leader")
+            st.session_state.mega_group_map_custom['新興・高ポテンシャル (Emerging)'] = st.text_input("新興・高ポテンシャル (Emerging)", "新興・高ポテンシャル (Emerging)", key="label_emerging")
         with col2:
-            st.session_state.mega_group_map_custom['成熟・既存勢力 (Established)'] = st.text_input(
-                "成熟・既存勢力 (Established)", "成熟・既存勢力 (Established)", key="label_established"
-            )
-            st.session_state.mega_group_map_custom['衰退・ニッチ (Declining/Niche)'] = st.text_input(
-                "衰退・ニッチ (Declining/Niche)", "衰退・ニッチ (Declining/Niche)", key="label_declining"
-            )
+            st.session_state.mega_group_map_custom['成熟・既存勢力 (Established)'] = st.text_input("成熟・既存勢力 (Established)", "成熟・既存勢力 (Established)", key="label_established")
+            st.session_state.mega_group_map_custom['衰退・ニッチ (Declining/Niche)'] = st.text_input("衰退・ニッチ (Declining/Niche)", "衰退・ニッチ (Declining/Niche)", key="label_declining")
 
         df_to_plot['Group_Custom'] = df_to_plot['Group_Auto'].map(st.session_state.mega_group_map_custom).fillna('N/A')
 
@@ -351,15 +471,16 @@ with tab_b:
 
         fig = go.Figure()
 
+        # ハイライトモード
         if highlight_targets:
             highlight_values = [t[1] for t in highlight_targets]
             df_highlighted = df_to_plot[df_to_plot.index.isin(highlight_values)].copy()
 
             if not df_highlighted.empty:
                 title += f" (注目対象: {', '.join(df_highlighted.index)})"
-
                 max_bubble_for_scaling = df_to_plot['Bubble_Present'].max()
                 if max_bubble_for_scaling == 0: max_bubble_for_scaling = 1
+                
                 df_highlighted['Size_Present_Linear'] = (df_highlighted['Bubble_Present'] / max_bubble_for_scaling) * 60
                 df_highlighted['Size_Past_Linear'] = (df_highlighted['Bubble_Past'] / max_bubble_for_scaling) * 60
                 df_highlighted['Size_Present_Linear'] = df_highlighted['Size_Present_Linear'].clip(lower=5)
@@ -368,12 +489,14 @@ with tab_b:
                 df_highlighted['Y_Present_Plot'] = df_highlighted['Y_Present'].replace(0, 0.1)
                 df_highlighted['Y_Past_Plot'] = df_highlighted['Y_Past'].replace(0, 0.1)
 
-                palette = px.colors.qualitative.Plotly
+                palette = theme_config["color_sequence"]
                 present_year_label = int(cagr_end_year_val)
                 past_year_label = int(cagr_end_year_val - past_offset)
 
                 for i, (idx, row) in enumerate(df_highlighted.iterrows()):
                     color = palette[i % len(palette)]
+                    
+                    # 過去の点 (薄く)
                     if pd.notna(row['X_Past']) and pd.notna(row['Y_Past']):
                         fig.add_trace(go.Scatter(
                             x=[row['X_Past']], y=[row['Y_Past_Plot']], mode='markers',
@@ -383,6 +506,7 @@ with tab_b:
                             hovertemplate=_get_hover_template_mode1(past_offset, is_past=True)
                         ))
 
+                    # 現在の点 (濃く)
                     fig.add_trace(go.Scatter(
                         x=[row['X_Present']], y=[row['Y_Present_Plot']], mode='markers',
                         marker=dict(color=color, size=row['Size_Present_Linear'], opacity=0.8),
@@ -391,13 +515,15 @@ with tab_b:
                         hovertemplate=_get_hover_template_mode1(past_offset, is_past=False)
                     ))
 
+                    # 軌跡線
                     if pd.notna(row['X_Past']) and pd.notna(row['Y_Past']):
                         fig.add_trace(go.Scatter(
                             x=[row['X_Past'], row['X_Present']], y=[row['Y_Past_Plot'], row['Y_Present_Plot']],
                             mode='lines', line=dict(color=color, dash='dot', width=1),
                             hoverinfo='none', showlegend=False
                         ))
-
+        
+        # 通常モード (全点表示)
         else:
             df_to_plot_filtered = df_to_plot[df_to_plot['Group_Custom'] != 'N/A'].copy()
             if not df_to_plot_filtered.empty:
@@ -418,297 +544,211 @@ with tab_b:
                     hover_data=custom_data_cols,
                     log_y=True,
                 )
+                fig.update_traces(hovertemplate=_get_hover_template_mode2(past_offset, is_past=False))
 
-                fig.update_traces(
-                    hoverlabel=dict(bgcolor='white'),
-                    hovertemplate=_get_hover_template_mode2(past_offset, is_past=False)
-                )
-
+        # 閾値の十字線
         fig.add_vline(x=x_threshold, line_width=1, line_dash="dash", line_color="gray")
         fig.add_hline(y=y_threshold, line_width=1, line_dash="dash", line_color="gray")
 
+        update_fig_layout(fig, title, height=800, theme_config=theme_config)
         fig.update_layout(
-            title=title,
             xaxis_title=f"← 勢い減速 | {xaxis_title_label} | 勢い加速 → (十字線: {x_threshold:.1%})",
             yaxis_title="← 活動鈍化 | 現在の活動量 | 活動活発 →",
             xaxis_tickformat='.0%',
             yaxis_type="log",
-            height=800,
             legend_title_text='戦略グループ' if not highlight_targets else '注目対象'
         )
 
         st.plotly_chart(fig, use_container_width=True)
-
         st.session_state.df_momentum_export = df_to_plot.copy()
 
 
-    # --- C. ドリルダウン分析 ---
-    with tab_c:
-        st.subheader("分析対象の選択")
-        drilldown_options = st.session_state.get("mega_drilldown_options", [('(分析対象を選択)', '(分析対象を選択)')])
+# --- C. ドリルダウン分析 ---
+with tab_c:
+    st.subheader("分析対象の選択")
+    drilldown_options = st.session_state.get("mega_drilldown_options", [('(分析対象を選択)', '(分析対象を選択)')])
 
-        selected_drilldown_target = st.selectbox(
-            "ドリルダウン対象:",
-            options=drilldown_options,
-            format_func=lambda x: x[0],
-            key="drill_target"
-        )
-        drilldown_target = selected_drilldown_target[1]
+    selected_drilldown_target = st.selectbox(
+        "ドリルダウン対象:",
+        options=drilldown_options,
+        format_func=lambda x: x[0],
+        key="drill_target"
+    )
+    drilldown_target = selected_drilldown_target[1]
 
-        st.subheader("マップパラメータ (UMAP / HDBSCAN)")
+    st.subheader("マップパラメータ (UMAP / HDBSCAN)")
+    col1, col2 = st.columns(2)
+    with col1:
+        drill_n_neighbors = st.number_input('UMAP 近傍点 (n_neighbors):', min_value=2, value=15, key="drill_n_neighbors")
+        drill_min_dist = st.number_input('UMAP 最小距離 (min_dist):', min_value=0.0, value=0.1, format="%.2f", key="drill_min_dist")
+    with col2:
+        drill_min_cluster_size = st.number_input('HDBSCAN 最小クラスタサイズ:', min_value=2, value=5, key="drill_min_cluster_size")
+        drill_min_samples = st.number_input('HDBSCAN 最小サンプル数:', min_value=1, value=5, key="drill_min_samples")
+
+    st.subheader("技術ポートフォリオ分析 (SBERT/UMAP)")
+
+    if st.button("選択対象の技術マップを描画", type="primary", key="drill_run_map"):
+        if drilldown_target == '(分析対象を選択)':
+            st.error("分析対象を選択してください。")
+        else:
+            with st.spinner(f"「{drilldown_target}」の技術マップを計算中..."):
+                try:
+                    axis_label = st.session_state.mega_axis_label
+                    axis_col_name = "applicant_main"
+                    if axis_label == "IPC (メイングループ)": axis_col_name = "ipc_main_group"
+                    elif axis_label == "Fターム (テーマコード)": axis_col_name = "fterm_main"
+
+                    target_indices_mask = df_main[axis_col_name].apply(lambda l: drilldown_target in l)
+                    df_filtered = df_main[target_indices_mask].copy()
+                    original_indices = df_main[target_indices_mask].index.tolist()
+
+                    if df_filtered.empty:
+                        st.error(f"「{drilldown_target}」に該当するデータがありません。")
+                        st.stop()
+
+                    target_embeddings = sbert_embeddings[original_indices]
+                    target_tfidf_matrix = tfidf_matrix[original_indices]
+
+                    n_neighbors = min(int(drill_n_neighbors), len(original_indices) - 1)
+                    if n_neighbors <= 1: n_neighbors = 1
+
+                    umap_results = UMAP(n_components=2, n_neighbors=n_neighbors, min_dist=float(drill_min_dist), random_state=42).fit_transform(target_embeddings)
+                    df_plot = pd.DataFrame(umap_results, columns=['x', 'y'])
+
+                    clusterer = hdbscan.HDBSCAN(min_cluster_size=int(drill_min_cluster_size), min_samples=int(drill_min_samples), metric='euclidean', cluster_selection_method='eom')
+                    cluster_labels = clusterer.fit_predict(df_plot[['x', 'y']])
+                    df_plot['cluster_id'] = cluster_labels
+
+                    df_plot[col_map['app_num']] = df_filtered[col_map['app_num']].values
+                    df_plot[col_map['title']] = df_filtered[col_map['title']].values
+                    df_plot[col_map['abstract']] = df_filtered[col_map['abstract']].values
+                    df_plot[col_map['claim']] = df_filtered[col_map['claim']].values
+                    df_plot['year'] = df_filtered['year'].values
+
+                    sbert_sub_cluster_map_auto = {}
+                    for cluster_id in sorted(df_plot['cluster_id'].unique()):
+                        if cluster_id == -1:
+                            sbert_sub_cluster_map_auto[-1] = "ノイズ / 小クラスタ"
+                            continue
+                        cluster_rows_mask = (df_plot['cluster_id'] == cluster_id)
+                        cluster_plot_indices = df_plot[cluster_rows_mask].index.tolist()
+                        if not cluster_plot_indices: continue
+                        cluster_tfidf_vectors = target_tfidf_matrix[cluster_plot_indices]
+                        mean_vector = np.asarray(cluster_tfidf_vectors.mean(axis=0)).flatten()
+                        top_words = _get_top_words_from_dense_vector(mean_vector, feature_names, 5)
+                        sbert_sub_cluster_map_auto[cluster_id] = f"Cluster {cluster_id}: {top_words}"
+
+                    df_plot['label'] = df_plot['cluster_id'].map(sbert_sub_cluster_map_auto)
+                    st.session_state.df_drilldown = df_plot.copy()
+                    st.session_state.sbert_sub_cluster_map_auto = sbert_sub_cluster_map_auto
+                    st.session_state.sbert_sub_cluster_map_custom = {}
+                    st.session_state.drilldown_target_name = drilldown_target
+
+                    st.success("技術マップの計算が完了しました。")
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"SBERT/UMAP分析中にエラーが発生しました: {e}")
+                    import traceback
+                    st.exception(traceback.format_exc())
+
+    # --- C-4, C-5, C-6 (描画とフィルタ) ---
+    if "df_drilldown" in st.session_state:
+        df_to_plot_sbert = st.session_state.df_drilldown.copy()
+        sbert_sub_cluster_map_auto = st.session_state.sbert_sub_cluster_map_auto
+
+        st.subheader("サブクラスタ・ラベル編集")
+        sbert_sub_cluster_map_custom = {}
+        auto_labels_map = sbert_sub_cluster_map_auto
+        
+        for cluster_id, auto_label in auto_labels_map.items():
+            if cluster_id != -1:
+                new_label = st.text_input(f"[{auto_label}]", value=auto_label, key=f"drill_label_{cluster_id}")
+                sbert_sub_cluster_map_custom[auto_label] = new_label
+        
+        if -1 in auto_labels_map:
+            noise_label = auto_labels_map[-1]
+            sbert_sub_cluster_map_custom[noise_label] = noise_label
+
+        auto_to_custom_map = {
+            auto_label: sbert_sub_cluster_map_custom.get(auto_label, auto_label)
+            for auto_label in auto_labels_map.values()
+        }
+        df_to_plot_sbert['label_custom'] = df_to_plot_sbert['label'].map(auto_to_custom_map).fillna('N/A')
+
         col1, col2 = st.columns(2)
-        with col1:
-            drill_n_neighbors = st.number_input('UMAP 近傍点 (n_neighbors):', min_value=2, value=15, key="drill_n_neighbors")
-            drill_min_dist = st.number_input('UMAP 最小距離 (min_dist):', min_value=0.0, value=0.1, format="%.2f", key="drill_min_dist")
-        with col2:
-            drill_min_cluster_size = st.number_input('HDBSCAN 最小クラスタサイズ:', min_value=2, value=5, key="drill_min_cluster_size")
-            drill_min_samples = st.number_input('HDBSCAN 最小サンプル数:', min_value=1, value=5, key="drill_min_samples")
+        with col1: sbert_bin_interval = st.selectbox("期間の粒度:", options=[1, 2, 3, 5], index=2, key="drill_interval")
+        min_date = df_to_plot_sbert['year'].min()
+        max_date = df_to_plot_sbert['year'].max()
+        date_bin_options = ["(全期間)"]
 
-        st.subheader("技術ポートフォリオ分析 (SBERT/UMAP)")
+        if pd.notna(min_date) and pd.notna(max_date):
+            bins = pd.date_range(start=pd.to_datetime(f"{int(min_date)}-01-01"), end=pd.to_datetime(f"{int(max_date)}-12-31") + pd.DateOffset(years=int(sbert_bin_interval)), freq=f'{int(sbert_bin_interval)*12}MS')
+            labels = [f"{bins[i].year}-{bins[i+1].year - 1}" for i in range(len(bins)-1)]
+            df_to_plot_sbert['date_bin'] = pd.cut(pd.to_datetime(df_to_plot_sbert['year'], format='%Y'), bins=bins, labels=labels, right=False)
+            for label in labels:
+                if (df_to_plot_sbert['date_bin'] == label).any(): date_bin_options.append(f"{label} ({len(df_to_plot_sbert[df_to_plot_sbert['date_bin'] == label])}件)")
 
-        if st.button("選択対象の技術マップを描画", type="primary", key="drill_run_map"):
-            if drilldown_target == '(分析対象を選択)':
-                st.error("分析対象を選択してください。")
-            else:
-                with st.spinner(f"「{drilldown_target}」の技術マップを計算中..."):
-                    try:
-                        axis_label = st.session_state.mega_axis_label
+        with col2: selected_date_bin_raw = st.selectbox("表示期間:", options=date_bin_options, key="drill_date_filter")
 
-                        axis_col_name = "applicant_main"
-                        if axis_label == "IPC (メイングループ)": axis_col_name = "ipc_main_group"
-                        elif axis_label == "Fターム (テーマコード)": axis_col_name = "fterm_main"
-
-                        target_indices_mask = df_main[axis_col_name].apply(lambda l: drilldown_target in l)
-                        df_filtered = df_main[target_indices_mask].copy()
-                        original_indices = df_main[target_indices_mask].index.tolist()
-
-                        if df_filtered.empty:
-                            st.error(f"「{drilldown_target}」に該当するデータがありません。")
-                            st.stop()
-
-                        target_embeddings = sbert_embeddings[original_indices]
-                        target_tfidf_matrix = tfidf_matrix[original_indices]
-
-                        n_neighbors = min(int(drill_n_neighbors), len(original_indices) - 1)
-                        if n_neighbors <= 1: n_neighbors = 1
-
-                        umap_results = UMAP(
-                            n_components=2,
-                            n_neighbors=n_neighbors,
-                            min_dist=float(drill_min_dist),
-                            random_state=42
-                        ).fit_transform(target_embeddings)
-                        df_plot = pd.DataFrame(umap_results, columns=['x', 'y'])
-
-                        clusterer = hdbscan.HDBSCAN(
-                            min_cluster_size=int(drill_min_cluster_size),
-                            min_samples=int(drill_min_samples),
-                            metric='euclidean',
-                            cluster_selection_method='eom'
-                        )
-                        cluster_labels = clusterer.fit_predict(df_plot[['x', 'y']])
-                        df_plot['cluster_id'] = cluster_labels
-
-                        df_plot[col_map['app_num']] = df_filtered[col_map['app_num']].values
-                        df_plot[col_map['title']] = df_filtered[col_map['title']].values
-                        df_plot[col_map['abstract']] = df_filtered[col_map['abstract']].values
-                        df_plot[col_map['claim']] = df_filtered[col_map['claim']].values
-                        df_plot['year'] = df_filtered['year'].values
-
-                        sbert_sub_cluster_map_auto = {}
-                        for cluster_id in sorted(df_plot['cluster_id'].unique()):
-                            if cluster_id == -1:
-                                sbert_sub_cluster_map_auto[-1] = "ノイズ / 小クラスタ"
-                                continue
-
-                            cluster_rows_mask = (df_plot['cluster_id'] == cluster_id)
-                            cluster_plot_indices = df_plot[cluster_rows_mask].index.tolist()
-
-                            if not cluster_plot_indices: continue
-
-                            cluster_tfidf_vectors = target_tfidf_matrix[cluster_plot_indices]
-                            mean_vector = np.asarray(cluster_tfidf_vectors.mean(axis=0)).flatten()
-                            top_words = _get_top_words_from_dense_vector(mean_vector, feature_names, 5)
-                            sbert_sub_cluster_map_auto[cluster_id] = f"Cluster {cluster_id}: {top_words}"
-
-                        df_plot['label'] = df_plot['cluster_id'].map(sbert_sub_cluster_map_auto)
-
-                        st.session_state.df_drilldown = df_plot.copy()
-                        st.session_state.sbert_sub_cluster_map_auto = sbert_sub_cluster_map_auto
-                        st.session_state.sbert_sub_cluster_map_custom = {}
-                        st.session_state.drilldown_target_name = drilldown_target
-
-                        st.success("技術マップの計算が完了しました。")
-                        st.rerun()
-
-                    except Exception as e:
-                        st.error(f"SBERT/UMAP分析中にエラーが発生しました: {e}")
-                        import traceback
-                        st.exception(traceback.format_exc())
-
-        # --- C-4, C-5, C-6 (描画とフィルタ) ---
-        if "df_drilldown" in st.session_state:
-            df_to_plot_sbert = st.session_state.df_drilldown.copy()
-            sbert_sub_cluster_map_auto = st.session_state.sbert_sub_cluster_map_auto
-
-            st.subheader("サブクラスタ・ラベル編集")
-            sbert_sub_cluster_map_custom = {}
-
-            auto_labels_map = sbert_sub_cluster_map_auto
-            for cluster_id, auto_label in auto_labels_map.items():
-                if cluster_id != -1:
-                    new_label = st.text_input(f"[{auto_label}]", value=auto_label, key=f"drill_label_{cluster_id}")
-                    sbert_sub_cluster_map_custom[auto_label] = new_label
-            if -1 in auto_labels_map:
-                noise_label = auto_labels_map[-1]
-                sbert_sub_cluster_map_custom[noise_label] = noise_label
-
-            auto_to_custom_map = {
-                auto_label: sbert_sub_cluster_map_custom.get(auto_label, auto_label)
-                for auto_label in auto_labels_map.values()
-            }
-            df_to_plot_sbert['label_custom'] = df_to_plot_sbert['label'].map(auto_to_custom_map).fillna('N/A')
-
-
-            st.subheader("期間フィルタ")
-            col1, col2 = st.columns(2)
-            with col1:
-                sbert_bin_interval = st.selectbox("期間の粒度:", options=[1, 2, 3, 5], index=2, key="drill_interval")
-
-            min_date = df_to_plot_sbert['year'].min()
-            max_date = df_to_plot_sbert['year'].max()
-            date_bin_options = ["(全期間)"]
-
-            if pd.notna(min_date) and pd.notna(max_date):
-                min_date = pd.to_datetime(f"{int(min_date)}-01-01")
-                max_date = pd.to_datetime(f"{int(max_date)}-12-31")
-                interval = int(sbert_bin_interval)
-
-                bins = pd.date_range(start=min_date, end=max_date + pd.DateOffset(years=interval), freq=f'{interval*12}MS')
-                labels = [f"{bins[i].year}-{bins[i+1].year - 1}" for i in range(len(bins)-1)]
-
-                df_dates = pd.to_datetime(df_to_plot_sbert['year'], format='%Y')
-                df_to_plot_sbert['date_bin'] = pd.cut(df_dates, bins=bins, labels=labels, right=False)
-
-                date_bin_counts = df_to_plot_sbert['date_bin'].value_counts()
-                for label in labels:
-                    count = date_bin_counts.get(label, 0)
-                    if count > 0:
-                        date_bin_options.append(f"{label} ({count}件)")
-
-            with col2:
-                selected_date_bin_raw = st.selectbox("表示期間 (フィルタ):", options=date_bin_options, key="drill_date_filter")
-
-            st.subheader("マップ描画")
-
-            title_suffix = ""
-            if selected_date_bin_raw == "(全期間)":
-                mask_in_range = pd.Series(True, index=df_to_plot_sbert.index)
-            else:
-                date_bin_label_for_filter = selected_date_bin_raw.split(' (')[0].strip()
-                mask_in_range = (df_to_plot_sbert['date_bin'].astype(str) == date_bin_label_for_filter)
-                title_suffix = f" ({date_bin_label_for_filter})"
-
-            df_in_range = df_to_plot_sbert[mask_in_range]
-            df_out_of_range = df_to_plot_sbert[~mask_in_range]
-
-            fig_sbert = go.Figure()
-
-            palette = px.colors.qualitative.Plotly
-            all_unique_labels = sorted(df_to_plot_sbert['label_custom'].unique())
-            color_map = {label: palette[i % len(palette)] for i, label in enumerate(all_unique_labels)}
-
-            noise_label = auto_labels_map.get(-1)
-            if noise_label and noise_label in color_map:
-                color_map[noise_label] = '#ced4da'
-
-            fig_sbert.add_trace(go.Scatter(
-                x=df_out_of_range['x'], y=df_out_of_range['y'],
-                mode='markers', marker=dict(color='#ced4da', opacity=0.2, size=5),
-                name='期間外', showlegend=True,
-                customdata=df_out_of_range[[col_map['title'], 'label_custom', col_map['app_num'], 'year']],
-                hovertemplate=(
-                    f"<b>出願番号: %{{customdata[2]}} (%{{customdata[3]}}年)</b><br>"
-                    f"名称: %{{customdata[0]}}<br>"
-                    f"クラスタ: %{{customdata[1]}} (期間外)<extra></extra>"
-                )
-            ))
-
-            in_range_labels = df_in_range['label_custom'].unique()
-
-            for label in all_unique_labels:
-                color = color_map[label]
-
-                if label in in_range_labels:
-                    df_cluster = df_in_range[df_in_range['label_custom'] == label]
-                    fig_sbert.add_trace(go.Scatter(
-                        x=df_cluster['x'], y=df_cluster['y'],
-                        mode='markers',
-                        marker=dict(color=color, size=3 if label == noise_label else 7),
-                        name=label,
-                        customdata=df_cluster[[col_map['title'], 'label_custom', col_map['app_num'], 'year']],
-                        hovertemplate=(
-                            f"<b>出願番号: %{{customdata[2]}} (%{{customdata[3]}}年)</b><br>"
-                            f"名称: %{{customdata[0]}}<br>"
-                            f"クラスタ: %{{customdata[1]}}<extra></extra>"
-                        )
-                    ))
-                else:
-                    fig_sbert.add_trace(go.Scatter(
-                        x=[None], y=[None], mode='markers',
-                        marker=dict(color=color),
-                        name=f"{label} (期間外)", showlegend=True
-                    ))
-
-            fig_sbert.update_layout(
-                title=f"技術ポートフォリオマップ: {st.session_state.drilldown_target_name} (SBERT/UMAP){title_suffix}",
-                height=800,
-                legend_title_text='サブクラスタ',
-                legend=dict(orientation="h", yanchor="top", y=-0.1, xanchor="center", x=0.5),
-                plot_bgcolor='white', paper_bgcolor='white',
-                xaxis=dict(showticklabels=False, showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor='black', mirror=True),
-                yaxis=dict(showticklabels=False, showgrid=False, zeroline=False, showline=True, linewidth=1, linecolor='black', mirror=True, scaleanchor="x", scaleratio=1)
-            )
-
-            st.plotly_chart(fig_sbert, use_container_width=True)
-
-            st.session_state.df_drilldown_export = df_to_plot_sbert.copy()
-
-    # --- D. エクスポート ---
-    with tab_d:
-        st.subheader("動態分析マップ結果をエクスポート")
-        if "df_momentum_export" in st.session_state:
-            @st.cache_data
-            def convert_df_to_csv(df):
-                return df.to_csv(encoding='utf-8-sig').encode('utf-8-sig')
-
-            csv_mega = convert_df_to_csv(st.session_state.df_momentum_export)
-            st.download_button(
-                label="動態分析マップ結果 (CSV) をダウンロード",
-                data=csv_mega,
-                file_name=f"APOLLO_MEGA_PULSE_{st.session_state.mega_axis_label}.csv",
-                mime="text/csv",
-            )
+        title_suffix = ""
+        if selected_date_bin_raw == "(全期間)":
+            mask_in_range = pd.Series(True, index=df_to_plot_sbert.index)
         else:
-            st.info("Landscape Analysis を実行すると、ダウンロードボタンが表示されます。")
+            date_label = selected_date_bin_raw.split(' (')[0].strip()
+            mask_in_range = (df_to_plot_sbert['date_bin'].astype(str) == date_label)
+            title_suffix = f" ({date_label})"
 
-        st.subheader("ドリルダウン結果をエクスポート")
-        if "df_drilldown_export" in st.session_state:
-            csv_drilldown = convert_df_to_csv(st.session_state.df_drilldown_export)
-            target_name = st.session_state.drilldown_target_name.replace(" ", "_").replace("/", "_")
-            st.download_button(
-                label="ドリルダウン結果 (CSV) をダウンロード",
-                data=csv_drilldown,
-                file_name=f"APOLLO_MEGA_TELESCOPE_{target_name}.csv",
-                mime="text/csv",
-            )
-        else:
-            st.info("Technology Probe を実行すると、ダウンロードボタンが表示されます。")
+        df_in = df_to_plot_sbert[mask_in_range]
+        df_out = df_to_plot_sbert[~mask_in_range]
+        fig_sbert = go.Figure()
+        palette = theme_config["color_sequence"]
+        unique_labels = sorted(df_to_plot_sbert['label_custom'].unique())
+        color_map = {label: palette[i % len(palette)] for i, label in enumerate(unique_labels)}
+        if -1 in sbert_sub_cluster_map_auto: color_map[sbert_sub_cluster_map_auto[-1]] = '#ced4da'
 
-# --- 共通サイドバーフッター ---
-st.sidebar.markdown("---") 
-st.sidebar.caption("ナビゲーション:")
-st.sidebar.caption("1. Mission Control でデータをアップロードし、前処理を実行します。")
-st.sidebar.caption("2. 左のリストから分析モジュールを選択します。")
-st.sidebar.markdown("---")
-st.sidebar.caption("© 2025 しばやま")
+        fig_sbert.add_trace(go.Scatter(x=df_out['x'], y=df_out['y'], mode='markers', marker=dict(color='#ced4da', opacity=0.2, size=5), name='期間外', hoverinfo='skip'))
+        
+        for label in unique_labels:
+            df_c = df_in[df_in['label_custom'] == label]
+            if not df_c.empty:
+                fig_sbert.add_trace(go.Scatter(x=df_c['x'], y=df_c['y'], mode='markers', marker=dict(color=color_map[label], size=7), name=label, hovertext=df_c[col_map['title']]))
+
+        update_fig_layout(fig_sbert, f"技術ポートフォリオ: {st.session_state.drilldown_target_name}{title_suffix}", height=800, theme_config=theme_config)
+        
+        # ★修正: 軸の枠線を確実に描画する設定
+        fig_sbert.update_xaxes(
+            showgrid=False, 
+            zeroline=False, 
+            showline=True, 
+            linewidth=2, 
+            linecolor='black', 
+            mirror=True, 
+            showticklabels=False,
+            visible=True # 明示的に可視化
+        )
+        fig_sbert.update_yaxes(
+            showgrid=False, 
+            zeroline=False, 
+            showline=True, 
+            linewidth=2, 
+            linecolor='black', 
+            mirror=True, 
+            showticklabels=False,
+            scaleanchor="x", 
+            scaleratio=1,
+            visible=True # 明示的に可視化
+        )
+        # ★追加: 余白を確保して枠線のクリッピングを防ぐ
+        fig_sbert.update_layout(margin=dict(l=20, r=20, t=40, b=20))
+        
+        st.plotly_chart(fig_sbert, use_container_width=True)
+        st.session_state.df_drilldown_export = df_to_plot_sbert.copy()
+
+# --- D. エクスポート ---
+with tab_d:
+    st.subheader("データエクスポート")
+    if "df_momentum_export" in st.session_state:
+        st.download_button("動態分析データ (CSV)", convert_df_to_csv(st.session_state.df_momentum_export), "MEGA_PULSE.csv", "text/csv")
+    if "df_drilldown_export" in st.session_state:
+        st.download_button("ドリルダウンデータ (CSV)", convert_df_to_csv(st.session_state.df_drilldown_export), "MEGA_TELESCOPE.csv", "text/csv")

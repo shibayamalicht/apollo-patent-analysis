@@ -1,6 +1,6 @@
 streamlit
 pandas
-numpy
+numpy<2
 scikit-learn
 plotly
 matplotlib
@@ -10,4 +10,6 @@ sentence-transformers
 umap-learn
 hdbscan
 wordcloud
+networkx
 openpyxl
+setuptools

@@ -1,44 +1,71 @@
-# ==================================================================
-# --- 1. ライブラリのインポート ---
-# ==================================================================
 import streamlit as st
 import pandas as pd
 import numpy as np
-import io
-import datetime
 import warnings
-import unicodedata
 import re
 import string
-from collections import Counter
 import os
+import platform
+import unicodedata
+import traceback
+from collections import Counter
 
-# WordCloud / Janome
+# 可視化・分析
 from wordcloud import WordCloud
 from janome.tokenizer import Tokenizer
-
-# 統計マップ用
 import matplotlib.pyplot as plt
 import matplotlib.font_manager
-import japanize_matplotlib # 日本語化
+import japanize_matplotlib
 
 # 警告を非表示
 warnings.filterwarnings('ignore')
 
 # ==================================================================
-# --- 2. Explorer専用ヘルパー関数 ---
+# --- 1. デザインテーマ管理 ---
 # ==================================================================
 
-# Explorerは独自のTokenizerとStopWords, n-gramを持つ
+def get_theme_config(theme_name):
+    """テーマに応じたCSSを返す"""
+    themes = {
+        "APOLLO Standard": {
+            "bg_color": "#ffffff",
+            "text_color": "#333333",
+            "sidebar_bg": "#f8f9fa",
+            "accent_color": "#003366",
+            "css": """
+                html, body { background-color: #ffffff; color: #333333; }
+                [data-testid="stSidebar"] { background-color: #f8f9fa; }
+                [data-testid="stHeader"] { background-color: #ffffff; }
+                h1, h2, h3 { color: #003366; }
+            """
+        },
+        "Modern Presentation": {
+            "bg_color": "#fdfdfd",
+            "text_color": "#2c3e50",
+            "sidebar_bg": "#eaeaea",
+            "accent_color": "#264653",
+            "css": """
+                html, body { background-color: #fdfdfd; color: #2c3e50; font-family: "Helvetica Neue", Arial, sans-serif; }
+                [data-testid="stSidebar"] { background-color: #eaeaea; }
+                [data-testid="stHeader"] { background-color: #fdfdfd; }
+                h1, h2, h3 { color: #264653; font-family: "Georgia", serif; }
+                .stButton>button { background-color: #264653; color: white; border-radius: 0px; }
+            """
+        }
+    }
+    return themes.get(theme_name, themes["APOLLO Standard"])
+
+# ==================================================================
+# --- 2. テキスト処理ヘルパー関数 ---
+# ==================================================================
+
 @st.cache_resource
 def load_tokenizer_explorer():
-    print("... Explorer: Janome Tokenizerをロード中 ...")
     return Tokenizer()
 
 t = load_tokenizer_explorer()
 
-# Explorer専用のストップワード
-stopwords = [
+_stopwords_original_list = [
     "する","ある","なる","ため","こと","よう","もの","これ","それ","あれ","ここ","そこ","どれ","どの",
     "この","その","当該","該","および","及び","または","また","例えば","例えばは","において","により",
     "に対して","に関して","について","として","としては","場合","一方","他方","さらに","そして","ただし",
@@ -52,35 +79,32 @@ stopwords = [
     "図面の簡単な説明","発明の詳細な説明","技術分野","背景技術","従来技術","発明が解決しようとする課題","課題",
     "解決手段","効果","要約","発明の効果","目的","手段","構成","構造","工程","処理","方法","手法","方式",
     "システム","プログラム","記憶媒体","特徴","特徴とする","特徴部","ステップ","フロー","シーケンス","定義",
-    "関係","対応","整合",
-    "実施の形態","実施の態様","態様","変形","修正例","図示","図示例","図示しない","参照","参照符号","段落",
-    "詳細説明","要旨","一実施形態","他の実施形態","一実施例","別の側面","付記","適用例","用語の定義","開示","本開示","開示内容",
-    "上部","下部","内部","外部","内側","外側","表面","裏面","側面","上面","下面","端面","先端","基端","後端",
-    "一端","他端","中心","中央","周縁","周辺","近傍","方向","位置","空間","領域","範囲","間隔","距離","形状",
-    "形態","状態","種類","層","膜","部","部材","部位","部品","機構","装置","容器","組成","材料","用途","適用",
-    "適用例",
-    "片側","両側","左側","右側","前方","後方","上流","下流","隣接","近接","離間","間置","介在","重畳","概ね",
-    "略","略中央","固定側","可動側","伸長","収縮","係合","嵌合","取付","連結部","支持体","支持部","ガイド部",
-    "データ","情報","信号","出力","入力","制御","演算","取得","送信","受信","表示","通知","設定","変更","更新",
-    "保存","削除","追加","実行","開始","終了","継続","停止","判定","判断","決定","選択","特定","抽出","検出",
-    "検知","測定","計測","移動","回転","変位","変形","固定","配置",
-    "生成","付与","供給","適用","照合","比較","算出","解析","同定","初期化","読出","書込","登録","記録","配信",
-    "連携","切替","起動","復帰","監視","通知処理","取得処理","演算処理",
-    "良好","容易","簡便","適切","有利","有用","有効","効果的","高い","低い","大きい","小さい","新規","改良","改善",
-    "抑制","向上","低減","削減","増加","減少","可能","好適","好ましい","望ましい","優れる","優れた","高性能",
-    "高効率","低コスト","コスト","簡易","安定","安定性","耐久","耐久性","信頼性","簡素","簡略","単純","最適",
-    "最適化","汎用","汎用性","実現","達成","確保","維持","防止","回避","促進","不要","必要",
-    "高精度","省電力","省資源","高信頼","低負荷","高純度","高密度","高感度","迅速","円滑","簡略化","低価格","実効的",
-    "可能化","有効化","非必須","適合","互換",
-    "出願","出願人","出願番号","出願日","出願書","出願公開","公開","公開番号","公開公報","公報","公報番号",
-    "特許","特許番号","特許文献","非特許文献","引用","引用文献","先行技術","審査","審査官","拒絶","意見書","補正書",
-    "優先","優先日","分割出願","継続出願","国内移行","国際出願","国際公開","PCT","登録","公開日","審査請求",
-    "拒絶理由","補正","訂正","無効審判","異議","取消","取下げ","事件番号","代理人","弁理士","係属","経過",
+    "関係","対応","整合","実施の形態","実施の態様","態様","変形","修正例","図示","図示例","図示しない",
+    "参照","参照符号","段落","詳細説明","要旨","一実施形態","他の実施形態","一実施例","別の側面","付記",
+    "適用例","用語の定義","開示","本開示","開示内容","上部","下部","内部","外部","内側","外側","表面",
+    "裏面","側面","上面","下面","端面","先端","基端","後端","一端","他端","中心","中央","周縁","周辺",
+    "近傍","方向","位置","空間","領域","範囲","間隔","距離","形状","形態","状態","種類","層","膜","部",
+    "部材","部位","部品","機構","装置","容器","組成","材料","用途","適用","適用例","片側","両側","左側",
+    "右側","前方","後方","上流","下流","隣接","近接","離間","間置","介在","重畳","概ね","略","略中央",
+    "固定側","可動側","伸長","収縮","係合","嵌合","取付","連結部","支持体","支持部","ガイド部",
+    "データ","情報","信号","出力","入力","制御","演算","取得","送信","受信","表示","通知","設定","変更",
+    "更新","保存","削除","追加","実行","開始","終了","継続","停止","判定","判断","決定","選択","特定",
+    "抽出","検出","検知","測定","計測","移動","回転","変位","変形","固定","配置","生成","付与","供給",
+    "適用","照合","比較","算出","解析","同定","初期化","読出","書込","登録","記録","配信","連携","切替",
+    "起動","復帰","監視","通知処理","取得処理","演算処理","良好","容易","簡便","適切","有利","有用","有効",
+    "効果的","高い","低い","大きい","小さい","新規","改良","改善","抑制","向上","低減","削減","増加",
+    "減少","可能","好適","好ましい","望ましい","優れる","優れた","高性能","高効率","低コスト","コスト",
+    "簡易","安定","安定性","耐久","耐久性","信頼性","簡素","簡略","単純","最適","最適化","汎用","汎用性",
+    "実現","達成","確保","維持","防止","回避","促進","不要","必要","高精度","省電力","省資源","高信頼",
+    "低負荷","高純度","高密度","高感度","迅速","円滑","簡略化","低価格","実効的","可能化","有効化",
+    "非必須","適合","互換","出願","出願人","出願番号","出願日","出願書","出願公開","公開","公開番号",
+    "公開公報","公報","公報番号","特許","特許番号","特許文献","非特許文献","引用","引用文献","先行技術",
+    "審査","審査官","拒絶","意見書","補正書","優先","優先日","分割出願","継続出願","国内移行","国際出願",
+    "国際公開","PCT","登録","公開日","審査請求","拒絶理由","補正","訂正","無効審判","異議","取消","取下げ",
+    "事件番号","代理人","弁理士","係属","経過",
     "第","第一","第二","第三","第1","第２","第３","第１","第２","第３","１","２","３","４","５","６","７","８","９","０",
-    "一","二","三","四","五","六","七","八","九","零","数","複合","多数","少数",
-    "図1","図2","図3","図4","図5","図6","図7","図8","図9","表1","表2","表3","式1","式2","式3",
-    "０","１","２","３","４","５","６","７","８","９",
-    "%","％","wt%","vol%","質量%","重量%","容量%","mol","mol%","mol/L","M","mm","cm","m","nm","μm","μ","rpm",
+    "一","二","三","四","五","六","七","八","九","零","数","複合","多数","少数","図1","図2","図3","図4","図5","図6","図7","図8","図9",
+    "表1","表2","表3","式1","式2","式3","０","１","２","３","４","５","６","７","８","９","%","％","wt%","vol%","質量%","重量%","容量%","mol","mol%","mol/L","M","mm","cm","m","nm","μm","μ","rpm",
     "Pa","kPa","MPa","GPa","N","W","V","A","mA","Hz","kHz","MHz","GHz","℃","°C","K","mL","L","g","kg","mg","wt","vol",
     "h","hr","hrs","min","s","sec","ppm","ppb","bar","Ω","ohm","J","kJ","Wh","kWh",
     "株式会社","有限会社","合資会社","合名会社","合同会社","Inc","Inc.","Ltd","Ltd.","Co","Co.","Corp","Corp.","LLC",
@@ -93,8 +117,7 @@ stopwords = [
     "インターフェース","データベース","DB","ネットワーク","通信","要求","応答","リクエスト","レスポンス","パラメータ",
     "引数","属性","プロパティ","フラグ","ID","ファイル","データ構造","テーブル","レコード",
     "軸","シャフト","ギア","モータ","エンジン","アクチュエータ","センサ","バルブ","ポンプ","筐体","ハウジング","フレーム",
-    "シャーシ","駆動","伝達","支持","連結",
-    "解決", "準備", "提供", "発生", "以上", "十分"
+    "シャーシ","駆動","伝達","支持","連結","解決", "準備", "提供", "発生", "以上", "十分"
 ]
 
 @st.cache_data
@@ -108,10 +131,8 @@ def expand_stopwords_to_full_width(words):
             expanded.add(word.translate(trans_table))
     return sorted(list(expanded))
 
-stopwords = expand_stopwords_to_full_width(stopwords)
-stopwords = sorted(list(set(stopwords)))
+stopwords = set(expand_stopwords_to_full_width(_stopwords_original_list))
 
-# n-gram定型句リスト (正規表現フィルタ)
 _ngram_rows = [
     ("参照符号付き要素", r"[一-龥ぁ-んァ-ンA-Za-z0-9／\-＋・]+?(?:部|層|面|体|板|孔|溝|片|部材|要素|機構|装置|手段|電極|端子|領域|基板|回路|材料|工程)\s*[（(]\s*[0-9０-９A-Za-z]+[A-Za-z]?\s*[）)]", "regex", 1),
     ("参照符号付き要素", r"(?:上記|前記)?[一-龥ぁ-んァ-ンA-Za-z0-9／\-＋・]+?(?:部|層|面|体|板|孔|溝|片|部材|要素|機構|装置|手段|電極|端子|領域|基板|回路|材料|工程)\s*[0-9０-９A-Za-z]+[A-Za-z]?", "regex", 1),
@@ -137,15 +158,9 @@ _ngram_rows = [
     ("補助句","これにより","literal",3), ("補助句","このように","literal",3)
 ]
 
-_ngram_rows = sorted(_ngram_rows, key=lambda x: (x[3], -len(x[1]) if x[2]=="literal" else -50))
-_ngram_compiled = []
-for cat, pat, ptype, pri in _ngram_rows:
-    if ptype == "regex":
-        _ngram_compiled.append((cat, re.compile(pat), ptype, pri))
-    else:
-        _ngram_compiled.append((cat, pat, ptype, pri))
+_ngram_compiled = sorted(_ngram_rows, key=lambda x: (x[3], -len(x[1]) if x[2]=="literal" else -50))
+_ngram_compiled = [(cat, re.compile(pat) if ptype == "regex" else pat, ptype, pri) for cat, pat, ptype, pri in _ngram_compiled]
 
-# テキスト処理関数
 def normalize_text(text):
     if not isinstance(text, str): text = "" if pd.isna(text) else str(text)
     text = unicodedata.normalize("NFKC", text)
@@ -166,6 +181,7 @@ def extract_compound_nouns(text):
     text = normalize_text(text)
     text = apply_ngram_filters(text)
     text = re.sub(r'【.*?】', '', text)
+    text = re.sub(r'[!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~]', ' ', text)
 
     tokens = t.tokenize(text)
     words, compound_word = [], ''
@@ -177,25 +193,39 @@ def extract_compound_nouns(text):
             if (len(compound_word) > 1 and
                 compound_word not in stopwords and
                 not re.fullmatch(r'[\d０-９]+', compound_word) and
-                not re.fullmatch(r'(図|表|式)[\d０-９]+', compound_word) and
+                not re.fullmatch(r'(図|表|式|第)[\d０-９]+.*', compound_word) and
                 not re.match(r'^(上記|前記|本開示|当該|該)', compound_word) and
                 not re.search(r'[0-9０-９]+[)）]?$', compound_word) and
                 not re.match(r'[0-9０-９]+[a-zA-Zａ-ｚＡ-Ｚ]', compound_word)):
                 words.append(compound_word)
             compound_word = ''
-
+            
     if (len(compound_word) > 1 and
         compound_word not in stopwords and
         not re.fullmatch(r'[\d０-９]+', compound_word) and
-        not re.fullmatch(r'(図|表|式)[\d０-９]+', compound_word) and
+        not re.fullmatch(r'(図|表|式|第)[\d０-９]+.*', compound_word) and
         not re.match(r'^(上記|前記|本開示|当該|該)', compound_word) and
         not re.search(r'[0-9０-９]+[)）]?$', compound_word) and
         not re.match(r'[0-9０-９]+[a-zA-Zａ-ｚＡ-Ｚ]', compound_word)):
         words.append(compound_word)
-
     return words
 
-# ワードクラウド生成・表示
+def get_font_path_for_wordcloud():
+    system_name = platform.system()
+    candidates = []
+    if system_name == 'Linux':
+        candidates = ['/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf', '/usr/share/fonts/truetype/fonts-japanese-gothic.ttf']
+    elif system_name == 'Darwin': 
+        candidates = ['/System/Library/Fonts/Hiragino Sans W3.ttc', '/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc']
+    elif system_name == 'Windows':
+        candidates = ['C:\\Windows\\Fonts\\meiryo.ttc', 'C:\\Windows\\Fonts\\msgothic.ttc']
+    
+    for path in candidates:
+        if os.path.exists(path): return path
+    return None
+
+font_path = get_font_path_for_wordcloud()
+
 def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
     if not words:
         st.subheader(title)
@@ -216,23 +246,19 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
         ax.set_title(title, fontsize=20)
         ax.axis('off')
         st.pyplot(fig)
-    except Exception as e:
-        st.error(f"ワードクラウドの描画に失敗しました: {e}")
-        st.error("Colab環境以外（Streamlit Cloudなど）で実行する場合、フォントパス（font_path）の指定が必要です。")
-
-    st.subheader(f"--- {title} (上位{top_n}件) ---")
-    if not word_freq:
-        st.write("（キーワードなし）")
-    else:
+        
+        st.markdown(f"**上位キーワード (Top {top_n})**")
         list_data = { "キーワード": [], "出現頻度": [] }
         for word, freq in word_freq.most_common(top_n):
             list_data["キーワード"].append(word)
             list_data["出現頻度"].append(freq)
-        st.dataframe(pd.DataFrame(list_data))
+        st.dataframe(pd.DataFrame(list_data), height=200)
+        
+    except Exception as e:
+        st.error(f"ワードクラウドの描画に失敗しました: {e}")
+        if font_path is None:
+            st.warning("日本語フォントが見つかりませんでした。")
 
-    return word_freq
-
-# 特徴語抽出
 @st.cache_data
 def get_characteristic_words(target_counter, other_counter1, other_counter2):
     char_words = {}
@@ -249,19 +275,61 @@ def get_characteristic_words(target_counter, other_counter1, other_counter2):
     return list(Counter(char_words).elements())
 
 # ==================================================================
-# --- 3. Streamlit UI ---
+# --- 3. Streamlit UI構成 ---
 # ==================================================================
+
 st.set_page_config(
     page_title="APOLLO | Explorer",
     page_icon="🧭",
     layout="wide"
 )
 
+# CSS注入
+st.markdown("""
+<style>
+    html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    [data-testid="stSidebar"] h1 { color: #003366; font-weight: 900 !important; font-size: 2.5rem !important; }
+    [data-testid="stSidebarNav"] { display: none !important; }
+    [data-testid="stSidebar"] .block-container { padding-top: 2rem; padding-bottom: 1rem; }
+    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+    .stButton>button { font-weight: 600; }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [data-baseweb="tab"] { background-color: #f0f2f6; border-radius: 8px 8px 0 0; padding: 10px 15px; }
+    .stTabs [aria-selected="true"] { background-color: #ffffff; border-bottom: 2px solid #003366; }
+</style>
+""", unsafe_allow_html=True)
+
+# --- サイドバー ---
+with st.sidebar:
+    st.title("APOLLO") 
+    st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
+    st.markdown("---")
+    st.subheader("Home")
+    st.page_link("Home.py", label="Mission Control", icon="🛰️")
+    st.subheader("Modules")
+    st.page_link("pages/1_🌍_ATLAS.py", label="ATLAS", icon="🌍")
+    st.page_link("pages/2_💡_CORE.py", label="CORE", icon="💡")
+    st.page_link("pages/3_🚀_Saturn_V.py", label="Saturn V", icon="🚀")
+    st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
+    st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
+    st.markdown("---")
+    st.caption("ナビゲーション:\n1. Mission Control でデータをアップロードし、前処理を実行します。\n2. 上のリストから分析モジュールを選択します。")
+    st.markdown("---")
+    st.caption("© 2025 しばやま")
+
+# --- メインコンテンツ ---
 st.title("🧭 Explorer")
 st.markdown("特許テキストからキーワード（複合名詞）を抽出し、全体・競合比較・時系列でのトレンドを可視化します。")
 
+# テーマ選択
+col_theme, _ = st.columns([1, 3])
+with col_theme:
+    selected_theme = st.selectbox("表示テーマ:", ["APOLLO Standard", "Modern Presentation"], key="explorer_theme_selector")
+theme_config = get_theme_config(selected_theme)
+st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
+
 # ==================================================================
-# --- 4. セッション状態の確認と初期化 ---
+# --- 4. セッション状態の確認 ---
 # ==================================================================
 if not st.session_state.get("preprocess_done", False):
     st.error("分析データがありません。")
@@ -276,25 +344,11 @@ else:
 # --- 5. Explorer アプリケーション ---
 # ==================================================================
 
-# --- フォントパスの設定 (Colab / Streamlit Cloud) ---
-font_path = '/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf'
-if not os.path.exists(font_path):
-    system_fonts = matplotlib.font_manager.findSystemFonts(fontpaths=None, fontext='ttf')
-    jp_fonts = [f for f in system_fonts if 'ipagp' in f or 'notosanscjkjp' in f.lower() or 'hiragino' in f.lower()]
-    if jp_fonts:
-        font_path = jp_fonts[0]
-        st.info(f"日本語フォントとして {font_path} を使用します。")
-    else:
-        st.warning("日本語フォントが見つかりません。ワードクラウドが文字化けする可能性があります。")
-        font_path = None
-
-
 # --- UI設定 ---
 st.subheader("分析パラメータ設定")
 
 with st.container(border=True):
     st.markdown("##### 企業比較分析の設定")
-
     applicant_list = ["(指定なし)"]
     if col_map['applicant'] and col_map['applicant'] in df_main.columns:
         try:
@@ -305,36 +359,29 @@ with st.container(border=True):
             st.warning(f"出願人リストの生成に失敗: {e}")
 
     col1, col2, col3 = st.columns(3)
-    with col1:
-        my_company = st.selectbox("自社名 (MY_COMPANY):", applicant_list, key="exp_my_company")
-    with col2:
-        company_a = st.selectbox("競合A (COMPANY_A):", applicant_list, key="exp_comp_a")
-    with col3:
-        company_b = st.selectbox("競合B (COMPANY_B):", applicant_list, key="exp_comp_b")
+    with col1: my_company = st.selectbox("自社名 (MY_COMPANY):", applicant_list, key="exp_my_company")
+    with col2: company_a = st.selectbox("競合A (COMPANY_A):", applicant_list, key="exp_comp_a")
+    with col3: company_b = st.selectbox("競合B (COMPANY_B):", applicant_list, key="exp_comp_b")
 
     st.markdown("##### 時系列分析の設定")
     col1, col2, col3 = st.columns(3)
-    with col1:
-        enable_time_series = st.checkbox("時系列分析を有効にする", value=True, key="exp_enable_time")
+    with col1: enable_time_series = st.checkbox("時系列分析を有効にする", value=True, key="exp_enable_time")
     with col2:
         date_column = col_map.get('date', None)
         st.text_input("日付カラム (自動選択):", value=date_column, disabled=True)
-    with col3:
-        time_slice_years = st.number_input("何年ごとに区切るか:", min_value=1, value=5, key="exp_time_slice")
+    with col3: time_slice_years = st.number_input("何年ごとに区切るか:", min_value=1, value=5, key="exp_time_slice")
 
     st.markdown("##### 出力設定")
     top_n_keywords = st.number_input("各キーワードリストで上位何件まで表示するか:", min_value=5, value=20, key="exp_top_n")
 
-
 # --- 分析実行 ---
 st.markdown("---")
 if st.button("Explorer キーワード分析を実行", type="primary", key="exp_run_analysis"):
-
     if not (col_map['title'] and col_map['abstract'] and col_map['applicant']):
-        st.error("エラー: Mission Controlで「発明の名称」「要約」「出願人」のカラムを正しく紐付けてください。")
+        st.error("エラー: 必須カラム（名称・要約・出願人）が設定されていません。")
         st.stop()
     if enable_time_series and not date_column:
-        st.error("エラー: 時系列分析を有効にする場合、Mission Controlで「出願日」カラムを紐付けてください。")
+        st.error("エラー: 時系列分析には出願日カラムが必要です。")
         st.stop()
 
     try:
@@ -342,87 +389,57 @@ if st.button("Explorer キーワード分析を実行", type="primary", key="exp
         df_main['権利者'] = df_main[col_map['applicant']].astype(str).str.split(delimiters['applicant'])
         df_exploded = df_main.explode('権利者')
         df_exploded['権利者'] = df_exploded['権利者'].str.strip()
+        st.success("データ前処理完了")
 
-        st.success("データの前処理が完了しました。")
-
-        # --- 分析1: 全体のワードクラウド ---
+        # --- 分析1: 全体 ---
         with st.container(border=True):
             st.header("データセット全体の技術キーワード")
-            with st.spinner("データセット全体のキーワードを抽出中..."):
+            with st.spinner("抽出中..."):
                 all_words = []
-                for text in df_main['text']:
-                    all_words.extend(extract_compound_nouns(text))
+                for text in df_main['text']: all_words.extend(extract_compound_nouns(text))
                 generate_wordcloud_and_list(all_words, "データセット全体の技術キーワード", top_n_keywords, font_path)
 
-        # --- 分析2: 企業比較分析 ---
+        # --- 分析2: 企業比較 ---
         target_companies = [c for c in [my_company, company_a, company_b] if c != "(指定なし)"]
-
         if target_companies:
             with st.container(border=True):
                 st.header(f"企業比較: {', '.join(target_companies)}")
                 company_words = {}
-
                 with st.spinner("各企業のキーワードを抽出中..."):
                     for company in target_companies:
                         company_df = df_exploded[df_exploded['権利者'] == company]
                         if company_df.empty:
-                            st.warning(f"警告: 企業 '{company}' のデータが見つかりませんでした。スキップします。")
+                            st.warning(f"警告: 企業 '{company}' のデータなし")
                             company_words[company] = []
                             continue
                         words = []
-                        for text in company_df['text']:
-                            words.extend(extract_compound_nouns(text))
+                        for text in company_df['text']: words.extend(extract_compound_nouns(text))
                         company_words[company] = words
 
                 for company, words in company_words.items():
                     generate_wordcloud_and_list(words, f"'{company}'の技術キーワード", top_n_keywords, font_path)
 
+                # 特徴語抽出
                 my_counter = Counter(company_words.get(my_company, []))
                 a_counter = Counter(company_words.get(company_a, []))
                 b_counter = Counter(company_words.get(company_b, []))
 
-                if my_company != "(指定なし)" and company_a != "(指定なし)":
-                    common_vs_a = list((my_counter & a_counter).elements())
-                    generate_wordcloud_and_list(common_vs_a, f"'{my_company}' と '{company_a}' の共通キーワード", top_n_keywords, font_path)
-
-                if my_company != "(指定なし)" and company_b != "(指定なし)":
-                    common_vs_b = list((my_counter & b_counter).elements())
-                    generate_wordcloud_and_list(common_vs_b, f"'{my_company}' と '{company_b}' の共通キーワード", top_n_keywords, font_path)
-
                 st.markdown("---")
                 st.subheader("特徴/独自キーワード")
+                if my_company != "(指定なし)":
+                    my_char = get_characteristic_words(my_counter, a_counter, b_counter)
+                    generate_wordcloud_and_list(my_char, f"'{my_company}' の特徴的キーワード", top_n_keywords, font_path)
+                if company_a != "(指定なし)":
+                    a_char = get_characteristic_words(a_counter, my_counter, b_counter)
+                    generate_wordcloud_and_list(a_char, f"'{company_a}' の特徴的キーワード", top_n_keywords, font_path)
 
-                my_char_words = get_characteristic_words(my_counter, a_counter, b_counter)
-                generate_wordcloud_and_list(my_char_words, f"'{my_company}' の特徴的キーワード", top_n_keywords, font_path)
-
-                a_char_words = get_characteristic_words(a_counter, my_counter, b_counter)
-                generate_wordcloud_and_list(a_char_words, f"'{company_a}' の特徴的キーワード", top_n_keywords, font_path)
-
-                b_char_words = get_characteristic_words(b_counter, my_counter, a_counter)
-                generate_wordcloud_and_list(b_char_words, f"'{company_b}' の特徴的キーワード", top_n_keywords, font_path)
-
-                my_set = set(word for word, freq in my_counter.most_common(500))
-                a_set = set(word for word, freq in a_counter.most_common(500))
-                b_set = set(word for word, freq in b_counter.most_common(500))
-
-                my_unique = {k: my_counter[k] for k in my_set - a_set - b_set}
-                generate_wordcloud_and_list(list(Counter(my_unique).elements()), f"'{my_company}' の独自キーワード", top_n_keywords, font_path)
-
-                a_unique = {k: a_counter[k] for k in a_set - my_set - b_set}
-                generate_wordcloud_and_list(list(Counter(a_unique).elements()), f"'{company_a}' の独自キーワード", top_n_keywords, font_path)
-
-                b_unique = {k: b_counter[k] for k in b_set - my_set - a_set}
-                generate_wordcloud_and_list(list(Counter(b_unique).elements()), f"'{company_b}' の独自キーワード", top_n_keywords, font_path)
-
-        # --- 分析3: 時系列分析 ---
+        # --- 分析3: 時系列 ---
         if enable_time_series:
             with st.container(border=True):
                 st.header(f"技術キーワードの時系列分析 ({time_slice_years}年ごと)")
                 try:
                     df_time = df_main.copy()
-                    # 'year' カラムは app.py で 'parsed_date' から既に作成済み
                     df_time.dropna(subset=['year'], inplace=True)
-
                     min_year = int(df_time['year'].min())
                     max_year = int(df_time['year'].max())
 
@@ -430,31 +447,15 @@ if st.button("Explorer キーワード分析を実行", type="primary", key="exp
                         for start_year in range(min_year, max_year + 1, time_slice_years):
                             end_year = start_year + time_slice_years - 1
                             period_df = df_time[(df_time['year'] >= start_year) & (df_time['year'] <= end_year)]
-
                             if period_df.empty: continue
-
                             period_words = []
-                            for text in period_df['text']:
-                                period_words.extend(extract_compound_nouns(text))
-
-                            title = f"技術キーワードの変遷 ({start_year} - {end_year})"
-                            generate_wordcloud_and_list(period_words, title, top_n_keywords, font_path)
-
+                            for text in period_df['text']: period_words.extend(extract_compound_nouns(text))
+                            generate_wordcloud_and_list(period_words, f"技術キーワードの変遷 ({start_year} - {end_year})", top_n_keywords, font_path)
                 except Exception as e:
-                    st.error(f"時系列分析中にエラーが発生しました: {e}")
-                    st.warning(f"ヒント: '{date_column}'列の日付形式が認識できない可能性があります。'YYYY-MM-DD'形式などを確認してください。")
+                    st.error(f"時系列分析エラー: {e}")
 
-        st.success("全ての分析が完了しました。")
+        st.success("完了")
 
     except Exception as e:
         st.error(f"処理中にエラーが発生しました: {e}")
-        import traceback
         st.exception(traceback.format_exc())
-
-# --- 共通サイドバーフッター ---
-st.sidebar.markdown("---") 
-st.sidebar.caption("ナビゲーション:")
-st.sidebar.caption("1. Mission Control でデータをアップロードし、前処理を実行します。")
-st.sidebar.caption("2. 左のリストから分析モジュールを選択します。")
-st.sidebar.markdown("---")
-st.sidebar.caption("© 2025 しばやま")

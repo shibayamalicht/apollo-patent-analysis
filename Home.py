@@ -1,14 +1,11 @@
-# ==================================================================
-# --- 1. ライブラリのインポート ---
-# ==================================================================
 import streamlit as st
 import pandas as pd
 import numpy as np
-import io
 import datetime
 import warnings
 import unicodedata
 import re
+import traceback
 
 from sentence_transformers import SentenceTransformer
 from janome.tokenizer import Tokenizer
@@ -18,25 +15,24 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 warnings.filterwarnings('ignore')
 
 # ==================================================================
-# --- 2. ヘルパー関数 ---
+# --- 1. ヘルパー関数 & リソースロード ---
 # ==================================================================
 
-# SBERTモデルのロードをキャッシュする
 @st.cache_resource
 def load_sbert_model():
-    print("... SBERTモデルをロード中 ...")
+    """SBERTモデルをロードおよびキャッシュ"""
     return SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
 
-# JanomeのTokenizerをキャッシュする
 @st.cache_resource
 def load_tokenizer():
-    print("... Janome Tokenizerをロード中 ...")
+    """Janome Tokenizerをロードおよびキャッシュ"""
     return Tokenizer()
 
+# Tokenizerインスタンス
 t = load_tokenizer()
 
-# stop_words
-stop_words = {
+# 分析用ストップワード定義
+STOP_WORDS = {
     "する","ある","なる","ため","こと","よう","もの","これ","それ","あれ","ここ","そこ","どれ","どの","この","その","当該","該","および","及び","または","また","例えば","例えばは","において","により","に対して","に関して","について","として","としては","場合","一方","他方","さらに","そして","ただし","なお","等","など","等々","いわゆる","所謂","同様","同時","前記","本","同","各","各種","所定","所望","一例","他","一部","一つ","複数","少なくとも","少なくとも一つ","上記","下記","前述","後述","既述","関する","基づく","用いる","使用","利用","有する","含む","備える","設ける","すなわち","従って","しかしながら","次に","特に","具体的に","詳細に","いずれ","うち","それぞれ","とき","かかる","かような","かかる場合","本件","本願","本出願","本明細書",
     "本発明","発明","実施例","実施形態","変形例","請求","請求項","図","図面","符号","符号の説明","図面の簡単な説明","発明の詳細な説明","技術分野","背景技術","従来技術","発明が解決しようとする課題","課題","解決手段","効果","要約","発明の効果","目的","手段","構成","構造","工程","処理","方法","手法","方式","システム","プログラム","記憶媒体","特徴","特徴とする","特徴部","ステップ","フロー","シーケンス","定義","関係","対応","整合", "実施の形態","実施の態様","態様","変形","修正例","図示","図示例","図示しない","参照","参照符号","段落","詳細説明","要旨","一実施形態","他の実施形態","一実施例","別の側面","付記","適用例","用語の定義","開示","本開示","開示内容",
     "上部","下部","内部","外部","内側","外側","表面","裏面","側面","上面","下面","端面","先端","基端","後端","一端","他端","中心","中央","周縁","周辺","近傍","方向","位置","空間","領域","範囲","間隔","距離","形状","形態","状態","種類","層","膜","部","部材","部位","部品","機構","装置","容器","組成","材料","用途","適用","適用例","片側","両側","左側","右側","前方","後方","上流","下流","隣接","近接","離間","間置","介在","重畳","概ね","略","略中央","固定側","可動側","伸長","収縮","係合","嵌合","取付","連結部","支持体","支持部","ガイド部",
@@ -52,6 +48,7 @@ stop_words = {
 }
 
 def extract_ipc(text, delimiter=';'):
+    """IPCコードを正規化してリストとして抽出"""
     if not isinstance(text, str): return [] 
     text = unicodedata.normalize('NFKC', text).lower()
     text = re.sub(r'[\(（][^)]*[\)）]', ' ', text)
@@ -71,37 +68,74 @@ def extract_ipc(text, delimiter=';'):
     return ipc_codes 
 
 def advanced_tokenize(text):
+    """Janomeを用いた高度なトークナイズ（複合名詞抽出・ストップワード除去）"""
     if not isinstance(text, str): return ""
     text = unicodedata.normalize('NFKC', text).lower()
     text = re.sub(r'[\(（][\w\s]+[\)）]', ' ', text)
     text = re.sub(r'\b(図|fig|step|s)\s?\d+\b', ' ', text)
     text = re.sub(r'[!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~]', ' ', text)
+    
     tokens = list(t.tokenize(text))
     processed_tokens = []
     i = 0
     while i < len(tokens):
         token1 = tokens[i]
-        if token1.base_form in stop_words or len(token1.base_form) < 2:
+        if token1.base_form in STOP_WORDS or len(token1.base_form) < 2:
             i += 1
             continue
+        
+        # 複合名詞の結合ロジック
         if (i + 1) < len(tokens):
             token2 = tokens[i+1]
             pos1 = token1.part_of_speech.split(',')[0]
             pos2 = token2.part_of_speech.split(',')[0]
-            if pos1 == '名詞' and pos2 == '名詞' and token2.base_form not in stop_words:
+            if pos1 == '名詞' and pos2 == '名詞' and token2.base_form not in STOP_WORDS:
                 compound_word = token1.base_form + token2.base_form
                 processed_tokens.append(compound_word)
                 i += 2
                 continue
+        
         pos = token1.part_of_speech.split(',')[0]
         if pos in ['名詞']:
             processed_tokens.append(token1.base_form)
         i += 1
     return " ".join(processed_tokens)
 
+def robust_parse_date(series):
+    """
+    多様なフォーマットの日付文字列をパースする強力な関数
+    - 標準形式 (YYYY-MM-DD)
+    - 区切りなし (YYYYMMDD)
+    - 年のみ (YYYY)
+    - Excelシリアル値
+    """
+    # 1. 標準的な変換
+    parsed = pd.to_datetime(series, errors='coerce')
+    if parsed.notna().mean() > 0.5: return parsed
+    
+    # 2. 区切り文字なし (YYYYMMDD)
+    parsed = pd.to_datetime(series, format='%Y%m%d', errors='coerce')
+    if parsed.notna().mean() > 0.5: return parsed
+    
+    # 3. 年のみ (YYYY)
+    parsed = pd.to_datetime(series, format='%Y', errors='coerce')
+    if parsed.notna().mean() > 0.5: return parsed
+    
+    # 4. Excelシリアル値
+    try:
+        numeric_series = pd.to_numeric(series, errors='coerce')
+        if numeric_series.notna().sum() > 0 and numeric_series.mean() > 30000:
+            parsed = pd.to_datetime(numeric_series, unit='D', origin='1899-12-30', errors='coerce')
+            return parsed
+    except:
+        pass
+        
+    return parsed
+
 # ==================================================================
-# --- 3. Streamlit セッション状態の初期化 ---
+# --- 3. アプリケーション初期化 ---
 # ==================================================================
+
 def initialize_session_state():
     defaults = {
         "df_main": None,
@@ -110,6 +144,11 @@ def initialize_session_state():
         "tfidf_matrix": None,
         "feature_names": None,
         "col_map": {},
+        "delimiters": {
+            'applicant': ';',
+            'ipc': ';',
+            'fterm': ';'
+        },
         "preprocess_done": False
     }
     for key, value in defaults.items():
@@ -119,10 +158,9 @@ def initialize_session_state():
 initialize_session_state()
 
 # ==================================================================
-# --- 4. Streamlit UI ---
+# --- 4. Streamlit UI構成 ---
 # ==================================================================
 
-# ページ設定
 st.set_page_config(
     page_title="APOLLO | Mission Control", 
     page_icon="🛰️", 
@@ -130,18 +168,25 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# カスタムCSS
+# カスタムCSS定義
 st.markdown("""
 <style>
-    /* Clean, professional font */
-    html, body, [class*="st-"] { 
+    /* フォント設定 */
+    html, body { 
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
     }
     
-    /* Main Page Title (Mission Control) */
+    /* サイドバーのロゴタイトル (APOLLO) を太字にする */
+    [data-testid="stSidebar"] h1 {
+        color: #003366;
+        font-weight: 900 !important; /* Extra Bold */
+        font-size: 2.5rem !important;
+    }
+
+    /* Main Page Title */
     h1 { 
-        color: #003366; /* Deeper, "corporate" blue */
-        font-weight: 600; 
+        color: #003366;
+        font-weight: 700; 
     }
     h2, h3 { 
         color: #333333; 
@@ -150,56 +195,15 @@ st.markdown("""
         padding-bottom: 5px; 
     }
     
-    /* Sidebar styling */
-    [data-testid="stSidebar"] > div:first-child { 
-        background-color: #f8f9fa; /* Light gray background */
-        border-right: 1px solid #e0e0e0; /* Add a subtle border */
-        
-        display: flex;
-        flex-direction: column;
-        padding-top: 1rem;
-    }
-    
-    /* ページリスト(Nav)を2番目に配置 */
+    /* 標準のナビゲーションを非表示にする */
     [data-testid="stSidebarNav"] {
-        order: 2;
-        padding-top: 1rem;
-        padding-bottom: 1rem;
+        display: none !important;
     }
     
-    /* ロゴとフッターを含むカスタムコンテナを1番目と3番目に配置 */
-    [data-testid="stSidebarNav"] + div {
-        order: 1; 
-        display: flex;
-        flex-direction: column;
-        flex-grow: 1; /* コンテナの高さを最大化 */
-    }
-
-    /* ロゴブロック (1番目の子) */
-    [data-testid="stSidebarNav"] + div [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"]:nth-child(1) {
-        order: 1; /* ロゴブロック */
-    }
-    /* ロゴのH1タイトル */
-    [data-testid="stSidebarNav"] + div [data-testid="stVerticalBlock"] h1 {
-        color: #003366;
-        font-size: 2.25rem;
-        font-weight: 700;
-        padding-top: 0rem;
-    }
-    /* ロゴのSubtitle */
-    [data-testid="stSidebarNav"] + div [data-testid="stVerticalBlock"] p {
-        color: #555;
-        font-size: 0.85rem;
-    }
-    /* ロゴとページリストの間の区切り線 */
-    [data-testid="stSidebarNav"] + div [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"]:nth-child(2) {
-        order: 2; /* 区切り線を2番目（ロゴの後）に */
-    }
-
-    /* フッターブロック (3番目の要素)を一番下に固定 */
-    [data-testid="stSidebarNav"] + div [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"]:nth-child(3) {
-        order: 3; /* フッターブロック */
-        margin-top: auto; /* ★上部のマージンを自動で最大化し、一番下に押しやる */
+    /* サイドバーの上部余白を調整 */
+    [data-testid="stSidebar"] .block-container {
+        padding-top: 2rem;
+        padding-bottom: 1rem;
     }
     
     /* Main content area */
@@ -208,12 +212,10 @@ st.markdown("""
         padding-bottom: 2rem; 
     }
     
-    /* Use default Streamlit buttons - they are clean */
+    /* ボタンとタブのスタイル */
     .stButton>button {
         font-weight: 600;
     }
-    
-    /* Tab styles for a cleaner look */
     .stTabs [data-baseweb="tab-list"] {
         gap: 8px;
     }
@@ -226,42 +228,40 @@ st.markdown("""
         background-color: #ffffff;
         border-bottom: 2px solid #003366;
     }
-    
-    /* ページリンク横の矢印(->)を非表示にする */
-    [data-testid="stSidebarNavItems"] li a > svg {
-        display: none;
-    }
-    
-    /* ページリスト全体のヘッダーと折りたたみボタンを非表示にする */
-    div[class*="st-emotion-cache-"][data-testid="stSidebarNav"] > div:first-child {
-        display: none;
-    }
-    
 </style>
 """, unsafe_allow_html=True)
 
 
-# --- サイドバー (ロゴ) ---
-st.sidebar.title("APOLLO") 
-st.sidebar.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
-st.sidebar.markdown("---")
+# --- サイドバー ---
+with st.sidebar:
+    st.title("APOLLO") 
+    st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
+    st.markdown("---")
+    
+    st.subheader("Home")
+    st.page_link("Home.py", label="Mission Control", icon="🛰️")
+    
+    st.subheader("Modules")
+    st.page_link("pages/1_🌍_ATLAS.py", label="ATLAS", icon="🌍")
+    st.page_link("pages/2_💡_CORE.py", label="CORE", icon="💡")
+    st.page_link("pages/3_🚀_Saturn_V.py", label="Saturn V", icon="🚀")
+    st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
+    st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
+    
+    st.markdown("---")
+    
+    st.caption("ナビゲーション:")
+    st.caption("1. Mission Control でデータをアップロードし、前処理を実行します。")
+    st.caption("2. 上のリストから分析モジュールを選択します。")
+    
+    st.markdown("---")
+    st.caption("© 2025 しばやま")
 
-# --- (ここにStreamlitが自動的にページリストを挿入します) ---
 
-# --- サイドバー (フッター) ---
-st.sidebar.markdown("---") 
-st.sidebar.caption("ナビゲーション:")
-st.sidebar.caption("1. (本ページ) Mission Control でデータをアップロードし、前処理を実行します。")
-st.sidebar.caption("2. 左のリストから分析モジュールを選択します。")
-st.sidebar.markdown("---")
-st.sidebar.caption("© 2025 しばやま")
-
-
-# --- メインページ (0_🛰️_Mission_Control.py) ---
+# --- メインコンテンツ ---
 st.title("🛰️ Mission Control") 
 st.markdown("ここは、全分析モジュールで共通のデータ準備を行う「ミッション・コントロール（データハブ）」です。")
 
-# --- 分析設定 ---
 st.markdown("---")
 st.subheader("分析設定")
 
@@ -274,7 +274,7 @@ with container:
         "フェーズ 3: 分析エンジン起動"
     ])
 
-    # A-1. ファイルアップロード
+    # --- A-1. ファイルアップロード ---
     with tab1:
         st.markdown("##### 分析対象の特許リストをインポートしてください。")
         uploaded_file = st.file_uploader(
@@ -301,33 +301,44 @@ with container:
                 st.error(f"ファイルインポートエラー: {e}")
                 st.session_state.df_main = None
                 
-    # A-2. カラム紐付け
+    # --- A-2. カラム紐付け ---
     with tab2:
         if st.session_state.df_main is not None:
             df = st.session_state.df_main
             columns_with_none = [None] + list(df.columns)
             
+            # 保存された値をデフォルト値として使用
+            current_col_map = st.session_state.col_map
+            current_delimiters = st.session_state.delimiters
+            
+            def get_index(key, options):
+                val = current_col_map.get(key)
+                if val in options:
+                    return options.index(val)
+                return 0
+
             col_map = {}
             
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.markdown("##### 必須テキスト項目")
-                col_map['title'] = st.selectbox("発明の名称:", columns_with_none, key="col_title")
-                col_map['abstract'] = st.selectbox("要約:", columns_with_none, key="col_abstract")
-                col_map['claim'] = st.selectbox("請求項:", columns_with_none, key="col_claim")
+                col_map['title'] = st.selectbox("発明の名称:", columns_with_none, index=get_index('title', columns_with_none), key="col_title")
+                col_map['abstract'] = st.selectbox("要約:", columns_with_none, index=get_index('abstract', columns_with_none), key="col_abstract")
+                col_map['claim'] = st.selectbox("請求項:", columns_with_none, index=get_index('claim', columns_with_none), key="col_claim")
             with col2:
                 st.markdown("##### 必須メタデータ項目")
-                col_map['app_num'] = st.selectbox("出願番号:", columns_with_none, key="col_app_num")
-                col_map['date'] = st.selectbox("出願日:", columns_with_none, key="col_date")
-                col_map['applicant'] = st.selectbox("出願人:", columns_with_none, key="col_applicant")
-                applicant_delimiter = st.text_input("出願人区切り文字:", value=';', key="del_applicant")
+                col_map['app_num'] = st.selectbox("出願番号:", columns_with_none, index=get_index('app_num', columns_with_none), key="col_app_num")
+                col_map['date'] = st.selectbox("出願日:", columns_with_none, index=get_index('date', columns_with_none), key="col_date")
+                col_map['applicant'] = st.selectbox("出願人:", columns_with_none, index=get_index('applicant', columns_with_none), key="col_applicant")
+                applicant_delimiter = st.text_input("出願人区切り文字:", value=current_delimiters.get('applicant', ';'), key="del_applicant")
             with col3:
                 st.markdown("##### 分析軸項目")
-                col_map['ipc'] = st.selectbox("IPC:", columns_with_none, key="col_ipc")
-                ipc_delimiter = st.text_input("IPC区切り文字:", value=';', key="del_ipc")
-                col_map['fterm'] = st.selectbox("Fターム:", columns_with_none, key="col_fterm")
-                fterm_delimiter = st.text_input("FターM区切り文字:", value=';', key="del_fterm") 
+                col_map['ipc'] = st.selectbox("IPC:", columns_with_none, index=get_index('ipc', columns_with_none), key="col_ipc")
+                ipc_delimiter = st.text_input("IPC区切り文字:", value=current_delimiters.get('ipc', ';'), key="del_ipc")
+                col_map['fterm'] = st.selectbox("Fターム (任意):", columns_with_none, index=get_index('fterm', columns_with_none), key="col_fterm")
+                fterm_delimiter = st.text_input("Fターム区切り文字:", value=current_delimiters.get('fterm', ';'), key="del_fterm") 
                 
+            # マッピング情報を保存
             st.session_state.col_map = col_map
             st.session_state.delimiters = {
                 'applicant': applicant_delimiter,
@@ -337,7 +348,7 @@ with container:
         else:
             st.info("フェーズ1でファイルをインポートすると、カラム紐付け設定が表示されます。")
 
-    # A-3. 前処理実行
+    # --- A-3. 前処理実行 ---
     with tab3:
         st.markdown("##### 全モジュール共通の分析エンジンを起動します。")
         st.write("データ量に応じて数分かかる場合があります。")
@@ -345,8 +356,9 @@ with container:
         if st.button("分析エンジン起動 (SBERT/TF-IDF)", type="primary", key="run_preprocess"):
             if st.session_state.df_main is None:
                 st.error("フェーズ1でファイルをアップロードしてください。")
-            elif any(v is None for k, v in st.session_state.col_map.items() if k in ['title', 'abstract', 'claim', 'app_num', 'date', 'applicant', 'ipc', 'fterm']):
-                missing = [k for k, v in st.session_state.col_map.items() if v is None and k in ['title', 'abstract', 'claim', 'app_num', 'date', 'applicant', 'ipc', 'fterm']]
+            # 必須カラムチェック (Fタームは除外)
+            elif any(v is None for k, v in st.session_state.col_map.items() if k in ['title', 'abstract', 'claim', 'app_num', 'date', 'applicant', 'ipc']):
+                missing = [k for k, v in st.session_state.col_map.items() if v is None and k in ['title', 'abstract', 'claim', 'app_num', 'date', 'applicant', 'ipc']]
                 st.error(f"エラー: フェーズ2の必須カラムが選択されていません: {missing}")
             else:
                 try:
@@ -392,7 +404,24 @@ with container:
 
                         status_area.write("6/7: 日付と分析軸（IPC/Fターム/出願人）を正規化中...")
                         
-                        df['parsed_date'] = pd.to_datetime(df[col_map['date']], errors='coerce')
+                        # 日付解析
+                        raw_dates = df[col_map['date']].astype(str)
+                        df['parsed_date'] = robust_parse_date(raw_dates)
+                        
+                        # 診断情報表示
+                        valid_date_count = df['parsed_date'].notna().sum()
+                        if valid_date_count == 0:
+                            st.error(f"⚠️ エラー: '{col_map['date']}' カラムから日付を1件も変換できませんでした。")
+                            st.warning("元データの形式: " + str(raw_dates.iloc[0] if len(df)>0 else 'N/A'))
+                        else:
+                            st.success(f"日付解析成功: {valid_date_count}/{len(df)}件")
+                            with st.expander("日付データの変換サンプルを確認"):
+                                debug_df = pd.DataFrame({
+                                    '元データ': raw_dates.head(5),
+                                    '変換後': df['parsed_date'].head(5)
+                                })
+                                st.dataframe(debug_df)
+
                         df['year'] = df['parsed_date'].dt.year
                         df['app_num_main'] = df[col_map['app_num']].astype(str).str.strip()
 
@@ -402,9 +431,13 @@ with container:
                         ipc_raw_list = df[col_map['ipc']].fillna('').astype(str).str.split(ipc_delimiter)
                         df['ipc_main_group'] = ipc_raw_list.apply(lambda terms: list(set([t.strip().split('/')[0].strip().upper() for t in terms if t.strip()])))
 
-                        fterm_delimiter = delimiters['fterm']
-                        fterm_raw_list = df[col_map['fterm']].fillna('').astype(str).str.split(fterm_delimiter)
-                        df['fterm_main'] = fterm_raw_list.apply(lambda terms: list(set([t.strip()[:5].upper() for t in terms if t.strip() and len(t) >= 5])))
+                        # Fターム (任意)
+                        if col_map['fterm']:
+                            fterm_delimiter = delimiters['fterm']
+                            fterm_raw_list = df[col_map['fterm']].fillna('').astype(str).str.split(fterm_delimiter)
+                            df['fterm_main'] = fterm_raw_list.apply(lambda terms: list(set([t.strip()[:5].upper() for t in terms if t.strip() and len(t) >= 5])))
+                        else:
+                            df['fterm_main'] = [[] for _ in range(len(df))]
 
                         applicant_delimiter = delimiters['applicant']
                         applicant_raw_list = df[col_map['applicant']].fillna('').astype(str).str.split(applicant_delimiter)
@@ -423,5 +456,4 @@ with container:
 
                 except Exception as e:
                     st.error(f"前処理中にエラーが発生しました: {e}")
-                    import traceback
                     st.exception(traceback.format_exc())
