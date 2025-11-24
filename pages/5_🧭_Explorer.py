@@ -1,3 +1,6 @@
+# ==================================================================
+# --- 1. ライブラリのインポート ---
+# ==================================================================
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -21,7 +24,17 @@ import japanize_matplotlib
 warnings.filterwarnings('ignore')
 
 # ==================================================================
-# --- 1. デザインテーマ管理 ---
+# --- 2. ページ設定 (最優先で実行) ---
+# ==================================================================
+# ★修正: ここに移動しました。他の処理より先に記述する必要があります。
+st.set_page_config(
+    page_title="APOLLO | Explorer",
+    page_icon="🧭",
+    layout="wide"
+)
+
+# ==================================================================
+# --- 3. デザインテーマ管理 ---
 # ==================================================================
 
 def get_theme_config(theme_name):
@@ -56,7 +69,7 @@ def get_theme_config(theme_name):
     return themes.get(theme_name, themes["APOLLO Standard"])
 
 # ==================================================================
-# --- 2. テキスト処理ヘルパー関数 ---
+# --- 4. テキスト処理ヘルパー関数 ---
 # ==================================================================
 
 @st.cache_resource
@@ -275,16 +288,10 @@ def get_characteristic_words(target_counter, other_counter1, other_counter2):
     return list(Counter(char_words).elements())
 
 # ==================================================================
-# --- 3. Streamlit UI構成 ---
+# --- 5. Streamlit UI構成 ---
 # ==================================================================
 
-st.set_page_config(
-    page_title="APOLLO | Explorer",
-    page_icon="🧭",
-    layout="wide"
-)
-
-# CSS注入
+# --- CSS注入 ---
 st.markdown("""
 <style>
     html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
@@ -329,7 +336,7 @@ theme_config = get_theme_config(selected_theme)
 st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
 
 # ==================================================================
-# --- 4. セッション状態の確認 ---
+# --- 6. データロード & 初期化 ---
 # ==================================================================
 if not st.session_state.get("preprocess_done", False):
     st.error("分析データがありません。")
@@ -341,7 +348,7 @@ else:
     delimiters = st.session_state.delimiters
 
 # ==================================================================
-# --- 5. Explorer アプリケーション ---
+# --- 7. Explorer アプリケーション ---
 # ==================================================================
 
 # --- UI設定 ---
@@ -432,6 +439,9 @@ if st.button("Explorer キーワード分析を実行", type="primary", key="exp
                 if company_a != "(指定なし)":
                     a_char = get_characteristic_words(a_counter, my_counter, b_counter)
                     generate_wordcloud_and_list(a_char, f"'{company_a}' の特徴的キーワード", top_n_keywords, font_path)
+                if company_b != "(指定なし)":
+                    b_char = get_characteristic_words(b_counter, my_counter, a_counter)
+                    generate_wordcloud_and_list(b_char, f"'{company_b}' の特徴的キーワード", top_n_keywords, font_path)
 
         # --- 分析3: 時系列 ---
         if enable_time_series:
