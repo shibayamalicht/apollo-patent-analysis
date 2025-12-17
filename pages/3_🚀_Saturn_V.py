@@ -20,21 +20,115 @@ import hdbscan
 from wordcloud import WordCloud
 from janome.tokenizer import Tokenizer
 import networkx as nx
+from scipy.spatial import ConvexHull
 
-# 描画設定
+# 描画用
 import matplotlib.pyplot as plt
-import matplotlib.font_manager
+import matplotlib.font_manager as fm
 import japanize_matplotlib
 
 # 警告を非表示
 warnings.filterwarnings('ignore')
 
 # ==================================================================
-# --- 1. デザインテーマ管理 ---
+# --- 1. ページ設定 ---
+# ==================================================================
+st.set_page_config(
+    page_title="APOLLO | Saturn V", 
+    page_icon="🚀", 
+    layout="wide"
+)
+
+# ==================================================================
+# --- 2. フォント設定 ---
+# ==================================================================
+def get_japanese_font_path():
+    system = platform.system()
+    font_paths = []
+    
+    if system == "Darwin": # Mac
+        font_paths = [
+            "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+            "/System/Library/Fonts/Hiragino Sans W3.ttc",
+            "/System/Library/Fonts/Hiragino Kaku Gothic ProN.ttc",
+            "/Library/Fonts/AppleGothic.ttf",
+            "/System/Library/Fonts/AppleSDGothicNeo.ttc" 
+        ]
+    elif system == "Windows": # Windows
+        font_paths = [
+            "C:/Windows/Fonts/meiryo.ttc",
+            "C:/Windows/Fonts/msgothic.ttc",
+            "C:/Windows/Fonts/yugothr.ttc",
+            "C:/Windows/Fonts/YuGothR.ttc"
+        ]
+    else: # Linux
+        font_paths = [
+            "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",
+            "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+            "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/noto/NotoSansCJKjp-Regular.otf"
+        ]
+        
+    for path in font_paths:
+        if os.path.exists(path): return path
+    return None
+
+FONT_PATH = get_japanese_font_path()
+if FONT_PATH:
+    try:
+        prop = fm.FontProperties(fname=FONT_PATH)
+        plt.rcParams['font.family'] = prop.get_name()
+    except:
+        pass
+
+# ==================================================================
+# --- 3. 共通デザイン設定 (CSS) ---
+# ==================================================================
+st.markdown("""
+<style>
+    html, body { 
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
+    }
+    [data-testid="stSidebar"] h1 {
+        color: #003366;
+        font-weight: 900 !important;
+        font-size: 2.5rem !important;
+    }
+    [data-testid="stSidebarNav"] {
+        display: none !important;
+    }
+    [data-testid="stSidebar"] .block-container {
+        padding-top: 2rem;
+        padding-bottom: 1rem;
+    }
+    .block-container { 
+        padding-top: 2rem; 
+        padding-bottom: 2rem; 
+    }
+    h3 { border-bottom: 2px solid #f0f0f0; padding-bottom: 5px; }
+    .stButton>button {
+        font-weight: 600;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #f0f2f6;
+        border-radius: 8px 8px 0 0;
+        padding: 10px 15px;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #ffffff;
+        border-bottom: 2px solid #003366;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# ==================================================================
+# --- 4. デザインテーマ管理 ---
 # ==================================================================
 
 def get_theme_config(theme_name):
-    """選択されたテーマに応じたCSSとPlotlyテンプレート設定を返す"""
     themes = {
         "APOLLO Standard": {
             "bg_color": "#ffffff",
@@ -44,12 +138,7 @@ def get_theme_config(theme_name):
             "color_sequence": px.colors.qualitative.G10,
             "density_scale": "Blues",
             "accent_color": "#003366",
-            "css": """
-                html, body { background-color: #ffffff; color: #333333; }
-                [data-testid="stSidebar"] { background-color: #f8f9fa; }
-                [data-testid="stHeader"] { background-color: #ffffff; }
-                h1, h2, h3 { color: #003366; }
-            """
+            "css": """[data-testid="stHeader"] { background-color: #ffffff; } h1, h2, h3 { color: #003366; }"""
         },
         "Modern Presentation": {
             "bg_color": "#fdfdfd",
@@ -59,33 +148,52 @@ def get_theme_config(theme_name):
             "color_sequence": ["#264653", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51", "#8ab17d"],
             "density_scale": "Teal",
             "accent_color": "#264653",
-            "css": """
-                html, body { background-color: #fdfdfd; color: #2c3e50; font-family: "Helvetica Neue", Arial, sans-serif; }
-                [data-testid="stSidebar"] { background-color: #eaeaea; }
-                [data-testid="stHeader"] { background-color: #fdfdfd; }
-                h1, h2, h3 { color: #264653; font-family: "Georgia", serif; }
-                .stButton>button { background-color: #264653; color: white; border-radius: 0px; }
-            """
+            "css": """[data-testid="stSidebar"] { background-color: #eaeaea; } [data-testid="stHeader"] { background-color: #fdfdfd; } h1, h2, h3 { color: #264653; font-family: "Georgia", serif; } .stButton>button { background-color: #264653; color: white; border-radius: 0px; }"""
         }
     }
     return themes.get(theme_name, themes["APOLLO Standard"])
 
-def update_fig_layout(fig, title, height=800, theme_config=None):
-    """Plotlyグラフの共通レイアウト設定"""
+def update_fig_layout(fig, title, height=1000, width=800, theme_config=None, show_axes=False):
     if theme_config is None:
         return fig
-    fig.update_layout(
+    
+    layout_params = dict(
         template=theme_config["plotly_template"],
-        title=title,
+        title=dict(text=title, font=dict(size=18, color=theme_config["text_color"])),
         paper_bgcolor=theme_config["bg_color"],
         plot_bgcolor=theme_config["bg_color"],
-        font_color=theme_config["text_color"],
-        height=height
+        font=dict(color=theme_config["text_color"], family="Helvetica Neue"),
+        height=height,
+        width=width,
+        margin=dict(l=20, r=20, t=60, b=20),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+            bgcolor="rgba(255,255,255,0.8)", bordercolor="#eee", borderwidth=1
+        )
     )
+
+    if not show_axes:
+        layout_params['xaxis'] = dict(visible=False, showgrid=False, zeroline=False, showticklabels=False)
+        layout_params['yaxis'] = dict(
+            visible=False, showgrid=False, zeroline=False, showticklabels=False,
+            scaleanchor="x", scaleratio=1
+        )
+    else:
+        if "width" in layout_params:
+            del layout_params["width"]
+
+        layout_params['xaxis'] = dict(
+            visible=True, showgrid=False, zeroline=False, showline=False, showticklabels=True
+        )
+        layout_params['yaxis'] = dict(
+            visible=True, showgrid=True, gridcolor='#eee', zeroline=False, showline=False, showticklabels=True
+        )
+
+    fig.update_layout(**layout_params)
     return fig
 
 # ==================================================================
-# --- 2. テキスト処理関数 ---
+# --- 5. テキスト処理関数 ---
 # ==================================================================
 
 @st.cache_resource
@@ -132,11 +240,7 @@ _stopwords_original_list = [
     "審査","審査官","拒絶","意見書","補正書","優先","優先日","分割出願","継続出願","国内移行","国際出願",
     "国際公開","PCT","登録","公開日","審査請求","拒絶理由","補正","訂正","無効審判","異議","取消","取下げ",
     "事件番号","代理人","弁理士","係属","経過",
-    "第","第一","第二","第三","第1","第２","第３","第１","第２","第３","１","２","３","４","５","６","７","８","９","０",
-    "一","二","三","四","五","六","七","八","九","零","数","複合","多数","少数","図1","図2","図3","図4","図5","図6","図7","図8","図9",
-    "表1","表2","表3","式1","式2","式3","０","１","２","３","４","５","６","７","８","９","%","％","wt%","vol%","質量%","重量%","容量%","mol","mol%","mol/L","M","mm","cm","m","nm","μm","μ","rpm",
-    "Pa","kPa","MPa","GPa","N","W","V","A","mA","Hz","kHz","MHz","GHz","℃","°C","K","mL","L","g","kg","mg","wt","vol",
-    "h","hr","hrs","min","s","sec","ppm","ppb","bar","Ω","ohm","J","kJ","Wh","kWh",
+    "第","第一","第二","第三","第1","第２","第３","第１","第２","第３","一","二","三","四","五","六","七","八","九","零","数","複合","多数","少数","図1","図2","図3","図4","図5","図6","図7","図8","図9","表1","表2","表3","式1","式2","式3","%","％","wt%","vol%","質量%","重量%","容量%","mol","mol%","mol/L","M","mm","cm","m","nm","μm","μ","rpm","Pa","kPa","MPa","GPa","N","W","V","A","mA","Hz","kHz","MHz","GHz","℃","°C","K","mL","L","g","kg","mg","wt","vol","h","hr","hrs","min","s","sec","ppm","ppb","bar","Ω","ohm","J","kJ","Wh","kWh",
     "株式会社","有限会社","合資会社","合名会社","合同会社","Inc","Inc.","Ltd","Ltd.","Co","Co.","Corp","Corp.","LLC",
     "GmbH","AG","BV","B.V.","S.A.","S.p.A.","（株）","㈱","（有）",
     "溶液","溶媒","触媒","反応","生成物","原料","成分","含有","含有量","配合","混合","混合物","濃度","温度","時間",
@@ -147,24 +251,22 @@ _stopwords_original_list = [
     "インターフェース","データベース","DB","ネットワーク","通信","要求","応答","リクエスト","レスポンス","パラメータ",
     "引数","属性","プロパティ","フラグ","ID","ファイル","データ構造","テーブル","レコード",
     "軸","シャフト","ギア","モータ","エンジン","アクチュエータ","センサ","バルブ","ポンプ","筐体","ハウジング","フレーム",
-    "シャーシ","駆動","伝達","支持","連結","解決", "準備", "提供", "発生", "以上", "十分"
+    "シャーシ","駆動","伝達","支持","連結","解決", "準備", "提供", "発生", "以上", "十分",
+    "できる", "いる", "明細書", "記載", "記述", "掲載", "言及", "内容", "詳細", "説明", "表記", "表現", "箇条書き", "以下の", "以上の", "全ての", "任意の", "特定の"
 ]
 
 @st.cache_data
 def expand_stopwords_to_full_width(words):
-    """半角文字を全角文字に変換したセットを追加する"""
     expanded = set(words)
-    hankaku_chars = string.ascii_letters + string.digits
-    zenkaku_chars = "ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ０１２３４５６７８９"
-    trans_table = str.maketrans(hankaku_chars, zenkaku_chars)
-    for word in words:
-        if any(c in hankaku_chars for c in word):
-            expanded.add(word.translate(trans_table))
+    hankaku = string.ascii_letters + string.digits
+    zenkaku = "ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ０１２３４５６７８９"
+    trans = str.maketrans(hankaku, zenkaku)
+    for w in words:
+        if any(c in hankaku for c in w): expanded.add(w.translate(trans))
     return sorted(list(expanded))
 
 stopwords = set(expand_stopwords_to_full_width(_stopwords_original_list))
 
-# n-gramフィルタ定義
 _ngram_rows = [
     ("参照符号付き要素", r"[一-龥ぁ-んァ-ンA-Za-z0-9／\-＋・]+?(?:部|層|面|体|板|孔|溝|片|部材|要素|機構|装置|手段|電極|端子|領域|基板|回路|材料|工程)\s*[（(]\s*[0-9０-９A-Za-z]+[A-Za-z]?\s*[）)]", "regex", 1),
     ("参照符号付き要素", r"(?:上記|前記)?[一-龥ぁ-んァ-ンA-Za-z0-9／\-＋・]+?(?:部|層|面|体|板|孔|溝|片|部材|要素|機構|装置|手段|電極|端子|領域|基板|回路|材料|工程)\s*[0-9０-９A-Za-z]+[A-Za-z]?", "regex", 1),
@@ -211,7 +313,7 @@ def apply_ngram_filters(text):
 @st.cache_data
 def extract_compound_nouns(text):
     text = normalize_text(text)
-    text = apply_ngram_filters(text)
+    text = apply_ngram_filters(text) 
     text = re.sub(r'【.*?】', '', text)
     text = re.sub(r'[!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~]', ' ', text)
 
@@ -242,30 +344,9 @@ def extract_compound_nouns(text):
         words.append(compound_word)
     return words
 
-def get_font_path_for_wordcloud():
-    system_name = platform.system()
-    candidates = []
-    if system_name == 'Linux':
-        candidates = ['/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf', '/usr/share/fonts/truetype/fonts-japanese-gothic.ttf']
-    elif system_name == 'Darwin': 
-        candidates = ['/System/Library/Fonts/Hiragino Sans W3.ttc', '/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc']
-    elif system_name == 'Windows':
-        candidates = ['C:\\Windows\\Fonts\\meiryo.ttc', 'C:\\Windows\\Fonts\\msgothic.ttc']
-    
-    for path in candidates:
-        if os.path.exists(path): return path
-    return None
-
-font_path = get_font_path_for_wordcloud()
-
 def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
-    if not words:
-        st.subheader(title)
-        st.warning("キーワードが見つからなかったため、表示をスキップしました。")
-        return None
-
+    if not words: return None
     word_freq = Counter(words)
-
     try:
         wc = WordCloud(
             width=800, height=400, background_color='white',
@@ -278,22 +359,11 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
         ax.set_title(title, fontsize=20)
         ax.axis('off')
         st.pyplot(fig)
-        
-        st.markdown(f"**上位キーワード (Top {top_n})**")
-        list_data = { "キーワード": [], "出現頻度": [] }
-        for word, freq in word_freq.most_common(top_n):
-            list_data["キーワード"].append(word)
-            list_data["出現頻度"].append(freq)
-        st.dataframe(pd.DataFrame(list_data), height=200)
-        
     except Exception as e:
         st.error(f"ワードクラウドの描画に失敗しました: {e}")
-        if font_path is None:
-            st.warning("日本語フォントが見つかりませんでした。")
 
-@st.cache_data
-def get_top_tfidf_words(_row_vector, feature_names, top_n=5):
-    scores = _row_vector.toarray().flatten() 
+def get_top_tfidf_words(row_vector, feature_names, top_n=5):
+    scores = row_vector.toarray().flatten() 
     indices = np.argsort(scores)[::-1]
     non_zero_indices = [i for i in indices if scores[i] > 0]
     top_indices = non_zero_indices[:top_n]
@@ -322,7 +392,6 @@ def update_drill_hover_text(df_subset):
 def _create_label_editor_ui(original_map, current_map, key_prefix):
     widgets_dict = {}
     sorted_ids = sorted([cid for cid in original_map.keys() if cid != -1])
-    
     for cluster_id in sorted_ids:
         orig_label = original_map.get(cluster_id, "")
         curr_label = current_map.get(cluster_id, orig_label)
@@ -332,7 +401,6 @@ def _create_label_editor_ui(original_map, current_map, key_prefix):
         with col2:
             new_label = st.text_input(f"Edit {cluster_id}", value=curr_label, label_visibility="collapsed", key=f"{key_prefix}_{cluster_id}")
             widgets_dict[cluster_id] = new_label
-            
     if -1 in original_map:
         orig_noise = original_map[-1]
         curr_noise = current_map.get(-1, orig_noise)
@@ -370,60 +438,32 @@ def get_date_bin_options(df_filtered, interval_years, year_column='year'):
         return [f"Error: {str(e)}"]
 
 # ==================================================================
-# --- 3. Streamlit UI構成 ---
+# --- 6. UI構成 ---
 # ==================================================================
-
-st.set_page_config(
-    page_title="APOLLO | Saturn V", 
-    page_icon="🚀", 
-    layout="wide"
-)
-
-# CSS注入
-st.markdown("""
-<style>
-    html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-    [data-testid="stSidebar"] h1 { color: #003366; font-weight: 900 !important; font-size: 2.5rem !important; }
-    [data-testid="stSidebarNav"] { display: none !important; }
-    [data-testid="stSidebar"] .block-container { padding-top: 2rem; padding-bottom: 1rem; }
-    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-    .stButton>button { font-weight: 600; }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { background-color: #f0f2f6; border-radius: 8px 8px 0 0; padding: 10px 15px; }
-    .stTabs [aria-selected="true"] { background-color: #ffffff; border-bottom: 2px solid #003366; }
-</style>
-""", unsafe_allow_html=True)
 
 # --- サイドバー ---
 with st.sidebar:
     st.title("APOLLO") 
     st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
+    st.markdown("**v.3**")
     st.markdown("---")
-    
     st.subheader("Home")
     st.page_link("Home.py", label="Mission Control", icon="🛰️")
-    
     st.subheader("Modules")
     st.page_link("pages/1_🌍_ATLAS.py", label="ATLAS", icon="🌍")
     st.page_link("pages/2_💡_CORE.py", label="CORE", icon="💡")
     st.page_link("pages/3_🚀_Saturn_V.py", label="Saturn V", icon="🚀")
     st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
     st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
-    
+    st.page_link("pages/6_🔗_CREW.py", label="CREW", icon="🔗")
     st.markdown("---")
-    
-    st.caption("ナビゲーション:")
-    st.caption("1. Mission Control でデータをアップロードし、前処理を実行します。")
-    st.caption("2. 上のリストから分析モジュールを選択します。")
-    
+    st.caption("ナビゲーション:\n1. Mission Control でデータをアップロードし、前処理を実行します。\n2. 上のリストから分析モジュールを選択します。")
     st.markdown("---")
     st.caption("© 2025 しばやま")
 
-# --- メインコンテンツ ---
 st.title("🚀 Saturn V")
 st.markdown("SBERT（文脈・意味）に基づき、インタラクティブな技術マップ分析モジュールです。")
 
-# テーマ選択
 col_theme, _ = st.columns([1, 3])
 with col_theme:
     selected_theme = st.selectbox("表示テーマ:", ["APOLLO Standard", "Modern Presentation"], key="saturn_theme_selector")
@@ -431,7 +471,7 @@ theme_config = get_theme_config(selected_theme)
 st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
 
 # ==================================================================
-# --- 4. データロード & 初期化 ---
+# --- 7. データロード & 初期化 ---
 # ==================================================================
 if not st.session_state.get("preprocess_done", False):
     st.error("分析データがありません。")
@@ -452,7 +492,7 @@ if "main_cluster_running" not in st.session_state: st.session_state.main_cluster
 if "saturnv_global_zmax" not in st.session_state: st.session_state.saturnv_global_zmax = None
 
 # ==================================================================
-# --- 5. Saturn V アプリケーション ---
+# --- 8. Saturn V アプリケーション ---
 # ==================================================================
 
 # --- 初回UMAP計算 ---
@@ -490,9 +530,9 @@ tab_main, tab_drill, tab_stats, tab_export = st.tabs([
 with tab_main:
     st.subheader("クラスタリング実行")
     col1, col2, col3 = st.columns([2, 2, 1])
-    with col1: min_cluster_size_w = st.number_input("最小クラスタサイズ:", min_value=2, value=15, key="main_min_cluster_size")
-    with col2: min_samples_w = st.number_input("最小サンプル数:", min_value=1, value=10, key="main_min_samples")
-    with col3: label_top_n_w = st.number_input("ラベル単語数:", min_value=1, value=3, key="main_label_top_n")
+    with col1: min_cluster_size_w = st.number_input("最小クラスタサイズ (推奨: 10-50):", min_value=2, value=15, key="main_min_cluster_size")
+    with col2: min_samples_w = st.number_input("最小サンプル数 (推奨: 5-20):", min_value=1, value=10, key="main_min_samples")
+    with col3: label_top_n_w = st.number_input("クラスタラベル単語数:", min_value=1, value=3, key="main_label_top_n")
     
     if st.button("描画 (再計算)", type="primary", key="main_run_cluster", disabled=st.session_state.main_cluster_running):
         st.session_state.main_cluster_running = True
@@ -550,11 +590,26 @@ with tab_main:
                 date_bin_filter_w = "(全期間)"
         
         with col2:
-            if col_map['applicant'] and col_map['applicant'] in st.session_state.df_main.columns:
+            if 'applicant_main' in st.session_state.df_main.columns:
+                applicants = st.session_state.df_main['applicant_main'].explode().dropna()
+            elif col_map['applicant'] and col_map['applicant'] in st.session_state.df_main.columns:
                 applicants = st.session_state.df_main[col_map['applicant']].fillna('').str.split(delimiters['applicant']).explode().str.strip()
-                unique_applicants = sorted([app for app in applicants.unique() if app])
-                applicant_options = [(f"(全出願人) ({len(st.session_state.df_main)}件)", "ALL")] + [(f"{app}", app) for app in unique_applicants]
-                applicant_filter_w = st.multiselect("出願人:", applicant_options, default=[applicant_options[0]], format_func=lambda x: x[0], key="main_applicant_filter")
+            else:
+                applicants = pd.Series([])
+
+            if not applicants.empty:
+                applicant_counts = applicants.value_counts()
+                unique_applicants = applicant_counts.index.tolist()
+                applicant_options = [(f"(全出願人) ({len(st.session_state.df_main)}件)", "ALL")] + \
+                                    [(f"{app} ({applicant_counts[app]}件)", app) for app in unique_applicants]
+                
+                applicant_filter_w = st.multiselect(
+                    "出願人:", 
+                    applicant_options, 
+                    default=[applicant_options[0]], 
+                    format_func=lambda x: x[0], 
+                    key="main_applicant_filter"
+                )
             else:
                 applicant_filter_w = [(f"(全出願人) ({len(st.session_state.df_main)}件)", "ALL")]
 
@@ -566,61 +621,168 @@ with tab_main:
         cluster_filter_w = st.multiselect("マップ表示クラスタ:", cluster_options, default=[cluster_options[0]], format_func=lambda x: x[0], key="main_cluster_filter")
 
         st.subheader("分析結果 (TELESCOPE メインマップ)")
-        col_mode, col_norm = st.columns([1, 1])
-        with col_mode: map_mode = st.radio("表示モード:", ["散布図 (Scatter)", "密度マップ (Density)"], horizontal=True)
-        use_abs_scale = False
-        if map_mode == "密度マップ (Density)":
-            with col_norm: use_abs_scale = st.checkbox("密度スケールを固定 (絶対評価)", value=False)
         
-        show_labels_chk = st.checkbox("マップにラベルを表示する", value=True, key="main_show_labels")
+        # --- UIレイアウト ---
+        map_mode = st.radio("表示モード:", ["散布図 (Scatter)", "密度マップ (Density)", "クラスタ領域 (Clusters)"], horizontal=True)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("**密度マップ設定**")
+            main_mesh_size = st.number_input("メッシュサイズ (Grid)", value=30, min_value=10, max_value=200, step=5, key="main_mesh_size")
+            use_abs_scale = False
+            if map_mode == "密度マップ (Density)":
+                use_abs_scale = st.checkbox("密度スケールを固定 (絶対評価)", value=False, key="main_abs_scale")
+        with c2:
+            st.markdown("**フィルタ**")
+            remove_noise_chk = st.checkbox("ノイズを除く (Exclude Noise)", value=False, key="main_remove_noise")
+        with c3:
+            st.markdown("**表示オプション**")
+            show_labels_chk = st.checkbox("マップにラベルを表示する", value=True, key="main_show_labels")
         
-        df_visible = st.session_state.df_main.copy()
-        # フィルタ適用
+        # --- ハイブリッド・レイヤー構造 ---
+        
+        # 1. Universe (第1層: 背景/Ghost用)
+        df_universe = st.session_state.df_main.copy()
+        if remove_noise_chk:
+            df_universe = df_universe[df_universe['cluster'] != -1]
+
+        # 2. Trend (第2層: 地形用)
+        df_trend = df_universe.copy()
         if not date_bin_filter_w.startswith("(全期間)"):
             try:
                 date_bin_label = date_bin_filter_w.split(' (')[0].strip()
                 start_year, end_year = map(int, date_bin_label.split('-'))
-                df_visible = df_visible[(df_visible['year'] >= start_year) & (df_visible['year'] <= end_year)]
+                df_trend = df_trend[(df_trend['year'] >= start_year) & (df_trend['year'] <= end_year)]
             except: pass
 
-        applicant_values = [val[1] for val in applicant_filter_w]
-        is_applicant_color_mode = True
-        if "ALL" in applicant_values:
-             is_applicant_color_mode = False
-        else:
-             mask_list = [df_visible[col_map['applicant']].fillna('').str.contains(re.escape(app)) for app in applicant_values]
-             if mask_list: df_visible = df_visible[pd.concat(mask_list, axis=1).any(axis=1)]
+        # 3. Focus (第3層: 注目用)
+        df_focus = df_trend.copy()
         
+        # 出願人フィルタ
+        applicant_values = [val[1] for val in applicant_filter_w]
+        if "ALL" not in applicant_values:
+             mask_list = [df_focus[col_map['applicant']].fillna('').str.contains(re.escape(app)) for app in applicant_values]
+             if mask_list:
+                 df_focus = df_focus[pd.concat(mask_list, axis=1).any(axis=1)]
+             else:
+                 df_focus = df_focus.iloc[0:0]
+
+        # クラスタフィルタ
         cluster_values = [val[1] for val in cluster_filter_w]
         if "ALL" not in cluster_values:
-            df_visible = df_visible[df_visible['cluster'].isin(cluster_values)]
+            df_focus = df_focus[df_focus['cluster'].isin(cluster_values)]
 
-        # 描画
+        # 4. Ghost (Universe - Focus)
+        try:
+            df_ghost = df_universe.drop(df_focus.index, errors='ignore')
+        except:
+            df_ghost = pd.DataFrame()
+
+        # --- 描画ロジック ---
         fig_main = go.Figure()
-        if map_mode == "密度マップ (Density)":
-             contour_params = dict(x=df_visible['umap_x'], y=df_visible['umap_y'], colorscale=theme_config["density_scale"], reversescale=False, xaxis='x', yaxis='y', showscale=True, name="密度", nbinsx=50, nbinsy=50)
-             if use_abs_scale and st.session_state.saturnv_global_zmax:
-                 contour_params.update(dict(zauto=False, zmin=0, zmax=st.session_state.saturnv_global_zmax))
-             else: contour_params.update(dict(zauto=True))
-             fig_main.add_trace(go.Histogram2dContour(**contour_params))
-             fig_main.add_trace(go.Scatter(x=df_visible['umap_x'], y=df_visible['umap_y'], mode='markers', marker=dict(color='white', size=3, opacity=0.3), hoverinfo='text', hovertext=df_visible['hover_text'], name='特許'))
-        else:
-            # 散布図
-            fig_main.add_trace(go.Scatter(x=df_visible['umap_x'], y=df_visible['umap_y'], mode='markers', marker=dict(color=df_visible['cluster'], colorscale=theme_config["color_sequence"], showscale=False, size=4, opacity=0.6), hoverinfo='text', hovertext=df_visible['hover_text'], name='表示対象'))
+        
+        # 密度マップ
+        if not df_trend.empty and map_mode == "密度マップ (Density)":
+            custom_density_colorscale = [
+                [0.0, "rgba(255, 255, 255, 0)"], 
+                [0.1, "rgba(225, 245, 254, 0.3)"],
+                [0.4, "rgba(129, 212, 250, 0.6)"],
+                [1.0, "rgba(2, 119, 189, 0.9)"]
+            ]
+            
+            contour_params = dict(
+                x=df_trend['umap_x'], y=df_trend['umap_y'], 
+                colorscale=custom_density_colorscale, 
+                reversescale=False, xaxis='x', yaxis='y', 
+                showscale=False, name="密度", 
+                nbinsx=main_mesh_size, nbinsy=main_mesh_size,
+                contours=dict(coloring='fill', showlines=True),
+                line=dict(width=0.5, color='rgba(0, 0, 0, 0.2)')
+            )
+            if use_abs_scale and st.session_state.saturnv_global_zmax:
+                contour_params.update(dict(zauto=False, zmin=0, zmax=st.session_state.saturnv_global_zmax))
+            else: 
+                contour_params.update(dict(zauto=True))
+            
+            fig_main.add_trace(go.Histogram2dContour(**contour_params))
+
+        # クラスタ領域
+        if map_mode == "クラスタ領域 (Clusters)" and not df_universe.empty:
+            unique_clusters = sorted(df_universe['cluster'].unique())
+            color_sequence = theme_config["color_sequence"]
+            for i, cid in enumerate(unique_clusters):
+                if cid == -1: continue
+                points = df_universe[df_universe['cluster'] == cid][['umap_x', 'umap_y']].values
+                if len(points) >= 3:
+                    try:
+                        hull = ConvexHull(points)
+                        hull_points = points[hull.vertices]
+                        hull_points = np.append(hull_points, [hull_points[0]], axis=0)
+                        cluster_color = color_sequence[i % len(color_sequence)]
+                        fig_main.add_trace(go.Scatter(
+                            x=hull_points[:, 0], y=hull_points[:, 1], mode='lines', fill='toself',
+                            fillcolor=cluster_color, opacity=0.1, line=dict(color=cluster_color, width=2),
+                            hoverinfo='skip', showlegend=False
+                        ))
+                    except: pass
+
+        # Ghost (Universe背景)
+        if not df_ghost.empty:
+            ghost_color = '#dddddd'
+            ghost_opacity = 0.4
+            fig_main.add_trace(go.Scattergl(
+                x=df_ghost['umap_x'], y=df_ghost['umap_y'], mode='markers', 
+                marker=dict(color=ghost_color, size=3, opacity=ghost_opacity, line=dict(width=0)), 
+                hoverinfo='skip', name='その他 (Ghost)'
+            ))
+
+        # Focus (注目)
+        if not df_focus.empty:
+            marker_line = dict(width=1, color='white') if map_mode == "密度マップ (Density)" else dict(width=0)
+            is_applicant_filtered = "ALL" not in applicant_values
+            
+            if is_applicant_filtered:
+                palette = px.colors.qualitative.Bold
+                for i, app_name in enumerate(applicant_values):
+                    mask = df_focus[col_map['applicant']].fillna('').str.contains(re.escape(app_name))
+                    df_app = df_focus[mask]
+                    if not df_app.empty:
+                        fig_main.add_trace(go.Scattergl(
+                            x=df_app['umap_x'], y=df_app['umap_y'], mode='markers',
+                            marker=dict(color=palette[i % len(palette)], size=6, opacity=0.9, line=marker_line),
+                            hoverinfo='text', hovertext=df_app['hover_text'], name=app_name
+                        ))
+            else:
+                fig_main.add_trace(go.Scattergl(
+                    x=df_focus['umap_x'], y=df_focus['umap_y'], mode='markers', 
+                    marker=dict(color=df_focus['cluster'], colorscale=theme_config["color_sequence"], showscale=False, size=5, opacity=0.8, line=marker_line), 
+                    hoverinfo='text', hovertext=df_focus['hover_text'], name='特許'
+                ))
 
         # ラベル追加
         if show_labels_chk:
-            for cid, grp in df_visible[df_visible['cluster'].isin(df_visible['cluster'].unique())].groupby('cluster'):
+            label_data_source = df_universe
+            target_cids = cluster_values if "ALL" not in cluster_values else label_data_source['cluster'].unique()
+            color_sequence = theme_config["color_sequence"]
+            sorted_unique_cids = sorted(df_universe['cluster'].unique()) 
+
+            for cid, grp in label_data_source[label_data_source['cluster'].isin(target_cids)].groupby('cluster'):
                 if cid == -1: continue
                 mean_pos = grp[['umap_x', 'umap_y']].mean()
-                if not grp.empty:
-                    label_txt = grp['cluster_label'].iloc[0]
-                    fig_main.add_annotation(x=mean_pos['umap_x'], y=mean_pos['umap_y'], text=label_txt, showarrow=False, font=dict(size=11, color='black' if map_mode=="散布図 (Scatter)" else 'white'), bgcolor='rgba(255,255,255,0.7)' if map_mode=="散布図 (Scatter)" else 'rgba(0,0,0,0.5)')
+                label_txt = grp['cluster_label'].iloc[0]
+                try:
+                    color_idx = sorted_unique_cids.index(cid)
+                    border_color = color_sequence[color_idx % len(color_sequence)]
+                except: border_color = "#333333"
+
+                fig_main.add_annotation(
+                    x=mean_pos['umap_x'], y=mean_pos['umap_y'], 
+                    text=label_txt, showarrow=False, 
+                    font=dict(size=11, color='black', family="Helvetica"), 
+                    bgcolor='rgba(255,255,255,0.8)', bordercolor=border_color, borderwidth=2, borderpad=4
+                )
 
         norm_msg = " (絶対評価)" if use_abs_scale and map_mode == "密度マップ (Density)" else ""
-        update_fig_layout(fig_main, f"Saturn V - メインマップ (SBERT UMAP){norm_msg}", height=800, theme_config=theme_config)
-        fig_main.update_xaxes(showgrid=False, zeroline=False, showticklabels=False)
-        fig_main.update_yaxes(showgrid=False, zeroline=False, showticklabels=False)
+        update_fig_layout(fig_main, f"Saturn V - メインマップ{norm_msg}", height=1000, theme_config=theme_config)
         st.plotly_chart(fig_main, use_container_width=True)
 
         st.subheader("ラベル編集")
@@ -662,16 +824,28 @@ with tab_main:
                 else:
                     drill_date_bin_filter_w = "(全期間)"
             with col2:
-                drill_applicant_options = [(f"(全出願人) ({len(df_subset_filter)}件)", "ALL")]
-                if col_map['applicant'] and col_map['applicant'] in df_subset_filter.columns:
+                if 'applicant_main' in df_subset_filter.columns:
+                    applicants_drill = df_subset_filter['applicant_main'].explode().dropna()
+                elif col_map['applicant'] and col_map['applicant'] in df_subset_filter.columns:
                     applicants_drill = df_subset_filter[col_map['applicant']].fillna('').str.split(delimiters['applicant']).explode().str.strip()
-                    applicant_counts_drill = applicants_drill.value_counts()
-                    unique_applicants_drill = sorted([app for app in applicants_drill.unique() if app])
-                    drill_applicant_options += [(f"{app_name} ({applicant_counts_drill.get(app_name, 0)}件)", app_name) for app_name in unique_applicants_drill if applicant_counts_drill.get(app_name, 0) > 0]
-                drill_applicant_filter_w = st.multiselect("出願人:", drill_applicant_options, default=[drill_applicant_options[0]], format_func=lambda x: x[0], key="drill_applicant_filter_w")
-        else:
-            drill_date_bin_filter_w = "(全期間)"
-            drill_applicant_filter_w = []
+                else:
+                    applicants_drill = pd.Series([])
+
+                if not applicants_drill.empty:
+                    app_counts_drill = applicants_drill.value_counts()
+                    unique_applicants_drill = app_counts_drill.index.tolist()
+                    drill_applicant_options = [(f"(全出願人) ({len(df_subset_filter)}件)", "ALL")] + \
+                                              [(f"{app} ({app_counts_drill[app]}件)", app) for app in unique_applicants_drill]
+                    
+                    drill_applicant_filter_w = st.multiselect(
+                        "出願人:", 
+                        drill_applicant_options, 
+                        default=[drill_applicant_options[0]], 
+                        format_func=lambda x: x[0], 
+                        key="drill_applicant_filter_w"
+                    )
+                else:
+                    drill_applicant_filter_w = [(f"(全出願人) ({len(df_subset_filter)}件)", "ALL")]
 
         st.subheader("クラスタリング設定 (ドリルダウン用)")
         col1, col2, col3 = st.columns(3)
@@ -696,6 +870,7 @@ with tab_main:
                                 df_subset = df_subset[(df_subset['year'] >= start_year) & (df_subset['year'] <= end_year)]
                             except: pass 
 
+                        # ドリルダウンでは絞り込み再計算が主目的なので、Applicantフィルタはデータ削減として扱う
                         drill_app_values = [val[1] for val in drill_applicant_filter_w]
                         if "ALL" not in drill_app_values:
                             mask_list_drill = [df_subset[col_map['applicant']].fillna('').str.contains(re.escape(app)) for app in drill_app_values]
@@ -761,25 +936,98 @@ with tab_main:
                 st.rerun()
 
             st.subheader("ドリルダウンマップ")
+            
+            # --- UIレイアウト ---
+            drill_map_mode = st.radio("表示モード:", ["散布図 (Scatter)", "密度マップ (Density)", "クラスタ領域 (Clusters)"], horizontal=True, key="drill_map_mode_radio")
+            
+            d_c1, d_c2, d_c3 = st.columns(3)
+            with d_c1:
+                st.markdown("**密度マップ設定**")
+                drill_mesh_size = st.number_input("メッシュサイズ (Grid)", value=40, min_value=10, max_value=200, step=5, key="drill_mesh_size")
+            with d_c2:
+                st.markdown("**フィルタ**")
+                drill_remove_noise_chk = st.checkbox("ノイズを除く (Exclude Noise)", value=False, key="drill_remove_noise")
+            with d_c3:
+                st.empty()
+
+            if drill_remove_noise_chk:
+                df_drill_plot = df_drill[df_drill['drill_cluster'] != -1]
+            else:
+                df_drill_plot = df_drill
+
             fig_drill = go.Figure()
-            fig_drill.add_trace(go.Scatter(
-                x=df_drill['drill_x'], y=df_drill['drill_y'], mode='markers',
-                marker=dict(color=df_drill['drill_cluster'], colorscale=theme_config["color_sequence"] if isinstance(theme_config["color_sequence"], str) else 'turbo', showscale=False, size=4, opacity=0.5),
-                hoverinfo='text', hovertext=df_drill['drill_hover_text'], name='表示対象'
+            
+            custom_density_colorscale_d = [
+                [0.0, "rgba(255, 255, 255, 0)"], 
+                [0.1, "rgba(225, 245, 254, 0.3)"],
+                [0.4, "rgba(129, 212, 250, 0.6)"],
+                [1.0, "rgba(2, 119, 189, 0.9)"]
+            ]
+
+            if drill_map_mode == "密度マップ (Density)":
+                contour_d = dict(
+                    x=df_drill_plot['drill_x'], y=df_drill_plot['drill_y'], 
+                    colorscale=custom_density_colorscale_d, 
+                    reversescale=False, xaxis='x', yaxis='y', showscale=False, name="密度", 
+                    nbinsx=drill_mesh_size, nbinsy=drill_mesh_size, 
+                    contours=dict(coloring='fill', showlines=True),
+                    line=dict(width=0.5, color='rgba(0, 0, 0, 0.2)')
+                )
+                fig_drill.add_trace(go.Histogram2dContour(**contour_d))
+                
+            if drill_map_mode == "クラスタ領域 (Clusters)":
+                color_sequence = theme_config["color_sequence"]
+                unique_clusters_d = sorted(df_drill_plot['drill_cluster'].unique())
+                for i, cid in enumerate(unique_clusters_d):
+                    if cid == -1: continue
+                    points = df_drill_plot[df_drill_plot['drill_cluster'] == cid][['drill_x', 'drill_y']].values
+                    if len(points) >= 3:
+                        try:
+                            hull = ConvexHull(points)
+                            hull_points = points[hull.vertices]
+                            hull_points = np.append(hull_points, [hull_points[0]], axis=0)
+                            c_color = color_sequence[i % len(color_sequence)]
+                            fig_drill.add_trace(go.Scatter(
+                                x=hull_points[:, 0], y=hull_points[:, 1], mode='lines', fill='toself',
+                                fillcolor=c_color, opacity=0.1, line=dict(color=c_color, width=2),
+                                hoverinfo='skip', showlegend=False
+                            ))
+                        except: pass
+
+            marker_line_d = dict(width=1, color='white') if drill_map_mode == "密度マップ (Density)" else dict(width=0)
+            fig_drill.add_trace(go.Scattergl(
+                x=df_drill_plot['drill_x'], y=df_drill_plot['drill_y'], mode='markers',
+                marker=dict(color=df_drill_plot['drill_cluster'], colorscale=theme_config["color_sequence"] if isinstance(theme_config["color_sequence"], str) else 'turbo', showscale=False, size=5, opacity=0.8, line=marker_line_d),
+                hoverinfo='text', hovertext=df_drill_plot['drill_hover_text'], name='表示対象'
             ))
+            
             annotations_drill = []
             if drill_show_labels_chk:
-                for cid, grp in df_drill[df_drill['drill_cluster'] != -1].groupby('drill_cluster'):
+                color_sequence = theme_config["color_sequence"]
+                sorted_unique_cids_d = sorted(df_drill_plot['drill_cluster'].unique())
+                
+                for cid, grp in df_drill_plot[df_drill_plot['drill_cluster'] != -1].groupby('drill_cluster'):
                     mean_pos = grp[['drill_x', 'drill_y']].mean()
+                    
+                    try:
+                        color_idx = sorted_unique_cids_d.index(cid)
+                        border_color = color_sequence[color_idx % len(color_sequence)]
+                    except:
+                        border_color = "#333333"
+
                     annotations_drill.append(go.layout.Annotation(
-                        x=mean_pos['drill_x'], y=mean_pos['drill_y'], text=drill_labels_map.get(cid, ""), showarrow=False, font=dict(size=10, color=theme_config["text_color"])
+                        x=mean_pos['drill_x'], y=mean_pos['drill_y'], text=drill_labels_map.get(cid, ""), showarrow=False, 
+                        font=dict(size=10, color='black', family="Helvetica"), 
+                        bgcolor='rgba(255,255,255,0.8)',
+                        bordercolor=border_color,
+                        borderwidth=2,
+                        borderpad=4
                     ))
             fig_drill.update_layout(annotations=annotations_drill)
-            update_fig_layout(fig_drill, f'Saturn V ドリルダウン: {st.session_state.drill_base_label}', theme_config=theme_config)
-            fig_drill.update_xaxes(showgrid=False, zeroline=False, showticklabels=False)
-            fig_drill.update_yaxes(showgrid=False, zeroline=False, showticklabels=False)
+            update_fig_layout(fig_drill, f'Saturn V ドリルダウン: {st.session_state.drill_base_label}', height=1000, theme_config=theme_config)
             st.plotly_chart(fig_drill, use_container_width=True)
             
+            # --- テキストマイニング ---
             st.markdown("---")
             st.subheader("クラスタ・テキスト分析 (Text Mining)")
             col_tm1, col_tm2 = st.columns(2)
@@ -798,7 +1046,7 @@ with tab_main:
                     if not words: st.warning("有効なキーワードなし")
                     else:
                         st.markdown("##### 1. ワードクラウド")
-                        generate_wordcloud_and_list(words, f"クラスタ: {st.session_state.drill_base_label}", 30, font_path)
+                        generate_wordcloud_and_list(words, f"クラスタ: {st.session_state.drill_base_label}", 30, FONT_PATH)
                         
                         st.markdown("##### 2. 共起ネットワーク")
                         word_freq = Counter(words)
@@ -841,7 +1089,9 @@ with tab_main:
                                 marker=dict(showscale=True, colorscale='YlGnBu', size=node_size, color=node_size, line_width=2)
                             )
                             fig_net = go.Figure(data=[edge_trace, node_trace], layout=go.Layout(title='共起ネットワーク', showlegend=False, hovermode='closest', margin=dict(b=20,l=5,r=5,t=40), xaxis=dict(showgrid=False, zeroline=False, showticklabels=False), yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
-                            update_fig_layout(fig_net, '共起ネットワーク', theme_config=theme_config)
+                            update_fig_layout(fig_net, '共起ネットワーク', theme_config=theme_config, show_axes=False)
+                            fig_net.update_xaxes(visible=False)
+                            fig_net.update_yaxes(visible=False)
                             st.plotly_chart(fig_net, use_container_width=True)
 
     # --- C. 特許マップ (統計分析) ---
@@ -857,16 +1107,27 @@ with tab_main:
             
             c1, c2 = st.columns(2)
             with c1:
-                if 'stats_start_year' not in st.session_state: st.session_state.stats_start_year = 2010
-                if 'stats_end_year' not in st.session_state: st.session_state.stats_end_year = 2024
-                s_year = st.number_input('開始年:', key="stats_start_year", step=1)
-                e_year = st.number_input('終了年:', key="stats_end_year", step=1)
+                auto_min_year = 2000
+                auto_max_year = datetime.datetime.now().year
+                if 'year' in st.session_state.df_main.columns:
+                    try:
+                        valid_years = st.session_state.df_main['year'].dropna()
+                        if not valid_years.empty:
+                            auto_min_year = int(valid_years.min())
+                            auto_max_year = int(valid_years.max())
+                    except:
+                        pass
+
+                if 'stats_start_year' not in st.session_state: st.session_state.stats_start_year = auto_min_year
+                if 'stats_end_year' not in st.session_state: st.session_state.stats_end_year = auto_max_year
+                
+                s_year = st.number_input('開始年:', min_value=1900, max_value=2100, key="stats_start_year", step=1)
+                e_year = st.number_input('終了年:', min_value=1900, max_value=2100, key="stats_end_year", step=1)
             with c2:
                 n_apps = st.number_input('表示人数:', min_value=1, value=15, key="stats_num_assignees")
             
             if st.button("特許マップを描画", key="stats_run_button"):
                 df_s = st.session_state.df_main.copy()
-                # フィルタ適用
                 vals = [v[1] for v in stats_cluster_filter_w]
                 if "ALL" not in vals: df_s = df_s[df_s['cluster'].isin(vals)]
                 df_s = df_s[(df_s['year'] >= s_year) & (df_s['year'] <= e_year)]
@@ -876,23 +1137,32 @@ with tab_main:
                     # 1. 時系列
                     yc = df_s['year'].value_counts().sort_index().reindex(range(s_year, e_year+1), fill_value=0)
                     fig1 = px.bar(x=yc.index, y=yc.values, labels={'x':'年', 'y':'件数'}, color_discrete_sequence=[theme_config["color_sequence"][0]])
-                    update_fig_layout(fig1, '出願推移', theme_config=theme_config)
+                    update_fig_layout(fig1, '出願推移', theme_config=theme_config, show_axes=True)
                     st.plotly_chart(fig1, use_container_width=True)
                     
                     # 2. ランキング
-                    ac = df_s[col_map['applicant']].astype(str).str.split(delimiters['applicant']).explode().str.strip().value_counts().head(n_apps).sort_values(ascending=True)
-                    fig2 = px.bar(x=ac.values, y=ac.index, orientation='h', labels={'x':'件数', 'y':'権利者'}, color_discrete_sequence=[theme_config["color_sequence"][1]])
-                    update_fig_layout(fig2, '権利者ランキング', height=max(600, len(ac)*30), theme_config=theme_config)
+                    ac = df_s['applicant_main'].explode().value_counts().head(n_apps).sort_values(ascending=True)
+                    fig2 = px.bar(x=ac.values, y=ac.index, orientation='h', labels={'x':'件数', 'y':'出願人'}, color_discrete_sequence=[theme_config["color_sequence"][1]])
+                    update_fig_layout(fig2, '出願人ランキング', height=max(600, len(ac)*30), theme_config=theme_config, show_axes=True)
                     st.plotly_chart(fig2, use_container_width=True)
                     
                     # 3. バブル
-                    ae = df_s.explode(col_map['applicant'])
-                    ae['ap'] = ae[col_map['applicant']].astype(str).str.strip()
+                    ae = df_s.explode('applicant_main')
+                    ae['ap'] = ae['applicant_main'].astype(str).str.strip()
                     top_a = ae['ap'].value_counts().head(n_apps).index.tolist()
                     pd_plot = ae[ae['ap'].isin(top_a)].groupby(['year', 'ap']).size().reset_index(name='count')
+                    
                     if not pd_plot.empty:
-                        fig3 = px.scatter(pd_plot, x='year', y='ap', size='count', color='ap', labels={'year':'年', 'ap':'権利者', 'count':'件数'}, category_orders={'ap': top_a})
-                        update_fig_layout(fig3, '出願年別動向', height=700, theme_config=theme_config)
+                        fig3 = px.scatter(pd_plot, x='year', y='ap', size='count', color='ap', labels={'year':'出願年', 'ap':'出願人', 'count':'件数'}, category_orders={'ap': top_a})
+                        update_fig_layout(fig3, '出願年別動向', height=700, theme_config=theme_config, show_axes=True)
+                        fig3.update_layout(
+                            legend=dict(
+                                orientation="v", 
+                                yanchor="top", y=1, 
+                                xanchor="left", x=1.02, 
+                                borderwidth=0
+                            )
+                        )
                         st.plotly_chart(fig3, use_container_width=True)
 
     # --- D. エクスポート ---
@@ -907,11 +1177,3 @@ with tab_main:
             cols_drop_d = ['hover_text', 'parsed_date', 'date_bin', 'drill_hover_text', 'drill_date_bin', 'temp_date_bin']
             csv_d = st.session_state.df_drilldown_result.drop(columns=cols_drop_d, errors='ignore').to_csv(encoding='utf-8-sig', index=False).encode('utf-8-sig')
             st.download_button("ドリルダウン結果 (CSV)", csv_d, "APOLLO_SaturnV_Drill.csv", "text/csv")
-
-# --- 共通サイドバーフッター ---
-st.sidebar.markdown("---") 
-st.sidebar.caption("ナビゲーション:")
-st.sidebar.caption("1. Mission Control でデータをアップロードし、前処理を実行します。")
-st.sidebar.caption("2. 左のリストから分析モジュールを選択します。")
-st.sidebar.markdown("---")
-st.sidebar.caption("© 2025 しばやま")

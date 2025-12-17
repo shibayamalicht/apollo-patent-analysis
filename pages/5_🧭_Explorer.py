@@ -1,6 +1,3 @@
-# ==================================================================
-# --- 1. ライブラリのインポート ---
-# ==================================================================
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -10,72 +7,102 @@ import string
 import os
 import platform
 import unicodedata
-import traceback
 from collections import Counter
+from itertools import combinations
+import datetime
 
-# 可視化・分析
+import plotly.graph_objects as go
+import plotly.express as px
 from wordcloud import WordCloud
 from janome.tokenizer import Tokenizer
+import networkx as nx
+from networkx.algorithms import community
 import matplotlib.pyplot as plt
-import matplotlib.font_manager
+import matplotlib.font_manager as fm
 import japanize_matplotlib
 
-# 警告を非表示
+# ==================================================================
+# --- 1. 設定・ヘルパー関数 ---
+# ==================================================================
 warnings.filterwarnings('ignore')
 
-# ==================================================================
-# --- 2. ページ設定 (最優先で実行) ---
-# ==================================================================
-# ★修正: ここに移動しました。他の処理より先に記述する必要があります。
 st.set_page_config(
     page_title="APOLLO | Explorer",
     page_icon="🧭",
     layout="wide"
 )
 
-# ==================================================================
-# --- 3. デザインテーマ管理 ---
-# ==================================================================
+def get_japanese_font_path():
+    system = platform.system()
+    font_paths = []
+    
+    if system == "Darwin": # Mac
+        font_paths = [
+            "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
+            "/System/Library/Fonts/Hiragino Sans W3.ttc",
+            "/System/Library/Fonts/Hiragino Kaku Gothic ProN.ttc",
+            "/Library/Fonts/AppleGothic.ttf",
+            "/System/Library/Fonts/AppleSDGothicNeo.ttc" 
+        ]
+    elif system == "Windows": # Windows
+        font_paths = [
+            "C:/Windows/Fonts/meiryo.ttc",
+            "C:/Windows/Fonts/msgothic.ttc",
+            "C:/Windows/Fonts/yugothr.ttc"
+        ]
+    else: # Linux
+        font_paths = [
+            "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",
+            "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+            "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc"
+        ]
+        
+    for path in font_paths:
+        if os.path.exists(path): return path
+    return None
+
+FONT_PATH = get_japanese_font_path()
+if FONT_PATH:
+    try:
+        prop = fm.FontProperties(fname=FONT_PATH)
+        plt.rcParams['font.family'] = prop.get_name()
+    except:
+        pass
+
+st.markdown("""
+<style>
+    html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    [data-testid="stSidebar"] h1 { color: #003366; font-weight: 900 !important; font-size: 2.5rem !important; }
+    [data-testid="stSidebarNav"] { display: none !important; }
+    [data-testid="stSidebar"] .block-container { padding-top: 2rem; padding-bottom: 1rem; }
+    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
+    .stButton>button { font-weight: 600; }
+</style>
+""", unsafe_allow_html=True)
 
 def get_theme_config(theme_name):
-    """テーマに応じたCSSを返す"""
     themes = {
-        "APOLLO Standard": {
-            "bg_color": "#ffffff",
-            "text_color": "#333333",
-            "sidebar_bg": "#f8f9fa",
-            "accent_color": "#003366",
-            "css": """
-                html, body { background-color: #ffffff; color: #333333; }
-                [data-testid="stSidebar"] { background-color: #f8f9fa; }
-                [data-testid="stHeader"] { background-color: #ffffff; }
-                h1, h2, h3 { color: #003366; }
-            """
-        },
-        "Modern Presentation": {
-            "bg_color": "#fdfdfd",
-            "text_color": "#2c3e50",
-            "sidebar_bg": "#eaeaea",
-            "accent_color": "#264653",
-            "css": """
-                html, body { background-color: #fdfdfd; color: #2c3e50; font-family: "Helvetica Neue", Arial, sans-serif; }
-                [data-testid="stSidebar"] { background-color: #eaeaea; }
-                [data-testid="stHeader"] { background-color: #fdfdfd; }
-                h1, h2, h3 { color: #264653; font-family: "Georgia", serif; }
-                .stButton>button { background-color: #264653; color: white; border-radius: 0px; }
-            """
-        }
+        "APOLLO Standard": { "bg_color": "#ffffff", "text_color": "#333333", "plotly_template": "plotly_white", "color_sequence": px.colors.qualitative.G10, "css": """[data-testid="stHeader"] { background-color: #ffffff; } h1, h2, h3 { color: #003366; }""" },
+        "Modern Presentation": { "bg_color": "#fdfdfd", "text_color": "#2c3e50", "plotly_template": "plotly_white", "color_sequence": ["#264653", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51", "#8ab17d"], "css": """[data-testid="stSidebar"] { background-color: #eaeaea; } [data-testid="stHeader"] { background-color: #fdfdfd; } h1, h2, h3 { color: #264653; font-family: "Georgia", serif; } .stButton>button { background-color: #264653; color: white; border-radius: 0px; }""" }
     }
     return themes.get(theme_name, themes["APOLLO Standard"])
 
-# ==================================================================
-# --- 4. テキスト処理ヘルパー関数 ---
-# ==================================================================
+def update_fig_layout(fig, title, height=600, theme_config=None):
+    if theme_config:
+        fig.update_layout(
+            template=theme_config["plotly_template"],
+            title=dict(text=title, font=dict(size=18, color=theme_config["text_color"])),
+            paper_bgcolor=theme_config["bg_color"], plot_bgcolor=theme_config["bg_color"],
+            font=dict(color=theme_config["text_color"], family="Helvetica Neue"),
+            height=height, margin=dict(l=20, r=20, t=60, b=20)
+        )
+    return fig
 
+# ==================================================================
+# --- 2. テキスト処理 ---
+# ==================================================================
 @st.cache_resource
-def load_tokenizer_explorer():
-    return Tokenizer()
-
+def load_tokenizer_explorer(): return Tokenizer()
 t = load_tokenizer_explorer()
 
 _stopwords_original_list = [
@@ -115,11 +142,7 @@ _stopwords_original_list = [
     "審査","審査官","拒絶","意見書","補正書","優先","優先日","分割出願","継続出願","国内移行","国際出願",
     "国際公開","PCT","登録","公開日","審査請求","拒絶理由","補正","訂正","無効審判","異議","取消","取下げ",
     "事件番号","代理人","弁理士","係属","経過",
-    "第","第一","第二","第三","第1","第２","第３","第１","第２","第３","１","２","３","４","５","６","７","８","９","０",
-    "一","二","三","四","五","六","七","八","九","零","数","複合","多数","少数","図1","図2","図3","図4","図5","図6","図7","図8","図9",
-    "表1","表2","表3","式1","式2","式3","０","１","２","３","４","５","６","７","８","９","%","％","wt%","vol%","質量%","重量%","容量%","mol","mol%","mol/L","M","mm","cm","m","nm","μm","μ","rpm",
-    "Pa","kPa","MPa","GPa","N","W","V","A","mA","Hz","kHz","MHz","GHz","℃","°C","K","mL","L","g","kg","mg","wt","vol",
-    "h","hr","hrs","min","s","sec","ppm","ppb","bar","Ω","ohm","J","kJ","Wh","kWh",
+    "第","第一","第二","第三","第1","第２","第３","第１","第２","第３","一","二","三","四","五","六","七","八","九","零","数","複合","多数","少数","図1","図2","図3","図4","図5","図6","図7","図8","図9","表1","表2","表3","式1","式2","式3","%","％","wt%","vol%","質量%","重量%","容量%","mol","mol%","mol/L","M","mm","cm","m","nm","μm","μ","rpm","Pa","kPa","MPa","GPa","N","W","V","A","mA","Hz","kHz","MHz","GHz","℃","°C","K","mL","L","g","kg","mg","wt","vol","h","hr","hrs","min","s","sec","ppm","ppb","bar","Ω","ohm","J","kJ","Wh","kWh",
     "株式会社","有限会社","合資会社","合名会社","合同会社","Inc","Inc.","Ltd","Ltd.","Co","Co.","Corp","Corp.","LLC",
     "GmbH","AG","BV","B.V.","S.A.","S.p.A.","（株）","㈱","（有）",
     "溶液","溶媒","触媒","反応","生成物","原料","成分","含有","含有量","配合","混合","混合物","濃度","温度","時間",
@@ -130,18 +153,18 @@ _stopwords_original_list = [
     "インターフェース","データベース","DB","ネットワーク","通信","要求","応答","リクエスト","レスポンス","パラメータ",
     "引数","属性","プロパティ","フラグ","ID","ファイル","データ構造","テーブル","レコード",
     "軸","シャフト","ギア","モータ","エンジン","アクチュエータ","センサ","バルブ","ポンプ","筐体","ハウジング","フレーム",
-    "シャーシ","駆動","伝達","支持","連結","解決", "準備", "提供", "発生", "以上", "十分"
+    "シャーシ","駆動","伝達","支持","連結","解決", "準備", "提供", "発生", "以上", "十分",
+    "できる", "いる", "明細書", "記載", "記述", "掲載", "言及", "内容", "詳細", "説明", "表記", "表現", "箇条書き", "以下の", "以上の", "全ての", "任意の", "特定の"
 ]
 
 @st.cache_data
 def expand_stopwords_to_full_width(words):
     expanded = set(words)
-    hankaku_chars = string.ascii_letters + string.digits
-    zenkaku_chars = "ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ０１２３４５６７８９"
-    trans_table = str.maketrans(hankaku_chars, zenkaku_chars)
-    for word in words:
-        if any(c in hankaku_chars for c in word):
-            expanded.add(word.translate(trans_table))
+    hankaku = string.ascii_letters + string.digits
+    zenkaku = "ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ０１２３４５６７８９"
+    trans = str.maketrans(hankaku, zenkaku)
+    for w in words:
+        if any(c in hankaku for c in w): expanded.add(w.translate(trans))
     return sorted(list(expanded))
 
 stopwords = set(expand_stopwords_to_full_width(_stopwords_original_list))
@@ -192,7 +215,7 @@ def apply_ngram_filters(text):
 @st.cache_data
 def extract_compound_nouns(text):
     text = normalize_text(text)
-    text = apply_ngram_filters(text)
+    text = apply_ngram_filters(text) 
     text = re.sub(r'【.*?】', '', text)
     text = re.sub(r'[!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~]', ' ', text)
 
@@ -223,30 +246,9 @@ def extract_compound_nouns(text):
         words.append(compound_word)
     return words
 
-def get_font_path_for_wordcloud():
-    system_name = platform.system()
-    candidates = []
-    if system_name == 'Linux':
-        candidates = ['/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf', '/usr/share/fonts/truetype/fonts-japanese-gothic.ttf']
-    elif system_name == 'Darwin': 
-        candidates = ['/System/Library/Fonts/Hiragino Sans W3.ttc', '/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc']
-    elif system_name == 'Windows':
-        candidates = ['C:\\Windows\\Fonts\\meiryo.ttc', 'C:\\Windows\\Fonts\\msgothic.ttc']
-    
-    for path in candidates:
-        if os.path.exists(path): return path
-    return None
-
-font_path = get_font_path_for_wordcloud()
-
 def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
-    if not words:
-        st.subheader(title)
-        st.warning("キーワードが見つからなかったため、表示をスキップしました。")
-        return None
-
+    if not words: return None
     word_freq = Counter(words)
-
     try:
         wc = WordCloud(
             width=800, height=400, background_color='white',
@@ -259,213 +261,450 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
         ax.set_title(title, fontsize=20)
         ax.axis('off')
         st.pyplot(fig)
-        
-        st.markdown(f"**上位キーワード (Top {top_n})**")
-        list_data = { "キーワード": [], "出現頻度": [] }
-        for word, freq in word_freq.most_common(top_n):
-            list_data["キーワード"].append(word)
-            list_data["出現頻度"].append(freq)
-        st.dataframe(pd.DataFrame(list_data), height=200)
-        
     except Exception as e:
         st.error(f"ワードクラウドの描画に失敗しました: {e}")
-        if font_path is None:
-            st.warning("日本語フォントが見つかりませんでした。")
-
-@st.cache_data
-def get_characteristic_words(target_counter, other_counter1, other_counter2):
-    char_words = {}
-    total_target = sum(target_counter.values()) + 1
-    total_other1 = sum(other_counter1.values()) + 1
-    total_other2 = sum(other_counter2.values()) + 1
-
-    for word, freq in target_counter.items():
-        tf_target = freq / total_target
-        tf_other1 = other_counter1.get(word, 0) / total_other1
-        tf_other2 = other_counter2.get(word, 0) / total_other2
-        score = tf_target / (tf_other1 + tf_other2 + 1e-9)
-        if score > 1: char_words[word] = freq
-    return list(Counter(char_words).elements())
 
 # ==================================================================
-# --- 5. Streamlit UI構成 ---
+# --- 3. UI & アプリケーション ---
 # ==================================================================
 
-# --- CSS注入 ---
-st.markdown("""
-<style>
-    html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-    [data-testid="stSidebar"] h1 { color: #003366; font-weight: 900 !important; font-size: 2.5rem !important; }
-    [data-testid="stSidebarNav"] { display: none !important; }
-    [data-testid="stSidebar"] .block-container { padding-top: 2rem; padding-bottom: 1rem; }
-    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-    .stButton>button { font-weight: 600; }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { background-color: #f0f2f6; border-radius: 8px 8px 0 0; padding: 10px 15px; }
-    .stTabs [aria-selected="true"] { background-color: #ffffff; border-bottom: 2px solid #003366; }
-</style>
-""", unsafe_allow_html=True)
-
-# --- サイドバー ---
 with st.sidebar:
     st.title("APOLLO") 
     st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
+    st.markdown("**v.3**")
     st.markdown("---")
-    st.subheader("Home")
-    st.page_link("Home.py", label="Mission Control", icon="🛰️")
+    st.subheader("Home"); st.page_link("Home.py", label="Mission Control", icon="🛰️")
     st.subheader("Modules")
     st.page_link("pages/1_🌍_ATLAS.py", label="ATLAS", icon="🌍")
     st.page_link("pages/2_💡_CORE.py", label="CORE", icon="💡")
     st.page_link("pages/3_🚀_Saturn_V.py", label="Saturn V", icon="🚀")
     st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
     st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
+    st.page_link("pages/6_🔗_CREW.py", label="CREW", icon="🔗")
     st.markdown("---")
-    st.caption("ナビゲーション:\n1. Mission Control でデータをアップロードし、前処理を実行します。\n2. 上のリストから分析モジュールを選択します。")
+    st.caption("ナビゲーション:")
+    st.caption("1. Mission Control でデータをアップロードし、前処理を実行します。")
+    st.caption("2. 上のリストから分析モジュールを選択します。")
     st.markdown("---")
     st.caption("© 2025 しばやま")
 
-# --- メインコンテンツ ---
 st.title("🧭 Explorer")
-st.markdown("特許テキストからキーワード（複合名詞）を抽出し、全体・競合比較・時系列でのトレンドを可視化します。")
+st.markdown("""
+Explorer (戦略的キーワード探索) は、特許文書内の専門用語を抽出し、市場全体のトレンド変遷や競合他社との戦略的差異を多角的に分析するモジュールです。
+急上昇ワードの特定、時系列での技術推移、そして企業間のポジショニング比較を通じて、次の一手となるインサイトを発掘します。
+""")
 
-# テーマ選択
 col_theme, _ = st.columns([1, 3])
 with col_theme:
-    selected_theme = st.selectbox("表示テーマ:", ["APOLLO Standard", "Modern Presentation"], key="explorer_theme_selector")
+    selected_theme = st.selectbox("表示テーマ:", ["APOLLO Standard", "Modern Presentation"], key="exp_theme")
 theme_config = get_theme_config(selected_theme)
 st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
 
-# ==================================================================
-# --- 6. データロード & 初期化 ---
-# ==================================================================
+# データロード
 if not st.session_state.get("preprocess_done", False):
-    st.error("分析データがありません。")
-    st.warning("先に「Mission Control」（メインページ）でファイルをアップロードし、「分析エンジン起動」を実行してください。")
-    st.stop()
-else:
-    df_main = st.session_state.df_main
-    col_map = st.session_state.col_map
-    delimiters = st.session_state.delimiters
+    st.error("分析データがありません。Mission Controlでデータをロードしてください。"); st.stop()
 
-# ==================================================================
-# --- 7. Explorer アプリケーション ---
-# ==================================================================
+df_main = st.session_state.df_main
+col_map = st.session_state.col_map
+delimiters = st.session_state.delimiters
 
-# --- UI設定 ---
-st.subheader("分析パラメータ設定")
+# 出願人リスト生成
+app_counts = pd.Series()
+if col_map['applicant'] in df_main.columns:
+    if 'applicant_main' in df_main.columns:
+        app_series = df_main['applicant_main'].explode().dropna()
+    else:
+        app_series = df_main[col_map['applicant']].fillna('').str.split(delimiters['applicant']).explode().str.strip()
+    
+    app_counts = app_series[app_series != ''].value_counts()
 
-with st.container(border=True):
-    st.markdown("##### 企業比較分析の設定")
-    applicant_list = ["(指定なし)"]
-    if col_map['applicant'] and col_map['applicant'] in df_main.columns:
-        try:
-            applicants = df_main[col_map['applicant']].fillna('').str.split(delimiters['applicant']).explode().str.strip()
-            applicants = applicants[applicants != '']
-            applicant_list = ["(指定なし)"] + sorted(applicants.unique())
-        except Exception as e:
-            st.warning(f"出願人リストの生成に失敗: {e}")
+sorted_applicants = app_counts.index.tolist()
+app_count_dict = app_counts.to_dict()
 
-    col1, col2, col3 = st.columns(3)
-    with col1: my_company = st.selectbox("自社名 (MY_COMPANY):", applicant_list, key="exp_my_company")
-    with col2: company_a = st.selectbox("競合A (COMPANY_A):", applicant_list, key="exp_comp_a")
-    with col3: company_b = st.selectbox("競合B (COMPANY_B):", applicant_list, key="exp_comp_b")
+# 前処理
+if 'explorer_keywords' not in st.session_state:
+    with st.spinner("Explorer: テキスト解析とキーワード抽出を実行中..."):
+        df_main['explorer_text'] = df_main[col_map['title']].fillna('') + ' ' + df_main[col_map['abstract']].fillna('')
+        df_main['explorer_keywords'] = df_main['explorer_text'].apply(extract_compound_nouns)
+        st.session_state.explorer_keywords = True
 
-    st.markdown("##### 時系列分析の設定")
-    col1, col2, col3 = st.columns(3)
-    with col1: enable_time_series = st.checkbox("時系列分析を有効にする", value=True, key="exp_enable_time")
-    with col2:
-        date_column = col_map.get('date', None)
-        st.text_input("日付カラム (自動選択):", value=date_column, disabled=True)
-    with col3: time_slice_years = st.number_input("何年ごとに区切るか:", min_value=1, value=5, key="exp_time_slice")
+# モード選択
+selected_tab = st.radio(
+    "分析モードを選択:",
+    ["Global Overview", "Trend Analysis", "Comparative Strategy", "Context Search (KWIC)"],
+    horizontal=True
+)
 
-    st.markdown("##### 出力設定")
-    top_n_keywords = st.number_input("各キーワードリストで上位何件まで表示するか:", min_value=5, value=20, key="exp_top_n")
-
-# --- 分析実行 ---
 st.markdown("---")
-if st.button("Explorer キーワード分析を実行", type="primary", key="exp_run_analysis"):
-    if not (col_map['title'] and col_map['abstract'] and col_map['applicant']):
-        st.error("エラー: 必須カラム（名称・要約・出願人）が設定されていません。")
-        st.stop()
-    if enable_time_series and not date_column:
-        st.error("エラー: 時系列分析には出願日カラムが必要です。")
-        st.stop()
 
-    try:
-        df_main['text'] = df_main[col_map['title']].fillna('') + ' ' + df_main[col_map['abstract']].fillna('')
-        df_main['権利者'] = df_main[col_map['applicant']].astype(str).str.split(delimiters['applicant'])
-        df_exploded = df_main.explode('権利者')
-        df_exploded['権利者'] = df_exploded['権利者'].str.strip()
-        st.success("データ前処理完了")
+# ==================================================================
+# --- 4. Global Overview (全体俯瞰) ---
+# ==================================================================
+if selected_tab == "Global Overview":
+    st.subheader("Global Overview")
+    
+    top_n_cloud = st.number_input("ワードクラウド単語数", 10, 100, 50, key="go_cloud_n")
+    all_keywords = [w for sublist in df_main['explorer_keywords'] for w in sublist]
+    word_counts = Counter(all_keywords)
+    
+    if not word_counts:
+        st.warning("有効なキーワードがありません。")
+    else:
+        st.markdown("##### 1. 全体ワードクラウド")
+        generate_wordcloud_and_list(all_keywords, "全体ワードクラウド", top_n_cloud, FONT_PATH)
 
-        # --- 分析1: 全体 ---
-        with st.container(border=True):
-            st.header("データセット全体の技術キーワード")
-            with st.spinner("抽出中..."):
-                all_words = []
-                for text in df_main['text']: all_words.extend(extract_compound_nouns(text))
-                generate_wordcloud_and_list(all_words, "データセット全体の技術キーワード", top_n_keywords, font_path)
+        st.markdown("##### 2. 全体共起ネットワーク (技術クラスター)")
+        col_net1, col_net2 = st.columns(2)
+        with col_net1: global_net_top_n = st.slider("抽出単語数 (Top N)", 30, 100, 60, key="global_net_n")
+        with col_net2: global_net_threshold = st.slider("共起閾値 (Jaccard)", 0.01, 0.3, 0.05, 0.01, key="global_net_th")
 
-        # --- 分析2: 企業比較 ---
-        target_companies = [c for c in [my_company, company_a, company_b] if c != "(指定なし)"]
-        if target_companies:
-            with st.container(border=True):
-                st.header(f"企業比較: {', '.join(target_companies)}")
-                company_words = {}
-                with st.spinner("各企業のキーワードを抽出中..."):
-                    for company in target_companies:
-                        company_df = df_exploded[df_exploded['権利者'] == company]
-                        if company_df.empty:
-                            st.warning(f"警告: 企業 '{company}' のデータなし")
-                            company_words[company] = []
-                            continue
-                        words = []
-                        for text in company_df['text']: words.extend(extract_compound_nouns(text))
-                        company_words[company] = words
+        with st.spinner("全体ネットワーク計算中..."):
+            c_all = Counter(all_keywords)
+            top_nodes_global = [w for w, c in c_all.most_common(global_net_top_n)]
+            pair_counts_global = Counter()
+            for kws in df_main['explorer_keywords']:
+                valid_w = [w for w in set(kws) if w in top_nodes_global]
+                if len(valid_w) >= 2:
+                    for pair in combinations(sorted(valid_w), 2): pair_counts_global[pair] += 1
+            
+            G_global = nx.Graph()
+            for w in top_nodes_global: G_global.add_node(w, size=c_all[w])
+            for (u, v), c in pair_counts_global.items():
+                weight = c / (c_all[u] + c_all[v] - c)
+                if weight >= global_net_threshold: G_global.add_edge(u, v, weight=weight)
+            G_global.remove_nodes_from(list(nx.isolates(G_global)))
+            
+            if G_global.number_of_nodes() > 0:
+                communities = community.greedy_modularity_communities(G_global)
+                community_map = {}; pos_global = nx.spring_layout(G_global, k=0.8, seed=42)
+                for i, comm in enumerate(communities):
+                    for node in comm: community_map[node] = i
+                
+                edge_x, edge_y = [], []
+                for edge in G_global.edges():
+                    x0, y0 = pos_global[edge[0]]; x1, y1 = pos_global[edge[1]]
+                    edge_x.extend([x0, x1, None]); edge_y.extend([y0, y1, None])
+                
+                edge_trace_g = go.Scatter(x=edge_x, y=edge_y, line=dict(width=0.5, color='#888'), hoverinfo='none', mode='lines')
+                node_x, node_y, node_color, node_text = [], [], [], []
+                for node in G_global.nodes():
+                    node_x.append(pos_global[node][0]); node_y.append(pos_global[node][1])
+                    node_color.append(community_map.get(node, 0))
+                    node_text.append(f"{node} ({c_all[node]}件)")
+                
+                node_trace_g = go.Scatter(
+                    x=node_x, y=node_y, mode='markers+text',
+                    text=[n for n in G_global.nodes()], textposition="top center",
+                    hovertext=node_text, hoverinfo="text",
+                    marker=dict(showscale=False, colorscale='Turbo', color=node_color, size=[np.log(c_all[n]+1)*8 for n in G_global.nodes()], line_width=1)
+                )
+                fig_net_g = go.Figure(data=[edge_trace_g, node_trace_g])
+                fig_net_g.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
+                update_fig_layout(fig_net_g, "Global Co-occurrence Network", height=700, theme_config=theme_config)
+                st.plotly_chart(fig_net_g, use_container_width=True)
+            else: st.warning("条件に一致する共起関係が見つかりませんでした。")
 
-                for company, words in company_words.items():
-                    generate_wordcloud_and_list(words, f"'{company}'の技術キーワード", top_n_keywords, font_path)
+# ==================================================================
+# --- 5. Trend Analysis (時系列分析) ---
+# ==================================================================
+elif selected_tab == "Trend Analysis":
+    st.subheader("Trend Analysis")
+    
+    target_filter = st.selectbox(
+        "分析対象:", 
+        ["全体 (Market)"] + sorted_applicants, 
+        format_func=lambda x: f"{x} (全{len(df_main)}件)" if x == "全体 (Market)" else f"{x} ({app_count_dict.get(x, 0)}件)",
+        key="trend_target"
+    )
+    
+    if target_filter == "全体 (Market)":
+        df_target = df_main
+    else:
+        if 'applicant_main' in df_main.columns:
+            mask = df_main['applicant_main'].apply(lambda x: isinstance(x, list) and target_filter in x)
+        else:
+            mask = df_main[col_map['applicant']].fillna('').str.contains(re.escape(target_filter))
+        df_target = df_main[mask]
+        
+    st.info(f"分析対象: {target_filter} ({len(df_target)}件)")
+    
+    if df_target.empty:
+        st.warning("データがありません。")
+    else:
+        current_year = int(df_target['year'].max())
+        min_year = int(df_target['year'].min())
+        
+        interval_years = st.slider("期間の粒度 (年)", 1, 10, 5, key="ta_interval")
+        
+        periods = []
+        c_end = current_year
+        while c_end >= min_year:
+            c_start = c_end - interval_years + 1
+            real_start = max(min_year, c_start)
+            periods.append((real_start, c_end))
+            c_end -= interval_years
+            if c_end < min_year: break
+        
+        # 1. 急上昇キーワード
+        st.markdown(f"##### 1. 急上昇キーワード (Growth Rate)")
+        if len(periods) > 1:
+            st.caption(f"比較期間: [{periods[0][0]}-{periods[0][1]}] vs [{periods[1][0]}-{periods[1][1]}]")
+            df_recent = df_target[(df_target['year'] >= periods[0][0]) & (df_target['year'] <= periods[0][1])]
+            df_past = df_target[(df_target['year'] >= periods[1][0]) & (df_target['year'] <= periods[1][1])]
+            
+            c_recent = Counter([w for sublist in df_recent['explorer_keywords'] for w in sublist])
+            c_past = Counter([w for sublist in df_past['explorer_keywords'] for w in sublist])
+            
+            growth_data = []
+            min_freq = max(2, len(df_recent) * 0.01)
+            for word, count_r in c_recent.items():
+                if count_r < min_freq: continue
+                count_p = c_past.get(word, 0)
+                growth_rate = (count_r - count_p) / (count_p + 1)
+                growth_data.append({"Keyword": word, "Growth Rate": growth_rate})
+            
+            df_growth = pd.DataFrame(growth_data).sort_values("Growth Rate", ascending=False).head(20)
+            if not df_growth.empty:
+                fig_growth = px.bar(df_growth, x="Growth Rate", y="Keyword", orientation='h', color="Growth Rate", color_continuous_scale="Reds")
+                fig_growth.update_layout(yaxis={'categoryorder':'total ascending'})
+                update_fig_layout(fig_growth, "Growth Rate Top 20", height=500, theme_config=theme_config)
+                st.plotly_chart(fig_growth, use_container_width=True)
+        else:
+            st.warning("比較対象となる過去のデータ期間が不足しています。")
 
-                # 特徴語抽出
-                my_counter = Counter(company_words.get(my_company, []))
-                a_counter = Counter(company_words.get(company_a, []))
-                b_counter = Counter(company_words.get(company_b, []))
+        # 2. 時系列マルチ・ワードクラウド
+        st.markdown(f"##### 2. 時系列ワードクラウド (Time-Lapse)")
+        cols = st.columns(3)
+        for i, (start, end) in enumerate(periods):
+            with cols[i % 3]:
+                df_p = df_target[(df_target['year'] >= start) & (df_target['year'] <= end)]
+                kws_p = [w for sublist in df_p['explorer_keywords'] for w in sublist]
+                st.markdown(f"**{start} - {end}** ({len(df_p)}件)")
+                if kws_p: generate_wordcloud_and_list(kws_p, f"{start}-{end}", 30, FONT_PATH)
+            
+        # 3. トレンド・ネットワーク
+        st.markdown(f"##### 3. トレンド・共起ネットワーク (赤=急上昇 / 青=停滞)")
+        col_net1, col_net2 = st.columns(2)
+        with col_net1: ta_net_n = st.slider("抽出単語数", 30, 100, 60, key="ta_net_n")
+        with col_net2: ta_net_th = st.slider("共起閾値", 0.01, 0.3, 0.05, 0.01, key="ta_net_th")
+        
+        all_target_kw = [w for sublist in df_target['explorer_keywords'] for w in sublist]
+        c_all = Counter(all_target_kw)
+        top_nodes = [w for w, c in c_all.most_common(ta_net_n)]
+        
+        pair_counts = Counter()
+        for kws in df_target['explorer_keywords']:
+            valid_w = [w for w in set(kws) if w in top_nodes]
+            if len(valid_w) >= 2:
+                for pair in combinations(sorted(valid_w), 2): pair_counts[pair] += 1
+                
+        G = nx.Graph()
+        for w in top_nodes: G.add_node(w, size=c_all[w])
+        for (u, v), c in pair_counts.items():
+            weight = c / (c_all[u] + c_all[v] - c)
+            if weight >= ta_net_th: G.add_edge(u, v, weight=weight)
+        G.remove_nodes_from(list(nx.isolates(G)))
+        
+        if G.number_of_nodes() > 0:
+            pos = nx.spring_layout(G, k=0.8, seed=42)
+            node_colors, node_texts = [], []
+            
+            c_rec_net = Counter([w for sublist in df_target[df_target['year'] >= periods[0][0]]['explorer_keywords'] for w in sublist])
+            if len(periods) > 1:
+                c_pst_net = Counter([w for sublist in df_target[(df_target['year'] >= periods[1][0]) & (df_target['year'] <= periods[1][1])]['explorer_keywords'] for w in sublist])
+            else:
+                c_pst_net = Counter()
 
-                st.markdown("---")
-                st.subheader("特徴/独自キーワード")
-                if my_company != "(指定なし)":
-                    my_char = get_characteristic_words(my_counter, a_counter, b_counter)
-                    generate_wordcloud_and_list(my_char, f"'{my_company}' の特徴的キーワード", top_n_keywords, font_path)
-                if company_a != "(指定なし)":
-                    a_char = get_characteristic_words(a_counter, my_counter, b_counter)
-                    generate_wordcloud_and_list(a_char, f"'{company_a}' の特徴的キーワード", top_n_keywords, font_path)
-                if company_b != "(指定なし)":
-                    b_char = get_characteristic_words(b_counter, my_counter, a_counter)
-                    generate_wordcloud_and_list(b_char, f"'{company_b}' の特徴的キーワード", top_n_keywords, font_path)
+            for node in G.nodes():
+                gr = (c_rec_net.get(node, 0) - c_pst_net.get(node, 0)) / (c_pst_net.get(node, 0) + 1)
+                node_colors.append(gr)
+                node_texts.append(f"{node}<br>Growth: {gr:.2f}")
+            
+            edge_x, edge_y = [], []
+            for edge in G.edges():
+                x0, y0 = pos[edge[0]]; x1, y1 = pos[edge[1]]
+                edge_x.extend([x0, x1, None]); edge_y.extend([y0, y1, None])
+            
+            edge_trace = go.Scatter(x=edge_x, y=edge_y, line=dict(width=0.5, color='#888'), hoverinfo='none', mode='lines')
+            node_trace = go.Scatter(
+                x=[pos[n][0] for n in G.nodes()], y=[pos[n][1] for n in G.nodes()],
+                mode='markers+text', text=list(G.nodes()), textposition="top center",
+                hovertext=node_texts, hoverinfo="text",
+                marker=dict(showscale=True, colorscale='RdBu_r', color=node_colors, size=[np.log(G.nodes[n]['size']+1)*8 for n in G.nodes()], line_width=1, colorbar=dict(title="Growth"))
+            )
+            fig_net = go.Figure(data=[edge_trace, node_trace])
+            fig_net.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
+            update_fig_layout(fig_net, "Trend Network", height=700, theme_config=theme_config)
+            st.plotly_chart(fig_net, use_container_width=True)
 
-        # --- 分析3: 時系列 ---
-        if enable_time_series:
-            with st.container(border=True):
-                st.header(f"技術キーワードの時系列分析 ({time_slice_years}年ごと)")
-                try:
-                    df_time = df_main.copy()
-                    df_time.dropna(subset=['year'], inplace=True)
-                    min_year = int(df_time['year'].min())
-                    max_year = int(df_time['year'].max())
+# ==================================================================
+# --- 6. Comparative Strategy (競合比較) ---
+# ==================================================================
+elif selected_tab == "Comparative Strategy":
+    st.subheader("Comparative Strategy")
+    
+    c1, c2 = st.columns(2)
+    with c1: 
+        my_comp = st.selectbox(
+            "自社 (My Company)", 
+            ["(選択してください)"] + sorted_applicants, 
+            format_func=lambda x: x if x == "(選択してください)" else f"{x} ({app_count_dict.get(x, 0)}件)",
+            key="comp_my"
+        )
+    with c2: 
+        target_comp = st.selectbox(
+            "競合他社 (Competitor)", 
+            ["(選択してください)"] + sorted_applicants, 
+            format_func=lambda x: x if x == "(選択してください)" else f"{x} ({app_count_dict.get(x, 0)}件)",
+            key="comp_target"
+        )
+    
+    if my_comp != "(選択してください)" and target_comp != "(選択してください)":
+        def get_keywords_for_app(app_name):
+            if 'applicant_main' in df_main.columns:
+                mask = df_main['applicant_main'].apply(lambda x: isinstance(x, list) and app_name in x)
+            else:
+                mask = df_main[col_map['applicant']].fillna('').str.contains(re.escape(app_name))
+            return [w for sublist in df_main[mask]['explorer_keywords'] for w in sublist]
 
-                    with st.spinner("時系列キーワードを抽出中..."):
-                        for start_year in range(min_year, max_year + 1, time_slice_years):
-                            end_year = start_year + time_slice_years - 1
-                            period_df = df_time[(df_time['year'] >= start_year) & (df_time['year'] <= end_year)]
-                            if period_df.empty: continue
-                            period_words = []
-                            for text in period_df['text']: period_words.extend(extract_compound_nouns(text))
-                            generate_wordcloud_and_list(period_words, f"技術キーワードの変遷 ({start_year} - {end_year})", top_n_keywords, font_path)
-                except Exception as e:
-                    st.error(f"時系列分析エラー: {e}")
+        words_my = get_keywords_for_app(my_comp)
+        words_target = get_keywords_for_app(target_comp)
+        c_my = Counter(words_my)
+        c_tgt = Counter(words_target)
+        
+        # 1. Tornado Chart
+        st.markdown("##### 1. キーワード出現頻度比較 (Tornado Chart)")
+        all_keys = set(list(c_my.keys()) + list(c_tgt.keys()))
+        valid_keys = [k for k in all_keys if (c_my[k] + c_tgt[k]) >= 3]
+        
+        tornado_data = []
+        for k in valid_keys:
+            tornado_data.append({
+                "Keyword": k, "My Count": -c_my[k], # Left (Negative)
+                "Competitor Count": c_tgt[k],       # Right (Positive)
+                "My Abs": c_my[k], 
+                "Total": c_my[k] + c_tgt[k]
+            })
+        df_tornado = pd.DataFrame(tornado_data).sort_values("Total", ascending=True).tail(30)
+        
+        if not df_tornado.empty:
+            max_val = max(df_tornado["My Abs"].max(), df_tornado["Competitor Count"].max())
+            range_x = [-max_val * 1.1, max_val * 1.1]
+            tick_vals = [-max_val, -max_val/2, 0, max_val/2, max_val]
+            tick_text = [str(int(abs(v))) for v in tick_vals]
 
-        st.success("完了")
+            fig_tornado = go.Figure()
+            fig_tornado.add_trace(go.Bar(y=df_tornado["Keyword"], x=df_tornado["My Count"], orientation='h', name=my_comp, marker_color=theme_config["color_sequence"][0]))
+            fig_tornado.add_trace(go.Bar(y=df_tornado["Keyword"], x=df_tornado["Competitor Count"], orientation='h', name=target_comp, marker_color=theme_config["color_sequence"][1]))
+            
+            fig_tornado.update_layout(
+                barmode='relative', bargap=0.1, 
+                xaxis=dict(
+                    title="出現件数 (左: 自社 / 右: 競合)", 
+                    tickmode='array', tickvals=tick_vals, ticktext=tick_text,
+                    range=range_x,
+                    showline=True, linewidth=1, linecolor='black'
+                ),
+                yaxis=dict(side='right', showline=True, linewidth=1, linecolor='black'),
+                legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
+                margin=dict(r=150, l=20, b=100)
+            )
+            update_fig_layout(fig_tornado, "Tornado Chart", height=800, theme_config=theme_config)
+            st.plotly_chart(fig_tornado, use_container_width=True)
+            st.info("左側 (青系) が自社、右側 (赤/オレンジ系) が競合の出現数を示します。")
 
-    except Exception as e:
-        st.error(f"処理中にエラーが発生しました: {e}")
-        st.exception(traceback.format_exc())
+        # 2. ワードクラウド
+        st.markdown("##### 2. 企業別ワードクラウド")
+        c_wc1, c_wc2 = st.columns(2)
+        with c_wc1:
+            st.markdown(f"**{my_comp}**")
+            if words_my: generate_wordcloud_and_list(words_my, my_comp, 30, FONT_PATH)
+        with c_wc2:
+            st.markdown(f"**{target_comp}**")
+            if words_target: generate_wordcloud_and_list(words_target, target_comp, 30, FONT_PATH)
+            
+        # 3. 支配率ネットワーク
+        st.markdown(f"##### 3. 支配率ネットワーク (青=自社優勢 / 赤=競合優勢)")
+        col_cs1, col_cs2 = st.columns(2)
+        with col_cs1: cs_net_n = st.slider("抽出単語数", 30, 100, 60, key="cs_net_n")
+        with col_cs2: cs_net_th = st.slider("共起閾値", 0.01, 0.3, 0.05, 0.01, key="cs_net_th")
+        
+        combined_keywords = words_my + words_target
+        c_combined = Counter(combined_keywords)
+        top_nodes = [w for w, c in c_combined.most_common(cs_net_n)]
+        
+        if 'applicant_main' in df_main.columns:
+            mask_2 = df_main['applicant_main'].apply(lambda x: isinstance(x, list) and (my_comp in x or target_comp in x))
+        else:
+            mask_2 = df_main[col_map['applicant']].fillna('').str.contains(re.escape(my_comp) + "|" + re.escape(target_comp))
+        df_2 = df_main[mask_2]
+        
+        pair_counts = Counter()
+        for kws in df_2['explorer_keywords']:
+            valid_w = [w for w in set(kws) if w in top_nodes]
+            if len(valid_w) >= 2:
+                for pair in combinations(sorted(valid_w), 2): pair_counts[pair] += 1
+                
+        G = nx.Graph()
+        for w in top_nodes: G.add_node(w, size=c_combined[w])
+        for (u, v), c in pair_counts.items():
+            weight = c / (c_combined[u] + c_combined[v] - c)
+            if weight >= cs_net_th: G.add_edge(u, v, weight=weight)
+        G.remove_nodes_from(list(nx.isolates(G)))
+        
+        if G.number_of_nodes() > 0:
+            pos = nx.spring_layout(G, k=0.8, seed=42)
+            node_colors, node_texts = [], []
+            for node in G.nodes():
+                m = c_my[node]; t = c_tgt[node]
+                if m + t == 0: dom = 0.5
+                else: dom = m / (m + t)
+                node_colors.append(dom)
+                node_texts.append(f"{node}<br>{my_comp}: {m}<br>{target_comp}: {t}")
+            
+            edge_x, edge_y = [], []
+            for edge in G.edges():
+                x0, y0 = pos[edge[0]]; x1, y1 = pos[edge[1]]
+                edge_x.extend([x0, x1, None]); edge_y.extend([y0, y1, None])
+            
+            edge_trace = go.Scatter(x=edge_x, y=edge_y, line=dict(width=0.5, color='#888'), hoverinfo='none', mode='lines')
+            node_trace = go.Scatter(
+                x=[pos[n][0] for n in G.nodes()], y=[pos[n][1] for n in G.nodes()],
+                mode='markers+text', text=list(G.nodes()), textposition="top center",
+                hovertext=node_texts, hoverinfo="text",
+                marker=dict(showscale=True, colorscale='RdBu', color=node_colors, size=[np.log(G.nodes[n]['size']+1)*8 for n in G.nodes()], line_width=1, colorbar=dict(title="Dominance"))
+            )
+            fig_net = go.Figure(data=[edge_trace, node_trace])
+            fig_net.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
+            update_fig_layout(fig_net, "Dominance Network", height=700, theme_config=theme_config)
+            st.plotly_chart(fig_net, use_container_width=True)
+
+# ==================================================================
+# --- 7. Context Search (文脈検索) ---
+# ==================================================================
+elif selected_tab.startswith("Context Search"):
+    st.subheader("Context Search (KWIC: KeyWord In Context)")
+    search_kw = st.text_input("検索したいキーワードを入力してください:", "")
+    
+    if search_kw:
+        mask = df_main['explorer_text'].str.contains(re.escape(search_kw), na=False)
+        df_hit = df_main[mask]
+        st.write(f"ヒット件数: {len(df_hit)} 件")
+        
+        if not df_hit.empty:
+            def highlight_text(text, kw):
+                if pd.isna(text): return ""
+                matches = [m.start() for m in re.finditer(re.escape(kw), text)]
+                if not matches: return text[:100] + "..."
+                snippets = []
+                for idx in matches[:3]: 
+                    start = max(0, idx - 40); end = min(len(text), idx + len(kw) + 40)
+                    snippet = text[start:end].replace(kw, f"**{kw}**")
+                    snippets.append(f"...{snippet}...")
+                return " / ".join(snippets)
+
+            for i, row in df_hit.head(20).iterrows():
+                with st.expander(f"{row[col_map['title']]} ({row['year']}) - {row.get(col_map['applicant'], '')}"):
+                    if col_map['abstract'] and pd.notna(row[col_map['abstract']]):
+                        st.markdown(highlight_text(row[col_map['abstract']], search_kw))
+                    st.caption(f"出願番号: {row.get(col_map['app_num'], 'N/A')}")
