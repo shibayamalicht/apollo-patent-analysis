@@ -13,6 +13,8 @@ import os
 import string
 from collections import Counter
 from itertools import combinations
+import json
+from sklearn.metrics.pairwise import euclidean_distances
 
 # 機械学習・自然言語処理
 from umap import UMAP 
@@ -26,6 +28,7 @@ from scipy.spatial import ConvexHull
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import japanize_matplotlib
+import utils
 
 # 警告を非表示
 warnings.filterwarnings('ignore')
@@ -42,38 +45,9 @@ st.set_page_config(
 # ==================================================================
 # --- 2. フォント設定 ---
 # ==================================================================
-def get_japanese_font_path():
-    system = platform.system()
-    font_paths = []
-    
-    if system == "Darwin": # Mac
-        font_paths = [
-            "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-            "/System/Library/Fonts/Hiragino Sans W3.ttc",
-            "/System/Library/Fonts/Hiragino Kaku Gothic ProN.ttc",
-            "/Library/Fonts/AppleGothic.ttf",
-            "/System/Library/Fonts/AppleSDGothicNeo.ttc" 
-        ]
-    elif system == "Windows": # Windows
-        font_paths = [
-            "C:/Windows/Fonts/meiryo.ttc",
-            "C:/Windows/Fonts/msgothic.ttc",
-            "C:/Windows/Fonts/yugothr.ttc",
-            "C:/Windows/Fonts/YuGothR.ttc"
-        ]
-    else: # Linux
-        font_paths = [
-            "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",
-            "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-            "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/noto/NotoSansCJKjp-Regular.otf"
-        ]
-        
-    for path in font_paths:
-        if os.path.exists(path): return path
-    return None
 
-FONT_PATH = get_japanese_font_path()
+
+FONT_PATH = utils.get_japanese_font_path()
 if FONT_PATH:
     try:
         prop = fm.FontProperties(fname=FONT_PATH)
@@ -84,113 +58,15 @@ if FONT_PATH:
 # ==================================================================
 # --- 3. 共通デザイン設定 (CSS) ---
 # ==================================================================
-st.markdown("""
-<style>
-    html, body { 
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
-    }
-    [data-testid="stSidebar"] h1 {
-        color: #003366;
-        font-weight: 900 !important;
-        font-size: 2.5rem !important;
-    }
-    [data-testid="stSidebarNav"] {
-        display: none !important;
-    }
-    [data-testid="stSidebar"] .block-container {
-        padding-top: 2rem;
-        padding-bottom: 1rem;
-    }
-    .block-container { 
-        padding-top: 2rem; 
-        padding-bottom: 2rem; 
-    }
-    h3 { border-bottom: 2px solid #f0f0f0; padding-bottom: 5px; }
-    .stButton>button {
-        font-weight: 600;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #f0f2f6;
-        border-radius: 8px 8px 0 0;
-        padding: 10px 15px;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #ffffff;
-        border-bottom: 2px solid #003366;
-    }
-</style>
-""", unsafe_allow_html=True)
+
 
 # ==================================================================
 # --- 4. デザインテーマ管理 ---
 # ==================================================================
 
-def get_theme_config(theme_name):
-    themes = {
-        "APOLLO Standard": {
-            "bg_color": "#ffffff",
-            "text_color": "#333333",
-            "sidebar_bg": "#f8f9fa",
-            "plotly_template": "plotly_white",
-            "color_sequence": px.colors.qualitative.G10,
-            "density_scale": "Blues",
-            "accent_color": "#003366",
-            "css": """[data-testid="stHeader"] { background-color: #ffffff; } h1, h2, h3 { color: #003366; }"""
-        },
-        "Modern Presentation": {
-            "bg_color": "#fdfdfd",
-            "text_color": "#2c3e50",
-            "sidebar_bg": "#eaeaea",
-            "plotly_template": "plotly_white",
-            "color_sequence": ["#264653", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51", "#8ab17d"],
-            "density_scale": "Teal",
-            "accent_color": "#264653",
-            "css": """[data-testid="stSidebar"] { background-color: #eaeaea; } [data-testid="stHeader"] { background-color: #fdfdfd; } h1, h2, h3 { color: #264653; font-family: "Georgia", serif; } .stButton>button { background-color: #264653; color: white; border-radius: 0px; }"""
-        }
-    }
-    return themes.get(theme_name, themes["APOLLO Standard"])
 
-def update_fig_layout(fig, title, height=1000, width=800, theme_config=None, show_axes=False):
-    if theme_config is None:
-        return fig
-    
-    layout_params = dict(
-        template=theme_config["plotly_template"],
-        title=dict(text=title, font=dict(size=18, color=theme_config["text_color"])),
-        paper_bgcolor=theme_config["bg_color"],
-        plot_bgcolor=theme_config["bg_color"],
-        font=dict(color=theme_config["text_color"], family="Helvetica Neue"),
-        height=height,
-        width=width,
-        margin=dict(l=20, r=20, t=60, b=20),
-        legend=dict(
-            orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-            bgcolor="rgba(255,255,255,0.8)", bordercolor="#eee", borderwidth=1
-        )
-    )
 
-    if not show_axes:
-        layout_params['xaxis'] = dict(visible=False, showgrid=False, zeroline=False, showticklabels=False)
-        layout_params['yaxis'] = dict(
-            visible=False, showgrid=False, zeroline=False, showticklabels=False,
-            scaleanchor="x", scaleratio=1
-        )
-    else:
-        if "width" in layout_params:
-            del layout_params["width"]
 
-        layout_params['xaxis'] = dict(
-            visible=True, showgrid=False, zeroline=False, showline=False, showticklabels=True
-        )
-        layout_params['yaxis'] = dict(
-            visible=True, showgrid=True, gridcolor='#eee', zeroline=False, showline=False, showticklabels=True
-        )
-
-    fig.update_layout(**layout_params)
-    return fig
 
 # ==================================================================
 # --- 5. テキスト処理関数 ---
@@ -203,69 +79,10 @@ def load_tokenizer_saturn():
 t = load_tokenizer_saturn()
 
 # ストップワード定義
-_stopwords_original_list = [
-    "する","ある","なる","ため","こと","よう","もの","これ","それ","あれ","ここ","そこ","どれ","どの",
-    "この","その","当該","該","および","及び","または","また","例えば","例えばは","において","により",
-    "に対して","に関して","について","として","としては","場合","一方","他方","さらに","そして","ただし",
-    "なお","等","など","等々","いわゆる","所謂","同様","同時","前記","本","同","各","各種","所定","所望",
-    "一例","他","一部","一つ","複数","少なくとも","少なくとも一つ","上記","下記","前述","後述","既述",
-    "関する","基づく","用いる","使用","利用","有する","含む","備える","設ける","すなわち","従って",
-    "しかしながら","次に","特に","具体的に","詳細に","いずれ","うち","それぞれ","とき",
-    "かかる","かような","かかる場合","本件","本願","本出願","本明細書","これら","それら","各々","随時","適宜",
-    "任意","必ずしも","通常","一般に","典型的","代表的",
-    "本発明","発明","実施例","実施形態","変形例","請求","請求項","図","図面","符号","符号の説明",
-    "図面の簡単な説明","発明の詳細な説明","技術分野","背景技術","従来技術","発明が解決しようとする課題","課題",
-    "解決手段","効果","要約","発明の効果","目的","手段","構成","構造","工程","処理","方法","手法","方式",
-    "システム","プログラム","記憶媒体","特徴","特徴とする","特徴部","ステップ","フロー","シーケンス","定義",
-    "関係","対応","整合","実施の形態","実施の態様","態様","変形","修正例","図示","図示例","図示しない",
-    "参照","参照符号","段落","詳細説明","要旨","一実施形態","他の実施形態","一実施例","別の側面","付記",
-    "適用例","用語の定義","開示","本開示","開示内容","上部","下部","内部","外部","内側","外側","表面",
-    "裏面","側面","上面","下面","端面","先端","基端","後端","一端","他端","中心","中央","周縁","周辺",
-    "近傍","方向","位置","空間","領域","範囲","間隔","距離","形状","形態","状態","種類","層","膜","部",
-    "部材","部位","部品","機構","装置","容器","組成","材料","用途","適用","適用例","片側","両側","左側",
-    "右側","前方","後方","上流","下流","隣接","近接","離間","間置","介在","重畳","概ね","略","略中央",
-    "固定側","可動側","伸長","収縮","係合","嵌合","取付","連結部","支持体","支持部","ガイド部",
-    "データ","情報","信号","出力","入力","制御","演算","取得","送信","受信","表示","通知","設定","変更",
-    "更新","保存","削除","追加","実行","開始","終了","継続","停止","判定","判断","決定","選択","特定",
-    "抽出","検出","検知","測定","計測","移動","回転","変位","変形","固定","配置","生成","付与","供給",
-    "適用","照合","比較","算出","解析","同定","初期化","読出","書込","登録","記録","配信","連携","切替",
-    "起動","復帰","監視","通知処理","取得処理","演算処理","良好","容易","簡便","適切","有利","有用","有効",
-    "効果的","高い","低い","大きい","小さい","新規","改良","改善","抑制","向上","低減","削減","増加",
-    "減少","可能","好適","好ましい","望ましい","優れる","優れた","高性能","高効率","低コスト","コスト",
-    "簡易","安定","安定性","耐久","耐久性","信頼性","簡素","簡略","単純","最適","最適化","汎用","汎用性",
-    "実現","達成","確保","維持","防止","回避","促進","不要","必要","高精度","省電力","省資源","高信頼",
-    "低負荷","高純度","高密度","高感度","迅速","円滑","簡略化","低価格","実効的","可能化","有効化",
-    "非必須","適合","互換","出願","出願人","出願番号","出願日","出願書","出願公開","公開","公開番号",
-    "公開公報","公報","公報番号","特許","特許番号","特許文献","非特許文献","引用","引用文献","先行技術",
-    "審査","審査官","拒絶","意見書","補正書","優先","優先日","分割出願","継続出願","国内移行","国際出願",
-    "国際公開","PCT","登録","公開日","審査請求","拒絶理由","補正","訂正","無効審判","異議","取消","取下げ",
-    "事件番号","代理人","弁理士","係属","経過",
-    "第","第一","第二","第三","第1","第２","第３","第１","第２","第３","一","二","三","四","五","六","七","八","九","零","数","複合","多数","少数","図1","図2","図3","図4","図5","図6","図7","図8","図9","表1","表2","表3","式1","式2","式3","%","％","wt%","vol%","質量%","重量%","容量%","mol","mol%","mol/L","M","mm","cm","m","nm","μm","μ","rpm","Pa","kPa","MPa","GPa","N","W","V","A","mA","Hz","kHz","MHz","GHz","℃","°C","K","mL","L","g","kg","mg","wt","vol","h","hr","hrs","min","s","sec","ppm","ppb","bar","Ω","ohm","J","kJ","Wh","kWh",
-    "株式会社","有限会社","合資会社","合名会社","合同会社","Inc","Inc.","Ltd","Ltd.","Co","Co.","Corp","Corp.","LLC",
-    "GmbH","AG","BV","B.V.","S.A.","S.p.A.","（株）","㈱","（有）",
-    "溶液","溶媒","触媒","反応","生成物","原料","成分","含有","含有量","配合","混合","混合物","濃度","温度","時間",
-    "割合","比率","基","官能基","化合物","組成物","樹脂","ポリマー","モノマー","基板","基材","フィルム","シート",
-    "粒子","粉末","比較例","参考例","試験","試料","評価","条件","実験","実験例","反応条件","反応時間","反応温度",
-    "処理装置","端末","ユニット","モジュール","回路","素子","電源","電圧","電流","信号線","配線","端子","端部","接続",
-    "接続部","演算部","記憶部","記憶装置","記録媒体","ユーザ","利用者","クライアント","サーバ","画面","UI","GUI",
-    "インターフェース","データベース","DB","ネットワーク","通信","要求","応答","リクエスト","レスポンス","パラメータ",
-    "引数","属性","プロパティ","フラグ","ID","ファイル","データ構造","テーブル","レコード",
-    "軸","シャフト","ギア","モータ","エンジン","アクチュエータ","センサ","バルブ","ポンプ","筐体","ハウジング","フレーム",
-    "シャーシ","駆動","伝達","支持","連結","解決", "準備", "提供", "発生", "以上", "十分",
-    "できる", "いる", "明細書", "記載", "記述", "掲載", "言及", "内容", "詳細", "説明", "表記", "表現", "箇条書き", "以下の", "以上の", "全ての", "任意の", "特定の"
-]
-
-@st.cache_data
-def expand_stopwords_to_full_width(words):
-    expanded = set(words)
-    hankaku = string.ascii_letters + string.digits
-    zenkaku = "ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ０１２３４５６７８９"
-    trans = str.maketrans(hankaku, zenkaku)
-    for w in words:
-        if any(c in hankaku for c in w): expanded.add(w.translate(trans))
-    return sorted(list(expanded))
-
-stopwords = set(expand_stopwords_to_full_width(_stopwords_original_list))
+if "stopwords" in st.session_state and st.session_state["stopwords"]:
+    stopwords = st.session_state["stopwords"]
+else:
+    stopwords = utils.get_stopwords()
 
 _ngram_rows = [
     ("参照符号付き要素", r"[一-龥ぁ-んァ-ンA-Za-z0-9／\-＋・]+?(?:部|層|面|体|板|孔|溝|片|部材|要素|機構|装置|手段|電極|端子|領域|基板|回路|材料|工程)\s*[（(]\s*[0-9０-９A-Za-z]+[A-Za-z]?\s*[）)]", "regex", 1),
@@ -285,7 +102,9 @@ _ngram_rows = [
     ("機能句","に限られない","literal",1), ("機能句","一例として","literal",2), ("機能句","例示的には","literal",2),
     ("参照句","前述のとおり","literal",2), ("参照句","前述の通り","literal",2), ("参照句","後述するように","literal",2),
     ("参照句","後述のとおり","literal",2), ("範囲表現", r"少なくとも(?:一|１)つ", "regex", 2), ("範囲表現", "少なくとも一部", "literal", 2),
+
     ("範囲表現", r"複数の(?:実施形態|構成|要素)", "regex", 3), ("課題句", r"(?:上記|前記)の?課題", "regex", 1),
+    ("範囲表現", r"(?:以上|以下|未満|超|以内)", "regex", 2),
     ("接続・論理","一方で","literal",3), ("接続・論理","他方で","literal",3), ("接続・論理","すなわち","literal",3),
     ("接続・論理","したがって","literal",3), ("接続・論理","しかしながら","literal",3), ("接続・論理","例えば","literal",3),
     ("接続・論理","具体的には","literal",3), ("補助句","以下に説明する","literal",3), ("補助句","前記のとおり","literal",3),
@@ -389,27 +208,10 @@ def update_drill_hover_text(df_subset):
     )
     return df_subset
 
-def _create_label_editor_ui(original_map, current_map, key_prefix):
-    widgets_dict = {}
-    sorted_ids = sorted([cid for cid in original_map.keys() if cid != -1])
-    for cluster_id in sorted_ids:
-        orig_label = original_map.get(cluster_id, "")
-        curr_label = current_map.get(cluster_id, orig_label)
-        if orig_label == "(該当なし)": continue
-        col1, col2 = st.columns([2, 3])
-        with col1: st.markdown(f":green[{orig_label}]")
-        with col2:
-            new_label = st.text_input(f"Edit {cluster_id}", value=curr_label, label_visibility="collapsed", key=f"{key_prefix}_{cluster_id}")
-            widgets_dict[cluster_id] = new_label
-    if -1 in original_map:
-        orig_noise = original_map[-1]
-        curr_noise = current_map.get(-1, orig_noise)
-        col1, col2 = st.columns([2, 3])
-        with col1: st.markdown(f":green[{orig_noise}]")
-        with col2:
-            st.text_input(f"noise_label", value=curr_noise, disabled=True, key=f"{key_prefix}_noise")
-            widgets_dict[-1] = curr_noise
-    return widgets_dict
+
+
+        
+
 
 def get_date_bin_options(df_filtered, interval_years, year_column='year'):
     if df_filtered is None or df_filtered.empty: return [f"(データなし)"]
@@ -442,24 +244,7 @@ def get_date_bin_options(df_filtered, interval_years, year_column='year'):
 # ==================================================================
 
 # --- サイドバー ---
-with st.sidebar:
-    st.title("APOLLO") 
-    st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
-    st.markdown("**v.3**")
-    st.markdown("---")
-    st.subheader("Home")
-    st.page_link("Home.py", label="Mission Control", icon="🛰️")
-    st.subheader("Modules")
-    st.page_link("pages/1_🌍_ATLAS.py", label="ATLAS", icon="🌍")
-    st.page_link("pages/2_💡_CORE.py", label="CORE", icon="💡")
-    st.page_link("pages/3_🚀_Saturn_V.py", label="Saturn V", icon="🚀")
-    st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
-    st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
-    st.page_link("pages/6_🔗_CREW.py", label="CREW", icon="🔗")
-    st.markdown("---")
-    st.caption("ナビゲーション:\n1. Mission Control でデータをアップロードし、前処理を実行します。\n2. 上のリストから分析モジュールを選択します。")
-    st.markdown("---")
-    st.caption("© 2025 しばやま")
+utils.render_sidebar()
 
 st.title("🚀 Saturn V")
 st.markdown("SBERT（文脈・意味）に基づき、インタラクティブな技術マップ分析モジュールです。")
@@ -467,7 +252,7 @@ st.markdown("SBERT（文脈・意味）に基づき、インタラクティブ�
 col_theme, _ = st.columns([1, 3])
 with col_theme:
     selected_theme = st.selectbox("表示テーマ:", ["APOLLO Standard", "Modern Presentation"], key="saturn_theme_selector")
-theme_config = get_theme_config(selected_theme)
+theme_config = utils.get_theme_config(selected_theme)
 st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
 
 # ==================================================================
@@ -782,12 +567,27 @@ with tab_main:
                 )
 
         norm_msg = " (絶対評価)" if use_abs_scale and map_mode == "密度マップ (Density)" else ""
-        update_fig_layout(fig_main, f"Saturn V - メインマップ{norm_msg}", height=1000, theme_config=theme_config)
-        st.plotly_chart(fig_main, use_container_width=True)
+        utils.update_fig_layout(fig_main, f"Saturn V - メインマップ{norm_msg}", height=1000, theme_config=theme_config)
+        st.plotly_chart(fig_main, use_container_width=True, config={
+            'editable': True,
+            'edits': {
+                'annotationPosition': True,
+                'annotationText': False,
+                'axisTitleText': False,
+                'legendPosition': False,
+                'legendText': False,
+                'shapePosition': False,
+                'titleText': False
+            }
+        })
 
         st.subheader("ラベル編集")
+        utils.render_ai_label_assistant(st.session_state.df_main, 'cluster', "saturnv_labels_map", col_map, tfidf_matrix, feature_names, widget_key_prefix="main_label")
+
+
+
         if "saturnv_labels_map_original" not in st.session_state: st.session_state.saturnv_labels_map_original = st.session_state.saturnv_labels_map.copy()
-        st.session_state.saturnv_labels_map_custom = _create_label_editor_ui(st.session_state.saturnv_labels_map_original, st.session_state.saturnv_labels_map, "main_label")
+        st.session_state.saturnv_labels_map_custom = utils.create_label_editor_ui(st.session_state.saturnv_labels_map_original, st.session_state.saturnv_labels_map, "main_label")
         if st.button("ラベルを更新", key="main_update_labels"):
             st.session_state.df_main['cluster_label'] = st.session_state.df_main['cluster'].map(st.session_state.saturnv_labels_map_custom)
             st.session_state.df_main = update_hover_text(st.session_state.df_main, col_map)
@@ -870,7 +670,7 @@ with tab_main:
                                 df_subset = df_subset[(df_subset['year'] >= start_year) & (df_subset['year'] <= end_year)]
                             except: pass 
 
-                        # ドリルダウンでは絞り込み再計算が主目的なので、Applicantフィルタはデータ削減として扱う
+                        # 出願人でフィルタリングを実行
                         drill_app_values = [val[1] for val in drill_applicant_filter_w]
                         if "ALL" not in drill_app_values:
                             mask_list_drill = [df_subset[col_map['applicant']].fillna('').str.contains(re.escape(app)) for app in drill_app_values]
@@ -924,16 +724,7 @@ with tab_main:
             df_drill = st.session_state.df_drilldown_result.copy()
             drill_labels_map = st.session_state.drill_labels_map
             
-            st.subheader("サブクラスタ・ラベル編集")
-            if "drill_labels_map_original" not in st.session_state:
-                 st.session_state.drill_labels_map_original = drill_labels_map.copy()
-            drill_label_widgets = _create_label_editor_ui(st.session_state.drill_labels_map_original, st.session_state.drill_labels_map, "drill_label")
-            if st.button("サブクラスタ・ラベルを更新", key="drill_update_labels"):
-                for cid, val in drill_label_widgets.items(): drill_labels_map[cid] = val
-                df_drill['drill_cluster_label'] = df_drill['drill_cluster'].map(drill_labels_map)
-                st.session_state.df_drilldown_result = update_drill_hover_text(df_drill)
-                st.session_state.drill_labels_map = drill_labels_map
-                st.rerun()
+
 
             st.subheader("ドリルダウンマップ")
             
@@ -1024,8 +815,34 @@ with tab_main:
                         borderpad=4
                     ))
             fig_drill.update_layout(annotations=annotations_drill)
-            update_fig_layout(fig_drill, f'Saturn V ドリルダウン: {st.session_state.drill_base_label}', height=1000, theme_config=theme_config)
-            st.plotly_chart(fig_drill, use_container_width=True)
+            utils.update_fig_layout(fig_drill, f'Saturn V ドリルダウン: {st.session_state.drill_base_label}', height=1000, theme_config=theme_config)
+            st.plotly_chart(fig_drill, use_container_width=True, config={
+                'editable': True,
+                'edits': {
+                    'annotationPosition': True,
+                    'annotationText': False,
+                    'axisTitleText': False,
+                    'legendPosition': False,
+                    'legendText': False,
+                    'shapePosition': False,
+                    'titleText': False
+                }
+            })
+            
+            st.subheader("サブクラスタ・ラベル編集")
+            utils.render_ai_label_assistant(df_drill, 'drill_cluster', "drill_labels_map", col_map, tfidf_matrix, feature_names, widget_key_prefix="drill_label")
+
+
+
+            if "drill_labels_map_original" not in st.session_state:
+                 st.session_state.drill_labels_map_original = drill_labels_map.copy()
+            drill_label_widgets = utils.create_label_editor_ui(st.session_state.drill_labels_map_original, st.session_state.drill_labels_map, "drill_label")
+            if st.button("サブクラスタ・ラベルを更新", key="drill_update_labels"):
+                for cid, val in drill_label_widgets.items(): drill_labels_map[cid] = val
+                df_drill['drill_cluster_label'] = df_drill['drill_cluster'].map(drill_labels_map)
+                st.session_state.df_drilldown_result = update_drill_hover_text(df_drill)
+                st.session_state.drill_labels_map = drill_labels_map
+                st.rerun()
             
             # --- テキストマイニング ---
             st.markdown("---")
@@ -1089,7 +906,7 @@ with tab_main:
                                 marker=dict(showscale=True, colorscale='YlGnBu', size=node_size, color=node_size, line_width=2)
                             )
                             fig_net = go.Figure(data=[edge_trace, node_trace], layout=go.Layout(title='共起ネットワーク', showlegend=False, hovermode='closest', margin=dict(b=20,l=5,r=5,t=40), xaxis=dict(showgrid=False, zeroline=False, showticklabels=False), yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
-                            update_fig_layout(fig_net, '共起ネットワーク', theme_config=theme_config, show_axes=False)
+                            utils.update_fig_layout(fig_net, '共起ネットワーク', theme_config=theme_config, show_axes=False)
                             fig_net.update_xaxes(visible=False)
                             fig_net.update_yaxes(visible=False)
                             st.plotly_chart(fig_net, use_container_width=True)
@@ -1137,13 +954,13 @@ with tab_main:
                     # 1. 時系列
                     yc = df_s['year'].value_counts().sort_index().reindex(range(s_year, e_year+1), fill_value=0)
                     fig1 = px.bar(x=yc.index, y=yc.values, labels={'x':'年', 'y':'件数'}, color_discrete_sequence=[theme_config["color_sequence"][0]])
-                    update_fig_layout(fig1, '出願推移', theme_config=theme_config, show_axes=True)
+                    utils.update_fig_layout(fig1, '出願推移', theme_config=theme_config, show_axes=True)
                     st.plotly_chart(fig1, use_container_width=True)
                     
                     # 2. ランキング
                     ac = df_s['applicant_main'].explode().value_counts().head(n_apps).sort_values(ascending=True)
                     fig2 = px.bar(x=ac.values, y=ac.index, orientation='h', labels={'x':'件数', 'y':'出願人'}, color_discrete_sequence=[theme_config["color_sequence"][1]])
-                    update_fig_layout(fig2, '出願人ランキング', height=max(600, len(ac)*30), theme_config=theme_config, show_axes=True)
+                    utils.update_fig_layout(fig2, '出願人ランキング', height=max(600, len(ac)*30), theme_config=theme_config, show_axes=True)
                     st.plotly_chart(fig2, use_container_width=True)
                     
                     # 3. バブル
@@ -1154,7 +971,7 @@ with tab_main:
                     
                     if not pd_plot.empty:
                         fig3 = px.scatter(pd_plot, x='year', y='ap', size='count', color='ap', labels={'year':'出願年', 'ap':'出願人', 'count':'件数'}, category_orders={'ap': top_a})
-                        update_fig_layout(fig3, '出願年別動向', height=700, theme_config=theme_config, show_axes=True)
+                        utils.update_fig_layout(fig3, '出願年別動向', height=700, theme_config=theme_config, show_axes=True)
                         fig3.update_layout(
                             legend=dict(
                                 orientation="v", 
@@ -1172,6 +989,14 @@ with tab_main:
             cols_drop = ['hover_text', 'parsed_date', 'drill_cluster', 'drill_cluster_label', 'drill_hover_text', 'drill_x', 'drill_y', 'temp_date_bin']
             csv = df_main.drop(columns=cols_drop, errors='ignore').to_csv(encoding='utf-8-sig', index=False).encode('utf-8-sig')
             st.download_button("メインマップ全データ (CSV)", csv, "APOLLO_SaturnV_Main.csv", "text/csv")
+
+            # Parameter Export
+            param_content = f"APOLLO Saturn V Analysis Parameters\n"
+            param_content += f"-----------------------------------\n"
+            param_content += f"Min Cluster Size: {min_cluster_size_w}\n"
+            param_content += f"Min Samples: {min_samples_w}\n"
+            param_content += f"Label Word Count: {label_top_n_w}\n"
+            st.download_button("パラメータ設定 (TXT)", param_content, "APOLLO_SaturnV_Params.txt", "text/plain")
         
         if "df_drilldown_result" in st.session_state:
             cols_drop_d = ['hover_text', 'parsed_date', 'date_bin', 'drill_hover_text', 'drill_date_bin', 'temp_date_bin']

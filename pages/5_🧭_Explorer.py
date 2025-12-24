@@ -20,6 +20,7 @@ from networkx.algorithms import community
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import japanize_matplotlib
+import utils
 
 # ==================================================================
 # --- 1. 設定・ヘルパー関数 ---
@@ -32,36 +33,9 @@ st.set_page_config(
     layout="wide"
 )
 
-def get_japanese_font_path():
-    system = platform.system()
-    font_paths = []
-    
-    if system == "Darwin": # Mac
-        font_paths = [
-            "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-            "/System/Library/Fonts/Hiragino Sans W3.ttc",
-            "/System/Library/Fonts/Hiragino Kaku Gothic ProN.ttc",
-            "/Library/Fonts/AppleGothic.ttf",
-            "/System/Library/Fonts/AppleSDGothicNeo.ttc" 
-        ]
-    elif system == "Windows": # Windows
-        font_paths = [
-            "C:/Windows/Fonts/meiryo.ttc",
-            "C:/Windows/Fonts/msgothic.ttc",
-            "C:/Windows/Fonts/yugothr.ttc"
-        ]
-    else: # Linux
-        font_paths = [
-            "/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf",
-            "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
-            "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc"
-        ]
-        
-    for path in font_paths:
-        if os.path.exists(path): return path
-    return None
 
-FONT_PATH = get_japanese_font_path()
+
+FONT_PATH = utils.get_japanese_font_path()
 if FONT_PATH:
     try:
         prop = fm.FontProperties(fname=FONT_PATH)
@@ -69,33 +43,27 @@ if FONT_PATH:
     except:
         pass
 
-st.markdown("""
-<style>
-    html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-    [data-testid="stSidebar"] h1 { color: #003366; font-weight: 900 !important; font-size: 2.5rem !important; }
-    [data-testid="stSidebarNav"] { display: none !important; }
-    [data-testid="stSidebar"] .block-container { padding-top: 2rem; padding-bottom: 1rem; }
-    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-    .stButton>button { font-weight: 600; }
-</style>
-""", unsafe_allow_html=True)
 
-def get_theme_config(theme_name):
-    themes = {
-        "APOLLO Standard": { "bg_color": "#ffffff", "text_color": "#333333", "plotly_template": "plotly_white", "color_sequence": px.colors.qualitative.G10, "css": """[data-testid="stHeader"] { background-color: #ffffff; } h1, h2, h3 { color: #003366; }""" },
-        "Modern Presentation": { "bg_color": "#fdfdfd", "text_color": "#2c3e50", "plotly_template": "plotly_white", "color_sequence": ["#264653", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51", "#8ab17d"], "css": """[data-testid="stSidebar"] { background-color: #eaeaea; } [data-testid="stHeader"] { background-color: #fdfdfd; } h1, h2, h3 { color: #264653; font-family: "Georgia", serif; } .stButton>button { background-color: #264653; color: white; border-radius: 0px; }""" }
-    }
-    return themes.get(theme_name, themes["APOLLO Standard"])
 
-def update_fig_layout(fig, title, height=600, theme_config=None):
+
+
+def update_fig_layout(fig, title, height=600, theme_config=None, show_legend=True):
     if theme_config:
-        fig.update_layout(
+        # Sanitize title
+        if isinstance(title, str):
+            title = re.sub(r'<[^>]+>', '', title)
+
+        layout_params = dict(
             template=theme_config["plotly_template"],
-            title=dict(text=title, font=dict(size=18, color=theme_config["text_color"])),
+            title=dict(text=title, font=dict(size=18, color=theme_config["text_color"], weight="normal")),
             paper_bgcolor=theme_config["bg_color"], plot_bgcolor=theme_config["bg_color"],
             font=dict(color=theme_config["text_color"], family="Helvetica Neue"),
             height=height, margin=dict(l=20, r=20, t=60, b=20)
         )
+        if not show_legend:
+            layout_params['showlegend'] = False
+            
+        fig.update_layout(**layout_params)
     return fig
 
 # ==================================================================
@@ -105,69 +73,10 @@ def update_fig_layout(fig, title, height=600, theme_config=None):
 def load_tokenizer_explorer(): return Tokenizer()
 t = load_tokenizer_explorer()
 
-_stopwords_original_list = [
-    "する","ある","なる","ため","こと","よう","もの","これ","それ","あれ","ここ","そこ","どれ","どの",
-    "この","その","当該","該","および","及び","または","また","例えば","例えばは","において","により",
-    "に対して","に関して","について","として","としては","場合","一方","他方","さらに","そして","ただし",
-    "なお","等","など","等々","いわゆる","所謂","同様","同時","前記","本","同","各","各種","所定","所望",
-    "一例","他","一部","一つ","複数","少なくとも","少なくとも一つ","上記","下記","前述","後述","既述",
-    "関する","基づく","用いる","使用","利用","有する","含む","備える","設ける","すなわち","従って",
-    "しかしながら","次に","特に","具体的に","詳細に","いずれ","うち","それぞれ","とき",
-    "かかる","かような","かかる場合","本件","本願","本出願","本明細書","これら","それら","各々","随時","適宜",
-    "任意","必ずしも","通常","一般に","典型的","代表的",
-    "本発明","発明","実施例","実施形態","変形例","請求","請求項","図","図面","符号","符号の説明",
-    "図面の簡単な説明","発明の詳細な説明","技術分野","背景技術","従来技術","発明が解決しようとする課題","課題",
-    "解決手段","効果","要約","発明の効果","目的","手段","構成","構造","工程","処理","方法","手法","方式",
-    "システム","プログラム","記憶媒体","特徴","特徴とする","特徴部","ステップ","フロー","シーケンス","定義",
-    "関係","対応","整合","実施の形態","実施の態様","態様","変形","修正例","図示","図示例","図示しない",
-    "参照","参照符号","段落","詳細説明","要旨","一実施形態","他の実施形態","一実施例","別の側面","付記",
-    "適用例","用語の定義","開示","本開示","開示内容","上部","下部","内部","外部","内側","外側","表面",
-    "裏面","側面","上面","下面","端面","先端","基端","後端","一端","他端","中心","中央","周縁","周辺",
-    "近傍","方向","位置","空間","領域","範囲","間隔","距離","形状","形態","状態","種類","層","膜","部",
-    "部材","部位","部品","機構","装置","容器","組成","材料","用途","適用","適用例","片側","両側","左側",
-    "右側","前方","後方","上流","下流","隣接","近接","離間","間置","介在","重畳","概ね","略","略中央",
-    "固定側","可動側","伸長","収縮","係合","嵌合","取付","連結部","支持体","支持部","ガイド部",
-    "データ","情報","信号","出力","入力","制御","演算","取得","送信","受信","表示","通知","設定","変更",
-    "更新","保存","削除","追加","実行","開始","終了","継続","停止","判定","判断","決定","選択","特定",
-    "抽出","検出","検知","測定","計測","移動","回転","変位","変形","固定","配置","生成","付与","供給",
-    "適用","照合","比較","算出","解析","同定","初期化","読出","書込","登録","記録","配信","連携","切替",
-    "起動","復帰","監視","通知処理","取得処理","演算処理","良好","容易","簡便","適切","有利","有用","有効",
-    "効果的","高い","低い","大きい","小さい","新規","改良","改善","抑制","向上","低減","削減","増加",
-    "減少","可能","好適","好ましい","望ましい","優れる","優れた","高性能","高効率","低コスト","コスト",
-    "簡易","安定","安定性","耐久","耐久性","信頼性","簡素","簡略","単純","最適","最適化","汎用","汎用性",
-    "実現","達成","確保","維持","防止","回避","促進","不要","必要","高精度","省電力","省資源","高信頼",
-    "低負荷","高純度","高密度","高感度","迅速","円滑","簡略化","低価格","実効的","可能化","有効化",
-    "非必須","適合","互換","出願","出願人","出願番号","出願日","出願書","出願公開","公開","公開番号",
-    "公開公報","公報","公報番号","特許","特許番号","特許文献","非特許文献","引用","引用文献","先行技術",
-    "審査","審査官","拒絶","意見書","補正書","優先","優先日","分割出願","継続出願","国内移行","国際出願",
-    "国際公開","PCT","登録","公開日","審査請求","拒絶理由","補正","訂正","無効審判","異議","取消","取下げ",
-    "事件番号","代理人","弁理士","係属","経過",
-    "第","第一","第二","第三","第1","第２","第３","第１","第２","第３","一","二","三","四","五","六","七","八","九","零","数","複合","多数","少数","図1","図2","図3","図4","図5","図6","図7","図8","図9","表1","表2","表3","式1","式2","式3","%","％","wt%","vol%","質量%","重量%","容量%","mol","mol%","mol/L","M","mm","cm","m","nm","μm","μ","rpm","Pa","kPa","MPa","GPa","N","W","V","A","mA","Hz","kHz","MHz","GHz","℃","°C","K","mL","L","g","kg","mg","wt","vol","h","hr","hrs","min","s","sec","ppm","ppb","bar","Ω","ohm","J","kJ","Wh","kWh",
-    "株式会社","有限会社","合資会社","合名会社","合同会社","Inc","Inc.","Ltd","Ltd.","Co","Co.","Corp","Corp.","LLC",
-    "GmbH","AG","BV","B.V.","S.A.","S.p.A.","（株）","㈱","（有）",
-    "溶液","溶媒","触媒","反応","生成物","原料","成分","含有","含有量","配合","混合","混合物","濃度","温度","時間",
-    "割合","比率","基","官能基","化合物","組成物","樹脂","ポリマー","モノマー","基板","基材","フィルム","シート",
-    "粒子","粉末","比較例","参考例","試験","試料","評価","条件","実験","実験例","反応条件","反応時間","反応温度",
-    "処理装置","端末","ユニット","モジュール","回路","素子","電源","電圧","電流","信号線","配線","端子","端部","接続",
-    "接続部","演算部","記憶部","記憶装置","記録媒体","ユーザ","利用者","クライアント","サーバ","画面","UI","GUI",
-    "インターフェース","データベース","DB","ネットワーク","通信","要求","応答","リクエスト","レスポンス","パラメータ",
-    "引数","属性","プロパティ","フラグ","ID","ファイル","データ構造","テーブル","レコード",
-    "軸","シャフト","ギア","モータ","エンジン","アクチュエータ","センサ","バルブ","ポンプ","筐体","ハウジング","フレーム",
-    "シャーシ","駆動","伝達","支持","連結","解決", "準備", "提供", "発生", "以上", "十分",
-    "できる", "いる", "明細書", "記載", "記述", "掲載", "言及", "内容", "詳細", "説明", "表記", "表現", "箇条書き", "以下の", "以上の", "全ての", "任意の", "特定の"
-]
-
-@st.cache_data
-def expand_stopwords_to_full_width(words):
-    expanded = set(words)
-    hankaku = string.ascii_letters + string.digits
-    zenkaku = "ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ０１２３４５６７８９"
-    trans = str.maketrans(hankaku, zenkaku)
-    for w in words:
-        if any(c in hankaku for c in w): expanded.add(w.translate(trans))
-    return sorted(list(expanded))
-
-stopwords = set(expand_stopwords_to_full_width(_stopwords_original_list))
+if "stopwords" in st.session_state and st.session_state["stopwords"]:
+    stopwords = st.session_state["stopwords"]
+else:
+    stopwords = utils.get_stopwords()
 
 _ngram_rows = [
     ("参照符号付き要素", r"[一-龥ぁ-んァ-ンA-Za-z0-9／\-＋・]+?(?:部|層|面|体|板|孔|溝|片|部材|要素|機構|装置|手段|電極|端子|領域|基板|回路|材料|工程)\s*[（(]\s*[0-9０-９A-Za-z]+[A-Za-z]?\s*[）)]", "regex", 1),
@@ -268,25 +177,7 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
 # --- 3. UI & アプリケーション ---
 # ==================================================================
 
-with st.sidebar:
-    st.title("APOLLO") 
-    st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
-    st.markdown("**v.3**")
-    st.markdown("---")
-    st.subheader("Home"); st.page_link("Home.py", label="Mission Control", icon="🛰️")
-    st.subheader("Modules")
-    st.page_link("pages/1_🌍_ATLAS.py", label="ATLAS", icon="🌍")
-    st.page_link("pages/2_💡_CORE.py", label="CORE", icon="💡")
-    st.page_link("pages/3_🚀_Saturn_V.py", label="Saturn V", icon="🚀")
-    st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
-    st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
-    st.page_link("pages/6_🔗_CREW.py", label="CREW", icon="🔗")
-    st.markdown("---")
-    st.caption("ナビゲーション:")
-    st.caption("1. Mission Control でデータをアップロードし、前処理を実行します。")
-    st.caption("2. 上のリストから分析モジュールを選択します。")
-    st.markdown("---")
-    st.caption("© 2025 しばやま")
+utils.render_sidebar()
 
 st.title("🧭 Explorer")
 st.markdown("""
@@ -297,7 +188,7 @@ Explorer (戦略的キーワード探索) は、特許文書内の専門用語�
 col_theme, _ = st.columns([1, 3])
 with col_theme:
     selected_theme = st.selectbox("表示テーマ:", ["APOLLO Standard", "Modern Presentation"], key="exp_theme")
-theme_config = get_theme_config(selected_theme)
+theme_config = utils.get_theme_config(selected_theme)
 st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
 
 # データロード
@@ -401,7 +292,7 @@ if selected_tab == "Global Overview":
                 fig_net_g = go.Figure(data=[edge_trace_g, node_trace_g])
                 fig_net_g.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
                 update_fig_layout(fig_net_g, "Global Co-occurrence Network", height=700, theme_config=theme_config)
-                st.plotly_chart(fig_net_g, use_container_width=True)
+                st.plotly_chart(fig_net_g, use_container_width=True, config={'editable': False})
             else: st.warning("条件に一致する共起関係が見つかりませんでした。")
 
 # ==================================================================
@@ -468,7 +359,7 @@ elif selected_tab == "Trend Analysis":
                 fig_growth = px.bar(df_growth, x="Growth Rate", y="Keyword", orientation='h', color="Growth Rate", color_continuous_scale="Reds")
                 fig_growth.update_layout(yaxis={'categoryorder':'total ascending'})
                 update_fig_layout(fig_growth, "Growth Rate Top 20", height=500, theme_config=theme_config)
-                st.plotly_chart(fig_growth, use_container_width=True)
+                st.plotly_chart(fig_growth, use_container_width=True, config={'editable': False})
         else:
             st.warning("比較対象となる過去のデータ期間が不足しています。")
 
@@ -535,7 +426,7 @@ elif selected_tab == "Trend Analysis":
             fig_net = go.Figure(data=[edge_trace, node_trace])
             fig_net.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
             update_fig_layout(fig_net, "Trend Network", height=700, theme_config=theme_config)
-            st.plotly_chart(fig_net, use_container_width=True)
+            st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
 
 # ==================================================================
 # --- 6. Comparative Strategy (競合比較) ---
@@ -610,7 +501,7 @@ elif selected_tab == "Comparative Strategy":
                 margin=dict(r=150, l=20, b=100)
             )
             update_fig_layout(fig_tornado, "Tornado Chart", height=800, theme_config=theme_config)
-            st.plotly_chart(fig_tornado, use_container_width=True)
+            st.plotly_chart(fig_tornado, use_container_width=True, config={'editable': False})
             st.info("左側 (青系) が自社、右側 (赤/オレンジ系) が競合の出現数を示します。")
 
         # 2. ワードクラウド
@@ -677,7 +568,7 @@ elif selected_tab == "Comparative Strategy":
             fig_net = go.Figure(data=[edge_trace, node_trace])
             fig_net.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
             update_fig_layout(fig_net, "Dominance Network", height=700, theme_config=theme_config)
-            st.plotly_chart(fig_net, use_container_width=True)
+            st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
 
 # ==================================================================
 # --- 7. Context Search (文脈検索) ---

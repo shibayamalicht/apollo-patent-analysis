@@ -1,12 +1,12 @@
 # ==================================================================
-# --- 0. 環境変数の設定 (最優先) ---
+# --- Environment Setup ---
 # ==================================================================
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ['OMP_NUM_THREADS'] = '1'
 
 # ==================================================================
-# --- 1. ライブラリのインポート ---
+# --- Libraries ---
 # ==================================================================
 import streamlit as st
 import pandas as pd
@@ -26,7 +26,7 @@ from janome.tokenizer import Tokenizer
 warnings.filterwarnings('ignore')
 
 # ==================================================================
-# --- 2. ページ設定 ---
+# --- Page Config ---
 # ==================================================================
 st.set_page_config(
     page_title="APOLLO | Mission Control", 
@@ -36,64 +36,15 @@ st.set_page_config(
 )
 
 # ==================================================================
-# --- 3. 定数・共通関数定義 ---
+# --- Constants & Helpers ---
 # ==================================================================
 
-STOP_WORDS = {
-    "する","ある","なる","ため","こと","よう","もの","これ","それ","あれ","ここ","そこ","どれ","どの",
-    "この","その","当該","該","および","及び","または","また","例えば","例えばは","において","により",
-    "に対して","に関して","について","として","としては","場合","一方","他方","さらに","そして","ただし",
-    "なお","等","など","等々","いわゆる","所謂","同様","同時","前記","本","同","各","各種","所定","所望",
-    "一例","他","一部","一つ","複数","少なくとも","少なくとも一つ","上記","下記","前述","後述","既述",
-    "関する","基づく","用いる","使用","利用","有する","含む","備える","設ける","すなわち","従って",
-    "しかしながら","次に","特に","具体的に","詳細に","いずれ","うち","それぞれ","とき",
-    "かかる","かような","かかる場合","本件","本願","本出願","本明細書","これら","それら","各々","随時","適宜",
-    "任意","必ずしも","通常","一般に","典型的","代表的",
-    "本発明","発明","実施例","実施形態","変形例","請求","請求項","図","図面","符号","符号の説明",
-    "図面の簡単な説明","発明の詳細な説明","技術分野","背景技術","従来技術","発明が解決しようとする課題","課題",
-    "解決手段","効果","要約","発明の効果","目的","手段","構成","構造","工程","処理","方法","手法","方式",
-    "システム","プログラム","記憶媒体","特徴","特徴とする","特徴部","ステップ","フロー","シーケンス","定義",
-    "関係","対応","整合","実施の形態","実施の態様","態様","変形","修正例","図示","図示例","図示しない",
-    "参照","参照符号","段落","詳細説明","要旨","一実施形態","他の実施形態","一実施例","別の側面","付記",
-    "適用例","用語の定義","開示","本開示","開示内容","記載","記述","掲載","言及","内容","詳細","説明","表記","表現","箇条書き","以下の","以上の","全ての","任意の","特定の",
-    "上部","下部","内部","外部","内側","外側","表面","裏面","側面","上面","下面","端面","先端","基端","後端","一端","他端","中心","中央","周縁","周辺",
-    "近傍","方向","位置","空間","領域","範囲","間隔","距離","形状","形態","状態","種類","層","膜","部",
-    "部材","部位","部品","機構","装置","容器","組成","材料","用途","適用","適用例","片側","両側","左側",
-    "右側","前方","後方","上流","下流","隣接","近接","離間","間置","介在","重畳","概ね","略","略中央",
-    "固定側","可動側","伸長","収縮","係合","嵌合","取付","連結部","支持体","支持部","ガイド部",
-    "データ","情報","信号","出力","入力","制御","演算","取得","送信","受信","表示","通知","設定","変更",
-    "更新","保存","削除","追加","実行","開始","終了","継続","停止","判定","判断","決定","選択","特定",
-    "抽出","検出","検知","測定","計測","移動","回転","変位","変形","固定","配置","生成","付与","供給",
-    "適用","照合","比較","算出","解析","同定","初期化","読出","書込","登録","記録","配信","連携","切替",
-    "起動","復帰","監視","通知処理","取得処理","演算処理","良好","容易","簡便","適切","有利","有用","有効",
-    "効果的","高い","低い","大きい","小さい","新規","改良","改善","抑制","向上","低減","削減","増加",
-    "減少","可能","好適","好ましい","望ましい","優れる","優れた","高性能","高効率","低コスト","コスト",
-    "簡易","安定","安定性","耐久","耐久性","信頼性","簡素","簡略","単純","最適","最適化","汎用","汎用性",
-    "実現","達成","確保","維持","防止","回避","促進","不要","必要","高精度","省電力","省資源","高信頼",
-    "低負荷","高純度","高密度","高感度","迅速","円滑","簡略化","低価格","実効的","可能化","有効化",
-    "非必須","適合","互換","出願","出願人","出願番号","出願日","出願書","出願公開","公開","公開番号",
-    "公開公報","公報","公報番号","特許","特許番号","特許文献","非特許文献","引用","引用文献","先行技術",
-    "審査","審査官","拒絶","意見書","補正書","優先","優先日","分割出願","継続出願","国内移行","国際出願",
-    "国際公開","PCT","登録","公開日","審査請求","拒絶理由","補正","訂正","無効審判","異議","取消","取下げ",
-    "事件番号","代理人","弁理士","係属","経過",
-    "第","第一","第二","第三","第1","第２","第３","第１","第２","第３","１","２","３","４","５","６","７","８","９","０",
-    "一","二","三","四","五","六","七","八","九","零","数","複合","多数","少数","図1","図2","図3","図4","図5","図6","図7","図8","図9",
-    "表1","表2","表3","式1","式2","式3","０","１","２","３","４","５","６","７","８","９","%","％","wt%","vol%","質量%","重量%","容量%","mol","mol%","mol/L","M","mm","cm","m","nm","μm","μ","rpm",
-    "Pa","kPa","MPa","GPa","N","W","V","A","mA","Hz","kHz","MHz","GHz","℃","°C","K","mL","L","g","kg","mg","wt","vol",
-    "h","hr","hrs","min","s","sec","ppm","ppb","bar","Ω","ohm","J","kJ","Wh","kWh",
-    "株式会社","有限会社","合資会社","合名会社","合同会社","Inc","Inc.","Ltd","Ltd.","Co","Co.","Corp","Corp.","LLC",
-    "GmbH","AG","BV","B.V.","S.A.","S.p.A.","（株）","㈱","（有）",
-    "溶液","溶媒","触媒","反応","生成物","原料","成分","含有","含有量","配合","混合","混合物","濃度","温度","時間",
-    "割合","比率","基","官能基","化合物","組成物","樹脂","ポリマー","モノマー","基板","基材","フィルム","シート",
-    "粒子","粉末","比較例","参考例","試験","試料","評価","条件","実験","実験例","反応条件","反応時間","反応温度",
-    "処理装置","端末","ユニット","モジュール","回路","素子","電源","電圧","電流","信号線","配線","端子","端部","接続",
-    "接続部","演算部","記憶部","記憶装置","記録媒体","ユーザ","利用者","クライアント","サーバ","画面","UI","GUI",
-    "インターフェース","データベース","DB","ネットワーク","通信","要求","応答","リクエスト","レスポンス","パラメータ",
-    "引数","属性","プロパティ","フラグ","ID","ファイル","データ構造","テーブル","レコード",
-    "軸","シャフト","ギア","モータ","エンジン","アクチュエータ","センサ","バルブ","ポンプ","筐体","ハウジング","フレーム",
-    "シャーシ","駆動","伝達","支持","連結","解決", "準備", "提供", "発生", "以上", "十分",
-    "できる", "いる", "明細書"
-}
+import io
+
+import utils
+
+
+
 
 @st.cache_resource
 def load_sbert_model():
@@ -106,6 +57,12 @@ def load_tokenizer():
 t = load_tokenizer()
 
 def advanced_tokenize(text):
+    # Dynamic stopword retrieval
+    if 'stopwords' in st.session_state and st.session_state['stopwords']:
+        current_stopwords = st.session_state['stopwords']
+    else:
+        current_stopwords = utils.get_stopwords()
+
     if not isinstance(text, str): return ""
     text = unicodedata.normalize('NFKC', text).lower()
     text = re.sub(r'[\(（][\w\s]+[\)）]', ' ', text)
@@ -119,7 +76,7 @@ def advanced_tokenize(text):
         token1 = tokens[i]
         base_form = token1.base_form if token1.base_form != '*' else token1.surface
         
-        if base_form in STOP_WORDS or len(base_form) < 2:
+        if base_form in current_stopwords or len(base_form) < 2:
             i += 1
             continue
         
@@ -128,7 +85,7 @@ def advanced_tokenize(text):
             base_form2 = token2.base_form if token2.base_form != '*' else token2.surface
             pos1 = token1.part_of_speech.split(',')[0]
             pos2 = token2.part_of_speech.split(',')[0]
-            if pos1 == '名詞' and pos2 == '名詞' and base_form2 not in STOP_WORDS:
+            if pos1 == '名詞' and pos2 == '名詞' and base_form2 not in current_stopwords:
                 compound_word = base_form + base_form2
                 processed_tokens.append(compound_word)
                 i += 2
@@ -180,7 +137,7 @@ def extract_ipc(text, delimiter=';'):
 
 def smart_map_index(current_value, options, keywords):
     """
-    カラム紐付けの自動化ロジック (Fix: 初期状態Noneでも検索を実行)
+    カラム紐付けの自動化ロジック
     """
     if current_value is not None and current_value in options:
         return options.index(current_value)
@@ -203,39 +160,7 @@ def smart_map_index(current_value, options, keywords):
 # --- 4. デザイン設定 ---
 # ==================================================================
 
-st.markdown("""
-<style>
-    html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-    [data-testid="stSidebar"] h1 { color: #003366; font-weight: 900 !important; font-size: 2.5rem !important; }
-    h1 { color: #003366; font-weight: 700; }
-    h2, h3 { color: #333333; font-weight: 500; border-bottom: 2px solid #f0f0f0; padding-bottom: 5px; }
-    [data-testid="stSidebarNav"] { display: none !important; }
-    [data-testid="stSidebar"] .block-container { padding-top: 2rem; padding-bottom: 1rem; }
-    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-    .stButton>button { font-weight: 600; }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { background-color: #f0f2f6; border-radius: 8px 8px 0 0; padding: 10px 15px; }
-    .stTabs [aria-selected="true"] { background-color: #ffffff; border-bottom: 2px solid #003366; }
-</style>
-""", unsafe_allow_html=True)
-
-with st.sidebar:
-    st.title("APOLLO") 
-    st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
-    st.markdown("**v.3**")
-    st.markdown("---")
-    st.subheader("Home"); st.page_link("Home.py", label="Mission Control", icon="🛰️")
-    st.subheader("Modules")
-    st.page_link("pages/1_🌍_ATLAS.py", label="ATLAS", icon="🌍")
-    st.page_link("pages/2_💡_CORE.py", label="CORE", icon="💡")
-    st.page_link("pages/3_🚀_Saturn_V.py", label="Saturn V", icon="🚀")
-    st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
-    st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
-    st.page_link("pages/6_🔗_CREW.py", label="CREW", icon="🔗")
-    st.markdown("---")
-    st.caption("ナビゲーション:\n1. Mission Control でデータをアップロードし、前処理を実行します。\n2. 上のリストから分析モジュールを選択します。")
-    st.markdown("---")
-    st.caption("© 2025 しばやま")
+utils.render_sidebar()
 
 st.title("🛰️ Mission Control") 
 st.markdown("ここは、全分析モジュールで共通のデータ準備を行う「ミッション・コントロール（データハブ）」です。")
@@ -260,16 +185,17 @@ def initialize_session_state():
 
 initialize_session_state()
 
-st.markdown("---")
-st.subheader("分析設定")
+
+st.markdown("<h3 style='border: none; padding-bottom: 0;'>分析設定</h3>", unsafe_allow_html=True)
 
 container = st.container() 
 
 with container:
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "フェーズ 1: データインポート", 
         "フェーズ 2: カラム紐付け", 
-        "フェーズ 3: 分析エンジン起動"
+        "フェーズ 3: ストップワード管理",
+        "フェーズ 4: 分析エンジン起動"
     ])
 
     # A-1. ファイルアップロード
@@ -334,15 +260,23 @@ with container:
                 col_map['applicant'] = st.selectbox("出願人:", columns_with_none, index=smart_map_index(st.session_state.col_map.get('applicant'), columns_with_none, kw_applicant), key="col_applicant")
                 applicant_delimiter = st.text_input("出願人区切り文字:", value=st.session_state.delimiters.get('applicant', ';'), key="del_applicant")
                 
+            with col3:
+                st.markdown("##### 任意メタデータ項目")
+                
+                # Inventor
                 col_map['inventor'] = st.selectbox("発明者 (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('inventor'), columns_with_none, kw_inventor), key="col_inventor")
                 inventor_delimiter = st.text_input("発明者区切り文字:", value=st.session_state.delimiters.get('inventor', ';'), key="del_inventor")
-
-            with col3:
-                st.markdown("##### 分析軸項目")
-                col_map['ipc'] = st.selectbox("IPC:", columns_with_none, index=smart_map_index(st.session_state.col_map.get('ipc'), columns_with_none, kw_ipc), key="col_ipc")
+                
+                # IPC
+                col_map['ipc'] = st.selectbox("IPC (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('ipc'), columns_with_none, kw_ipc), key="col_ipc")
                 ipc_delimiter = st.text_input("IPC区切り文字:", value=st.session_state.delimiters.get('ipc', ';'), key="del_ipc")
+                
+                # F-term
                 col_map['fterm'] = st.selectbox("Fターム (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('fterm'), columns_with_none, kw_fterm), key="col_fterm")
                 fterm_delimiter = st.text_input("Fターム区切り文字:", value=st.session_state.delimiters.get('fterm', ';'), key="del_fterm") 
+                
+                # Status
+                col_map['status'] = st.selectbox("ステータス (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('status'), columns_with_none, ['ステータス', 'Status', 'Legal Status', '法的状態']), key="col_status") 
                 
             st.session_state.col_map = col_map
             st.session_state.delimiters = {
@@ -354,8 +288,99 @@ with container:
         else:
             st.info("フェーズ1でファイルをインポートすると、カラム紐付け設定が表示されます。")
 
-    # A-3. 前処理実行
+    # A-3. ストップワード管理
     with tab3:
+        st.markdown("##### 分析から除外するストップワードを管理します。")
+        
+        # 初期化
+        if 'stopwords' not in st.session_state or not st.session_state['stopwords']:
+            st.session_state['stopwords'] = utils.get_stopwords()
+        
+        # 検索機能
+        search_query = st.text_input("リスト内検索 (正規表現も可)", placeholder="検索したい単語を入力...", key="sw_search")
+        
+        full_stopwords = sorted(list(st.session_state['stopwords']))
+        
+        if search_query:
+            try:
+                # 正規表現検索を試みる
+                filtered_stopwords = [w for w in full_stopwords if re.search(search_query, w)]
+            except re.error:
+                # 正規表現エラー時は単純な部分一致
+                filtered_stopwords = [w for w in full_stopwords if search_query in w]
+            is_filtered = True
+        else:
+            filtered_stopwords = full_stopwords
+            is_filtered = False
+            
+        stopwords_text = "\n".join(filtered_stopwords)
+        
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            label_suffix = f" (表示中: {len(filtered_stopwords)} / 全 {len(full_stopwords)} 語)" if is_filtered else f" (全 {len(full_stopwords)} 語)"
+            if is_filtered:
+                st.warning("⚠️ フィルタリング中: ここでの編集（追加・削除）は、表示されている単語に対して適用され、メインリストにマージされます。")
+            
+
+            editor_key = f"stopwords_editor_{hash(search_query)}" 
+            new_stopwords_text = st.text_area(f"ストップワードリスト{label_suffix}", value=stopwords_text, height=300, key=editor_key)
+            
+            if st.button("変更を適用", key="apply_stopwords"):
+                edited_lines = set([line.strip() for line in new_stopwords_text.split('\n') if line.strip()])
+                
+                if is_filtered:
+                    # フィルタリング時のスマートマージ
+                    # 1. 検索ヒットしていたはずの元の単語群 (変更前)
+                    original_matches = set(filtered_stopwords)
+                    # 2. 削除された単語 = (元ヒット) - (編集後)
+                    removed_words = original_matches - edited_lines
+                    # 3. 追加された単語 = (編集後) - (元ヒット)
+                    added_words = edited_lines - original_matches
+                    
+                    # 4. メインリストから削除対象を除き、追加分を足す
+                    current_set = st.session_state['stopwords']
+                    new_set = (current_set - removed_words) | added_words
+                    st.session_state['stopwords'] = new_set
+                    msg = f"更新完了: {len(added_words)} 語を追加, {len(removed_words)} 語を削除しました。"
+                else:
+                    # 全量置換
+                    st.session_state['stopwords'] = edited_lines
+                    msg = f"リストを全量更新しました (計 {len(edited_lines)} 語)。"
+                
+                st.success(msg)
+                st.rerun()
+
+        with c2:
+            st.markdown("**インポート / エクスポート**")
+            
+            # インポート
+            sw_file = st.file_uploader("リストをインポート (.txt, .csv)", type=['txt', 'csv'], key="sw_uploader")
+            if sw_file:
+                try:
+                    stringio = io.StringIO(sw_file.getvalue().decode("utf-8"))
+                    imported_lines = [line.strip() for line in stringio.read().split('\n') if line.strip()]
+                    if st.button(f"追加インポート ({len(imported_lines)}語)", key="import_sw"):
+                        st.session_state['stopwords'].update(imported_lines)
+                        st.success("インポートしました。")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"読み込みエラー: {e}")
+
+            # エクスポート
+            st.download_button(
+                label="リストをエクスポート (.txt)",
+                data="\n".join(sorted(list(st.session_state['stopwords']))),
+                file_name="apollo_stopwords.txt",
+                mime="text/plain"
+            )
+            
+            st.markdown("---")
+            if st.button("デフォルトに戻す", key="reset_stopwords"):
+                st.session_state['stopwords'] = utils.get_stopwords()
+                st.rerun()
+
+    # A-4. 前処理実行
+    with tab4:
         st.markdown("##### 全モジュール共通の分析エンジンを起動します。")
         st.write("データ量に応じて数分かかる場合があります。")
 

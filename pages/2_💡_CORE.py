@@ -14,6 +14,7 @@ from janome.tokenizer import Tokenizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import euclidean_distances
+import utils
 
 # ==================================================================
 # --- 1. ページ設定 ---
@@ -30,26 +31,9 @@ warnings.filterwarnings('ignore')
 # ==================================================================
 # --- 2. デザインテーマ設定 & 共通CSS ---
 # ==================================================================
-st.markdown("""
-<style>
-    html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-    [data-testid="stSidebar"] h1 { color: #003366; font-weight: 900 !important; font-size: 2.5rem !important; }
-    [data-testid="stSidebarNav"] { display: none !important; }
-    [data-testid="stSidebar"] .block-container { padding-top: 2rem; padding-bottom: 1rem; }
-    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-    .stButton>button { font-weight: 600; }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { background-color: #f0f2f6; border-radius: 8px 8px 0 0; padding: 10px 15px; }
-    .stTabs [aria-selected="true"] { background-color: #ffffff; border-bottom: 2px solid #003366; }
-</style>
-""", unsafe_allow_html=True)
 
-def get_theme_config(theme_name):
-    themes = {
-        "APOLLO Standard": { "bg_color": "#ffffff", "text_color": "#333333", "plotly_template": "plotly_white", "color_sequence": px.colors.qualitative.G10, "css": """[data-testid="stHeader"] { background-color: #ffffff; } h1, h2, h3 { color: #003366; }""" },
-        "Modern Presentation": { "bg_color": "#fdfdfd", "text_color": "#2c3e50", "plotly_template": "plotly_white", "color_sequence": ["#264653", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51", "#8ab17d"], "css": """[data-testid="stSidebar"] { background-color: #eaeaea; } [data-testid="stHeader"] { background-color: #fdfdfd; } h1, h2, h3 { color: #264653; font-family: "Georgia", serif; } .stButton>button { background-color: #264653; color: white; border-radius: 0px; }""" }
-    }
-    return themes.get(theme_name, themes["APOLLO Standard"])
+
+
 
 # ==================================================================
 # --- 3. ヘルパー関数 & リソースロード ---
@@ -58,21 +42,10 @@ def get_theme_config(theme_name):
 def load_tokenizer_core(): return Tokenizer()
 t = load_tokenizer_core()
 
-STOP_WORDS = {
-    "する","ある","なる","ため","こと","よう","もの","これ","それ","あれ","ここ","そこ","どれ","どの","この","その","当該","該","および","及び","または","また","例えば","例えばは","において","により","に対して","に関して","について","として","としては","場合","一方","他方","さらに","そして","ただし","なお","等","など","等々","いわゆる","所謂","同様","同時","前記","本","同","各","各種","所定","所望","一例","他","一部","一つ","複数","少なくとも","少なくとも一つ","上記","下記","前述","後述","既述","関する","基づく","用いる","使用","利用","有する","含む","備える","設ける","すなわち","従って","しかしながら","次に","特に","具体的に","詳細に","いずれ","うち","それぞれ","とき","かかる","かような","かかる場合","本件","本願","本出願","本明細書",
-    "できる", "いる", "提供", "明細書", 
-    "本発明","発明","実施例","実施形態","変形例","請求","請求項","図","図面","符号","符号の説明","図面の簡単な説明","発明の詳細な説明","技術分野","背景技術","従来技術","発明が解決しようとする課題","課題","解決手段","効果","要約","発明の効果","目的","手段", "実施の形態","実施の態様","態様","変形","修正例","図示","図示例","図示しない","参照","参照符号","段落","詳細説明","要旨","一実施形態","他の実施形態","一実施例","別の側面","付記","適用例","用語の定義","開示","本開示","開示内容","記載","記述","掲載","言及","内容","詳細","説明","表記","表現","箇条書き","以下の","以上の","全ての","任意の","特定の",
-    "上部","下部","内部","外部","内側","外側","表面","裏面","側面","上面","下面","端面","先端","基端","後端","一端","他端","中心","中央","周縁","周辺","近傍","方向","位置","空間","領域","範囲","間隔","距離","形状","形態","状態","種類","層","膜","部","部材","部位","部品","機構","装置","容器","組成","材料","用途","適用","適用例","片側","両側","左側","右側","前方","後方","上流","下流","隣接","近接","離間","間置","介在","重畳","概ね","略","略中央","固定側","可動側","伸長","収縮","係合","嵌合","取付","連結部","支持体","支持部","ガイド部",
-    "データ","情報","信号","出力","入力","制御","演算","取得","送信","受信","表示","通知","設定","変更","更新","保存","削除","追加","実行","開始","終了","継続","停止","判定","判断","決定","選択","特定","抽出","検出","検知","測定","計測","移動","回転","変位","変形","固定","配置","生成","付与","供給","適用","照合","比較","算出","解析","同定","初期化","読出","書込","登録","記録","配信","連携","切替","起動","復帰","監視","通知処理","取得処理","演算処理",
-    "良好","容易","簡便","適切","有利","有用","有効","効果的","高い","低い","大きい","小さい","新規","改良","改善","抑制","向上","低減","削減","増加","減少","可能","好適","好ましい","望ましい","優れる","優れた","高性能","高効率","低コスト","コスト","簡易","安定","安定性","耐久","耐久性","信頼性","簡素","簡略","単純","最適","最適化","汎用","汎用性","実現","達成","確保","維持","防止","回避","促進","不要","必要","高精度","省電力","省資源","高信頼","低負荷","高純度","高密度","高感度","迅速","円滑","簡略化","低価格","実効的","可能化","有効化","非必須","適合","互換",
-    "出願","出願人","出願番号","出願日","出願書","出願公開","公開","公開番号","公開公報","公報","公報番号","特許","特許番号","特許文献","非特許文献","引用","引用文献","先行技術","審査","審査官","拒絶","意見書","補正書","優先","優先日","分割出願","継続出願","国内移行","国際出願","国際公開","PCT","登録","公開日","審査請求","拒絶理由","補正","訂正","無効審判","異議","取消","取下げ","事件番号","代理人","弁理士","係属","経過",
-    "第","第一","第二","第三","第1","第２","第３","第１","第２","第３","一","二","三","四","五","六","七","八","九","零","数","複合","多数","少数","図1","図2","図3","図4","図5","図6","図7","図8","図9","表1","表2","表3","式1","式2","式3",
-    "%","％","wt%","vol%","質量%","重量%","容量%","mol","mol%","mol/L","M","mm","cm","m","nm","μm","μ","rpm","Pa","kPa","MPa","GPa","N","W","V","A","mA","Hz","kHz","MHz","GHz","℃","°C","K","mL","L","g","kg","mg","wt","vol","h","hr","hrs","min","s","sec","ppm","ppb","bar","Ω","ohm","J","kJ","Wh","kWh",
-    "株式会社","有限会社","合資会社","合名会社","合同会社","Inc","Inc.","Ltd","Ltd.","Co","Co.","Corp","Corp.","LLC", "GmbH","AG","BV","B.V.","S.A.","S.p.A.","（株）","㈱","（有）",
-    "溶液","溶媒","触媒","反応","生成物","原料","成分","含有","含有量","配合","混合","混合物","濃度","温度","時間","割合","比率","基","官能基","化合物","組成物","樹脂","ポリマー","モノマー","基板","基材","フィルム","シート","粒子","粉末","比較例","参考例","試験","試料","評価","条件","実験","実験例","反応条件","反応時間","反応温度",
-    "処理装置","端末","ユニット","モジュール","回路","素子","電源","電圧","電流","信号線","配線","端子","端部","接続", "接続部","演算部","記憶部","記憶装置","記録媒体","ユーザ","利用者","クライアント","サーバ","画面","UI","GUI","インターフェース","データベース","DB","ネットワーク","通信","要求","応答","リクエスト","レスポンス","パラメータ","引数","属性","プロパティ","フラグ","ID","ファイル","データ構造","テーブル","レコード",
-    "軸","シャフト","ギア","モータ","エンジン","アクチュエータ","センサ","バルブ","ポンプ","筐体","ハウジング","フレーム","シャーシ","駆動","伝達","支持","連結"
-}
+if "stopwords" in st.session_state and st.session_state["stopwords"]:
+    STOP_WORDS = st.session_state["stopwords"]
+else:
+    STOP_WORDS = utils.get_stopwords()
 
 @st.cache_data
 def _core_text_preprocessor(text):
@@ -178,25 +151,7 @@ def convert_df_to_csv_core(df): return df.to_csv(encoding='utf-8-sig').encode('u
 # ==================================================================
 # --- 4. アプリケーション初期化 & UI構成 ---
 # ==================================================================
-with st.sidebar:
-    st.title("APOLLO") 
-    st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
-    st.markdown("**v.3**")
-    st.markdown("---")
-    st.subheader("Home"); st.page_link("Home.py", label="Mission Control", icon="🛰️")
-    st.subheader("Modules")
-    st.page_link("pages/1_🌍_ATLAS.py", label="ATLAS", icon="🌍")
-    st.page_link("pages/2_💡_CORE.py", label="CORE", icon="💡")
-    st.page_link("pages/3_🚀_Saturn_V.py", label="Saturn V", icon="🚀")
-    st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
-    st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
-    st.page_link("pages/6_🔗_CREW.py", label="CREW", icon="🔗")
-    st.markdown("---")
-    st.caption("ナビゲーション:")
-    st.caption("1. Mission Control でデータをアップロードし、前処理を実行します。")
-    st.caption("2. 上のリストから分析モジュールを選択します。")
-    st.markdown("---")
-    st.caption("© 2025 しばやま")
+utils.render_sidebar()
 
 st.title("💡 CORE")
 st.markdown("Contextual Operator & Rule Engine: **論理式ベースの特許分類ツール**です。")
@@ -204,7 +159,7 @@ st.markdown("Contextual Operator & Rule Engine: **論理式ベースの特許分
 col_theme, _ = st.columns([1, 3])
 with col_theme:
     selected_theme = st.selectbox("表示テーマ:", ["APOLLO Standard", "Modern Presentation"], key="core_theme_selector")
-theme_config = get_theme_config(selected_theme)
+theme_config = utils.get_theme_config(selected_theme)
 st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
 
 if not st.session_state.get("preprocess_done", False):
@@ -639,7 +594,7 @@ elif current_phase.startswith("フェーズ 4"):
                         yaxis=dict(title=y_ax),
                         xaxis=dict(title=x_ax, side='bottom')
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, config={'editable': False})
                     
                 else: # バブルチャート
                     ct_long = ct.reset_index().melt(id_vars='Y', var_name='X', value_name='Count')
@@ -655,7 +610,7 @@ elif current_phase.startswith("フェーズ 4"):
                     fig.update_xaxes(categoryorder='array', categoryarray=x_ord, title=x_ax, side='bottom', type='category')
                     
                     fig.update_layout(title=f"{x_ax} × {y_ax}", height=max(600, len(ct)*40), showlegend=False)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
         # CSVダウンロード
         st.markdown("---")

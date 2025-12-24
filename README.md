@@ -1,5 +1,5 @@
 ---
-title: APOLLO v3 Patent Analysis
+title: APOLLO v4 Patent Analysis
 emoji: 🚀
 colorFrom: blue
 colorTo: indigo
@@ -11,7 +11,7 @@ short_description: AI-Powered Patent Analysis Platform (JP/EN)
 license: mit
 ---
 
-# 🚀 APOLLO v3: Patent Analysis Platform
+# 🚀 APOLLO v4: Patent Analysis Platform
 
 **APOLLO (Advanced Patent & Overall Landscape-analytics Logic Orbiter)** is an advanced, AI-powered patent analysis platform designed to visualize technology trends, competitor strategies, and inventor networks using state-of-the-art NLP techniques (SBERT, UMAP, HDBSCAN).
 
@@ -30,6 +30,8 @@ The entry point for all analyses.
     * *スマートマッピング*: キーワードに基づいてカラム（名称、要約、請求項、IPCなど）を自動的に紐付けます。
 3.  **Analysis Engine**: Pre-calculates SBERT vectors, TF-IDF keywords, and normalizes metadata with a real-time progress bar.
     * *分析エンジン*: SBERTベクトル化、TF-IDF計算、メタデータ正規化をバックグラウンドで実行します（リアルタイム進捗表示付き）。
+4.  **Stopword Management**: Manage and edit stopwords to refine analysis accuracy.
+    * *ストップワード管理*: 分析精度を向上させるため、ストップワードの管理・編集が可能です。
 
 ---
 
@@ -78,6 +80,13 @@ Analyzes co-occurrence networks of inventors or applicants.
 * **Co-occurrence Graph**: Interactive network visualization. (インタラクティブなネットワーク図)
 * **Metrics**: Betweenness Centrality, Brokerage Score, Productivity Score. (媒介中心性、技術ブローカー、生産性スコアなどの指標算出)
 * **Community Detection**: Identifies research groups/factions. (コミュニティ・派閥の検出)
+
+### 7. 🦅 EAGLE (Exploratory Landscape / 探索的ランドスケープ)
+An interactive exploration module based on Saturn V, featuring manual clustering.
+Saturn Vをベースにした、手動クラスタリング可能な探索的分析モジュールです。
+* **Lasso Clustering**: Manually select and cluster data points. (自由選択クラスタリング)
+* **Drill-down**: Detailed analysis of selected areas. (ドリルダウン分析)
+* **Visual Editing**: Edit clusters and labels interactively. (視覚的なクラスタ編集)
 
 ---
 

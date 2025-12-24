@@ -5,6 +5,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import japanize_matplotlib
 import warnings
+import utils
 import re
 
 # ==================================================================
@@ -12,39 +13,7 @@ import re
 # ==================================================================
 warnings.filterwarnings('ignore')
 
-def get_theme_config(theme_name):
-    themes = {
-        "APOLLO Standard": {
-            "bg_color": "#ffffff",
-            "text_color": "#333333",
-            "sidebar_bg": "#f8f9fa",
-            "plotly_template": "plotly_white",
-            "color_sequence": px.colors.qualitative.G10,
-            "accent_color": "#003366",
-            "css": """
-                html, body { background-color: #ffffff; color: #333333; }
-                [data-testid="stSidebar"] { background-color: #f8f9fa; }
-                [data-testid="stHeader"] { background-color: #ffffff; }
-                h1, h2, h3 { color: #003366; }
-            """
-        },
-        "Modern Presentation": {
-            "bg_color": "#fdfdfd",
-            "text_color": "#2c3e50",
-            "sidebar_bg": "#eaeaea",
-            "plotly_template": "plotly_white",
-            "color_sequence": ["#264653", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51", "#8ab17d"],
-            "accent_color": "#264653",
-            "css": """
-                html, body { background-color: #fdfdfd; color: #2c3e50; font-family: "Helvetica Neue", Arial, sans-serif; }
-                [data-testid="stSidebar"] { background-color: #eaeaea; }
-                [data-testid="stHeader"] { background-color: #fdfdfd; }
-                h1, h2, h3 { color: #264653; font-family: "Georgia", serif; }
-                .stButton>button { background-color: #264653; color: white; border-radius: 0px; }
-            """
-        }
-    }
-    return themes.get(theme_name, themes["APOLLO Standard"])
+
 
 @st.cache_data
 def parse_ipc_atlas(ipc, level):
@@ -85,17 +54,26 @@ def create_treemap_data(df_stats, start_year, end_year, mode="ipc"):
         df_tree['Root'] = 'Total'
         return df_tree
 
-def update_fig_layout(fig, title, height=600, theme_config=None):
+def update_fig_layout(fig, title, height=600, theme_config=None, show_legend=True):
     if theme_config is None:
         return fig
-    fig.update_layout(
+    
+    # Sanitize title to remove implicit/explicit HTML tags
+    if isinstance(title, str):
+        title = re.sub(r'<[^>]+>', '', title)
+
+    layout_params = dict(
         template=theme_config["plotly_template"],
-        title=title,
+        title=dict(text=title, font=dict(size=18, color=theme_config["text_color"], family="Helvetica Neue", weight="normal")),
         paper_bgcolor=theme_config["bg_color"],
         plot_bgcolor=theme_config["bg_color"],
         font_color=theme_config["text_color"],
         height=height
     )
+    if not show_legend:
+        layout_params['showlegend'] = False
+        
+    fig.update_layout(**layout_params)
     return fig
 
 # ==================================================================
@@ -108,38 +86,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.markdown("""
-<style>
-    html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-    [data-testid="stSidebar"] h1 { color: #003366; font-weight: 900 !important; font-size: 2.5rem !important; }
-    [data-testid="stSidebarNav"] { display: none !important; }
-    [data-testid="stSidebar"] .block-container { padding-top: 2rem; padding-bottom: 1rem; }
-    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-    .stButton>button { font-weight: 600; }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { background-color: #f0f2f6; border-radius: 8px 8px 0 0; padding: 10px 15px; }
-    .stTabs [aria-selected="true"] { background-color: #ffffff; border-bottom: 2px solid #003366; }
-</style>
-""", unsafe_allow_html=True)
-
-with st.sidebar:
-    st.title("APOLLO") 
-    st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
-    st.markdown("**v.3**")
-    st.markdown("---")
-    st.subheader("Home")
-    st.page_link("Home.py", label="Mission Control", icon="🛰️")
-    st.subheader("Modules")
-    st.page_link("pages/1_🌍_ATLAS.py", label="ATLAS", icon="🌍")
-    st.page_link("pages/2_💡_CORE.py", label="CORE", icon="💡")
-    st.page_link("pages/3_🚀_Saturn_V.py", label="Saturn V", icon="🚀")
-    st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
-    st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
-    st.page_link("pages/6_🔗_CREW.py", label="CREW", icon="🔗")
-    st.markdown("---")
-    st.caption("ナビゲーション:\n1. Mission Control でデータをアップロードし、前処理を実行します。\n2. 上のリストから分析モジュールを選択します。")
-    st.markdown("---")
-    st.caption("© 2025 しばやま")
+utils.render_sidebar()
 
 st.title("🌍 ATLAS")
 st.markdown("出願年、出願人、IPCなどの基本的な統計グラフを作成します。")
@@ -147,7 +94,7 @@ st.markdown("出願年、出願人、IPCなどの基本的な統計グラフを�
 col_theme, _ = st.columns([1, 3])
 with col_theme:
     selected_theme = st.selectbox("表示テーマ:", ["APOLLO Standard", "Modern Presentation"], key="atlas_theme_selector")
-theme_config = get_theme_config(selected_theme)
+theme_config = utils.get_theme_config(selected_theme)
 st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
 
 # ==================================================================
@@ -207,31 +154,94 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "ライフサイクルマップ"
 ])
 
+# --- ステータスの配色設定 ---
+# 全タブで色が統一されるように、ステータスごとの色を固定する
+status_color_map = {}
+status_col = st.session_state.col_map.get('status')
+if status_col:
+    # 全てのユニークなステータスを取得（ソートして順序を固定）
+    unique_statuses_all = sorted(df_filtered[status_col].dropna().unique().astype(str))
+    base_colors = theme_config["color_sequence"]
+    # 循環的に色を割り当てる
+    status_color_map = {s: base_colors[i % len(base_colors)] for i, s in enumerate(unique_statuses_all)}
+
 # 1. 件数推移
 with tab1:
     st.subheader("出願件数時系列推移")
+    
+    # Status Breakdown Option
+    use_status_breakdown = False
+    status_col = st.session_state.col_map.get('status')
+    if status_col:
+        use_status_breakdown = st.checkbox("ステータス内訳を表示", key="atlas_use_status_tab1")
+
     if st.button("件数推移グラフを描画", key="atlas_run_map1"):
         if df_filtered.empty:
             st.warning("データがありません。")
         else:
-            yearly_counts = df_filtered['year'].value_counts().sort_index()
-            plot_data = yearly_counts.reindex(range(int(stats_start_year), int(stats_end_year) + 1), fill_value=0)
-            fig = px.bar(x=plot_data.index, y=plot_data.values, labels={'x': '出願年', 'y': '出願件数'}, color_discrete_sequence=[theme_config["color_sequence"][0]])
+            if use_status_breakdown and status_col:
+                 # Stacked Bar Chart by Status
+                plot_data = df_filtered.groupby(['year', status_col]).size().reset_index(name='count')
+                # Use color_discrete_map for consistency
+                fig = px.bar(plot_data, x='year', y='count', color=status_col, labels={'year': '出願年', 'count': '出願件数', status_col: 'ステータス'}, 
+                             color_discrete_map=status_color_map,
+                             category_orders={status_col: sorted(status_color_map.keys())} # Ensure consistent legend order
+                            )
+            else:
+                # Standard Bar Chart
+                yearly_counts = df_filtered['year'].value_counts().sort_index()
+                plot_data = yearly_counts.reindex(range(int(stats_start_year), int(stats_end_year) + 1), fill_value=0)
+                fig = px.bar(x=plot_data.index, y=plot_data.values, labels={'x': '出願年', 'y': '出願件数'}, color_discrete_sequence=[theme_config["color_sequence"][0]])
+            
             update_fig_layout(fig, f'出願件数時系列推移 ({int(stats_start_year)}年～{int(stats_end_year)}年)', theme_config=theme_config)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, config={'editable': False})
 
 # 2. 出願人ランキング
 with tab2:
     st.subheader("出願人ランキング")
-    num_to_display_map2 = st.number_input("表示人数:", min_value=1, value=20, key="atlas_num_apps_map2")
+    col2_1, col2_2 = st.columns([2, 1])
+    with col2_1:
+         num_to_display_map2 = st.number_input("表示人数:", min_value=1, value=20, key="atlas_num_apps_map2")
+    
+    # Status Breakdown Option
+    use_status_breakdown_tab2 = False
+    status_col = st.session_state.col_map.get('status')
+    with col2_2:
+        if status_col:
+            st.write("") # Spacer
+            st.write("")
+            use_status_breakdown_tab2 = st.checkbox("ステータス内訳を表示", key="atlas_use_status_tab2")
+
     if st.button("出願人ランキングを描画", key="atlas_run_map2"):
         if df_filtered.empty:
             st.warning("データがありません。")
         else:
+            # 1. Identify Top Applicants first (based on total count)
             assignee_counts = df_filtered['applicant_main'].explode().str.strip().value_counts().head(int(num_to_display_map2)).sort_values(ascending=True)
-            fig = px.bar(x=assignee_counts.values, y=assignee_counts.index, orientation='h', labels={'x': '特許件数', 'y': '出願人'}, color_discrete_sequence=[theme_config["color_sequence"][1]])
+            top_applicants = assignee_counts.index.tolist()
+
+            if use_status_breakdown_tab2 and status_col:
+                # Stacked Bar Chart by Status for Top Applicants
+                df_exploded = df_filtered.explode('applicant_main')
+                df_exploded['applicant_parsed'] = df_exploded['applicant_main'].str.strip()
+                df_top = df_exploded[df_exploded['applicant_parsed'].isin(top_applicants)]
+                
+                plot_data = df_top.groupby(['applicant_parsed', status_col]).size().reset_index(name='count')
+                
+                # Ensure sort order matches total count
+                fig = px.bar(plot_data, x='count', y='applicant_parsed', color=status_col, orientation='h', 
+                             labels={'count': '特許件数', 'applicant_parsed': '出願人', status_col: 'ステータス'}, 
+                             color_discrete_map=status_color_map,
+                             category_orders={'applicant_parsed': top_applicants[::-1], status_col: sorted(status_color_map.keys())})
+            else:
+                # Standard Bar Chart
+                fig = px.bar(x=assignee_counts.values, y=assignee_counts.index, orientation='h', labels={'x': '特許件数', 'y': '出願人'}, color_discrete_sequence=[theme_config["color_sequence"][1]])
+            
             update_fig_layout(fig, f'出願人ランキング ({int(stats_start_year)}年～{int(stats_end_year)}年)', height=max(600, len(assignee_counts)*30), theme_config=theme_config)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+
+# 3. IPCランキング
+
 
 # 3. IPCランキング
 with tab3:
@@ -247,23 +257,192 @@ with tab3:
             ipc_counts = ipc_parsed.value_counts().head(int(num_to_display_map3)).sort_values(ascending=True)
             fig = px.bar(x=ipc_counts.values, y=ipc_counts.index, orientation='h', labels={'x': '特許件数', 'y': 'IPC分類'}, color_discrete_sequence=[theme_config["color_sequence"][2]])
             update_fig_layout(fig, f'IPCランキング ({ipc_level_map3[1]})', height=max(600, len(ipc_counts)*30), theme_config=theme_config)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, config={'editable': False})
 
 # 4. 出願人×年 バブル
 with tab4:
     st.subheader("出願人 × 年 バブルチャート")
-    num_to_display_map4 = st.number_input("表示人数:", min_value=1, value=10, key="atlas_num_apps_map4")
+    col4_1, col4_2 = st.columns([2, 1])
+    with col4_1:
+         num_to_display_map4 = st.number_input("表示人数:", min_value=1, value=10, key="atlas_num_apps_map4")
+    
+    # Status Breakdown Option
+    use_status_breakdown_tab4 = False
+    status_col = st.session_state.col_map.get('status')
+    with col4_2:
+        if status_col:
+            st.write("") # Spacer
+            st.write("")
+            use_status_breakdown_tab4 = st.checkbox("ステータス内訳を表示", key="atlas_use_status_tab4")
+
     if st.button("出願人×年 バブルを描画", key="atlas_run_map4"):
         assignees_exploded = df_filtered.explode('applicant_main')
         assignees_exploded['assignee_parsed'] = assignees_exploded['applicant_main'].str.strip()
         top_assignees = assignees_exploded['assignee_parsed'].value_counts().head(int(num_to_display_map4)).index.tolist()
-        plot_data = assignees_exploded[assignees_exploded['assignee_parsed'].isin(top_assignees)].groupby(['year', 'assignee_parsed']).size().reset_index(name='件数')
-        if plot_data.empty:
+        
+        # Filter for top applicants upfront
+        df_target = assignees_exploded[assignees_exploded['assignee_parsed'].isin(top_assignees)].copy()
+        
+        if df_target.empty:
             st.warning("データがありません。")
         else:
-            fig = px.scatter(plot_data, x='year', y='assignee_parsed', size='件数', color='assignee_parsed', labels={'year': '出願年', 'assignee_parsed': '出願人', '件数': '件数'}, color_discrete_sequence=theme_config["color_sequence"], category_orders={"assignee_parsed": top_assignees})
-            update_fig_layout(fig, '出願年別 出願人動向', height=700, theme_config=theme_config)
-            st.plotly_chart(fig, use_container_width=True)
+            if use_status_breakdown_tab4 and status_col:
+                # --- グリッド状パイチャートの描画 ---
+                # 1. グリッド寸法の計算
+                years = sorted(df_target['year'].unique())
+                valid_years = [y for y in years if int(y) >= int(stats_start_year) and int(y) <= int(stats_end_year)]
+                # Re-filter data by valid years just in case
+                df_target = df_target[df_target['year'].isin(valid_years)]
+                
+                if df_target.empty:
+                    st.warning("指定期間内のデータがありません。")
+                else:
+                    # Rows = Applicants, Cols = Years
+                    rows = top_assignees 
+                    cols = valid_years
+                    
+                    n_rows = len(rows)
+                    n_cols = len(cols)
+                    
+                    fig = go.Figure()
+                    
+                    # Group by [Applicant, Year, Status]
+                    grid_data = df_target.groupby(['assignee_parsed', 'year', status_col]).size().reset_index(name='count')
+                    total_counts = df_target.groupby(['assignee_parsed', 'year']).size().reset_index(name='total')
+                    max_total = total_counts['total'].max()
+                    
+                    # Layout Calculation
+                    x_margin_l = 0.25 # For Applicant Names (Increased for long names)
+                    x_margin_r = 0.02
+                    y_margin_b = 0.05 # For Years
+                    y_margin_t = 0.05
+                    
+                    plot_width = 1.0 - (x_margin_l + x_margin_r)
+                    plot_height = 1.0 - (y_margin_b + y_margin_t)
+                    
+                    cell_w = plot_width / n_cols
+                    cell_h = plot_height / n_rows
+                    
+                    # Prepare Legend Colors (Use globally defined map)
+                    
+                    # Filter map to only statuses present in this view for the legend
+                    statuses_in_view = sorted(df_target[status_col].dropna().unique().astype(str))
+                    
+                    # Add Dummy Traces for Legend (Scatter markers)
+                    for status in statuses_in_view:
+                        fig.add_trace(go.Scatter(
+                            x=[None], y=[None],
+                            mode='markers',
+                            marker=dict(size=10, color=status_color_map.get(status, '#ccc')),
+                            name=status,
+                            showlegend=True
+                        ))
+                    
+                    # Annotations for Axes
+                    annotations = []
+                    
+                    # Y-Axis Labels (Applicants)
+                    for i, applicant in enumerate(rows):
+                        y_center = (1.0 - y_margin_t) - (i * cell_h) - (cell_h / 2)
+                        
+                        annotations.append(dict(
+                            x=x_margin_l - 0.01, y=y_center,
+                            xref="paper", yref="paper",
+                            text=applicant,
+                            showarrow=False, xanchor="right", yanchor="middle",
+                            font=dict(size=12, color=theme_config["text_color"])
+                        ))
+                        
+                    # X-Axis Labels (Years)
+                    for j, year in enumerate(cols):
+                        x_center = x_margin_l + (j * cell_w) + (cell_w / 2)
+                        
+                        annotations.append(dict(
+                            x=x_center, y=y_margin_b - 0.02,
+                            xref="paper", yref="paper",
+                            text=str(year),
+                            showarrow=False, xanchor="center", yanchor="top",
+                            font=dict(size=12, color=theme_config["text_color"])
+                        ))
+
+                    # Add Pie Traces
+                    for i, applicant in enumerate(rows):
+                        for j, year in enumerate(cols):
+                            cell_df = grid_data[(grid_data['assignee_parsed'] == applicant) & (grid_data['year'] == year)]
+                            
+                            if not cell_df.empty:
+                                total = cell_df['count'].sum()
+                                max_r = min(cell_w, cell_h) / 2 * 0.9
+                                scale_factor = (total / max_total) ** 0.5
+                                scaled_r = max_r * scale_factor
+                                
+                                # Use sqrt scaling for visual size
+                                y_center = (1.0 - y_margin_t) - (i * cell_h) - (cell_h / 2)
+                                x_center = x_margin_l + (j * cell_w) + (cell_w / 2)
+                                
+                                # Domain Calc
+                                d_w = cell_w * scale_factor
+                                d_h = cell_h * scale_factor
+                                
+                                x0 = x_center - (d_w / 2)
+                                x1 = x_center + (d_w / 2)
+                                y0 = y_center - (d_h / 2)
+                                y1 = y_center + (d_h / 2)
+                                
+                                # Map colors explicitly
+                                labels = cell_df[status_col].astype(str).tolist()
+                                values = cell_df['count'].tolist()
+                                colors = [status_color_map.get(l, '#ccc') for l in labels]
+                                
+                                fig.add_trace(go.Pie(
+                                    labels=labels,
+                                    values=values,
+                                    marker=dict(colors=colors),
+                                    domain=dict(x=[x0, x1], y=[y0, y1]),
+                                    showlegend=False, # Use dummy legend instead
+                                    textinfo='none',
+                                    hoverinfo='label+value',
+                                    sort=False 
+                                ))
+                    
+                    # Add Horizontal Grid Lines (At row centers)
+                    shapes = []
+                    for i in range(n_rows):
+                        # Line Y position: Center of row i (where bubble sits)
+                        y_center = (1.0 - y_margin_t) - (i * cell_h) - (cell_h / 2)
+                        
+                        shapes.append(dict(
+                            type="line",
+                            xref="paper", yref="paper",
+                            x0=x_margin_l, y0=y_center,
+                            x1=1.0 - x_margin_r, y1=y_center,
+                            layer="below",
+                            line=dict(color="#eee", width=1)
+                        ))
+                    
+                    # Layout Finalization
+                    fig.update_layout(
+                        height=max(700, n_rows * 50),
+                        annotations=annotations,
+                        shapes=shapes,
+                        showlegend=True,
+                        xaxis=dict(visible=False),
+                        yaxis=dict(visible=False),
+                        margin=dict(l=0, r=0, t=40, b=0),
+                        paper_bgcolor=theme_config["bg_color"],
+                        plot_bgcolor=theme_config["bg_color"],
+                        font_color=theme_config["text_color"],
+                        title=dict(text=f'出願年別 出願人動向 (内訳: {status_col})', font=dict(size=18, weight="normal"))
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+            else:
+                # Standard Bubble Chart
+                plot_data = df_target.groupby(['year', 'assignee_parsed']).size().reset_index(name='件数')
+                fig = px.scatter(plot_data, x='year', y='assignee_parsed', size='件数', color='assignee_parsed', labels={'year': '出願年', 'assignee_parsed': '出願人', '件数': '件数'}, color_discrete_sequence=theme_config["color_sequence"], category_orders={"assignee_parsed": top_assignees})
+                update_fig_layout(fig, '出願年別 出願人動向', height=700, theme_config=theme_config)
+                st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+
 
 # 5. IPC×出願人 バブル
 with tab5:
@@ -286,7 +465,7 @@ with tab5:
         else:
             fig = px.scatter(plot_data, x='assignee_parsed', y='ipc_parsed', size='件数', color='ipc_parsed', labels={'assignee_parsed': '出願人', 'ipc_parsed': 'IPC分類', '件数': '件数'}, color_discrete_sequence=theme_config["color_sequence"], category_orders={"ipc_parsed": top_ipcs})
             update_fig_layout(fig, f'IPC ({ipc_level_map5[1]}) × 出願人 ポートフォリオ', height=800, theme_config=theme_config)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, config={'editable': False})
 
 # 6. 構成比マップ
 with tab6:
@@ -301,7 +480,7 @@ with tab6:
                 else:
                     fig = px.treemap(df_tree, path=['Section', 'Class', 'Subclass'], values='count', color='Section', color_discrete_sequence=theme_config["color_sequence"])
                     update_fig_layout(fig, 'IPC階層構造マップ', height=700, theme_config=theme_config)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, config={'editable': False})
             elif tree_mode == "出願人シェア":
                 df_tree = create_treemap_data(df_filtered, stats_start_year, stats_end_year, mode="applicant")
                 if df_tree.empty:
@@ -309,7 +488,7 @@ with tab6:
                 else:
                     fig = px.treemap(df_tree, path=['Root', 'Applicant'], values='count', color='count', color_continuous_scale='Blues', labels={'Applicant': '出願人', 'count': '件数', 'Root': '全体'})
                     update_fig_layout(fig, '出願人シェアマップ', height=700, theme_config=theme_config)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, config={'editable': False})
 
 # 7. ライフサイクルマップ
 with tab7:
@@ -378,7 +557,7 @@ with tab7:
                     yaxis_title="出願人数 (参入プレイヤー数)"
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True, config={'editable': False})
                 
                 st.markdown("""
                 ##### 💡 マップの読み方

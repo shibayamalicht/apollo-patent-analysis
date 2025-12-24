@@ -16,7 +16,8 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize
 from wordcloud import WordCloud
 import os
-import platform
+import japanize_matplotlib
+import utils
 
 # ==============================================================================
 #  1. Page Config (Must be first)
@@ -30,34 +31,12 @@ st.set_page_config(
 # ==============================================================================
 #  2. Font Setup
 # ==============================================================================
-def get_japanese_font_path():
-    system = platform.system()
-    font_paths = []
-    if system == "Darwin": # Mac
-        font_paths = ["/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc", "/System/Library/Fonts/Hiragino Sans W3.ttc", "/Library/Fonts/AppleGothic.ttf"]
-    elif system == "Windows": # Windows
-        font_paths = ["C:/Windows/Fonts/meiryo.ttc", "C:/Windows/Fonts/msgothic.ttc", "C:/Windows/Fonts/YuGothR.ttc"]
-    else: # Linux
-        font_paths = ["/usr/share/fonts/opentype/ipafont-gothic/ipagp.ttf", "/usr/share/fonts/noto/NotoSansCJK-Regular.ttc"]
-    for path in font_paths:
-        if os.path.exists(path): return path
-    return None
 
-FONT_PATH = get_japanese_font_path()
-if FONT_PATH:
-    try:
-        prop = fm.FontProperties(fname=FONT_PATH)
-        plt.rcParams['font.family'] = prop.get_name()
-    except: pass
 
 # --- Custom CSS ---
 st.markdown("""
 <style>
-    [data-testid="stSidebar"] h1 { color: #003366; font-weight: 900 !important; font-size: 2.5rem !important; }
-    [data-testid="stSidebarNav"] { display: none !important; }
-    [data-testid="stSidebar"] .block-container { padding-top: 2rem; padding-bottom: 1rem; }
-    .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-    h3 { border-bottom: 2px solid #f0f0f0; padding-bottom: 5px; }
+
     .stButton>button { font-weight: 600; }
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
     .stTabs [data-baseweb="tab"] { background-color: #f0f2f6; border-radius: 8px 8px 0 0; padding: 10px 15px; }
@@ -68,27 +47,7 @@ st.markdown("""
 # ==============================================================================
 #  3. Sidebar Navigation
 # ==============================================================================
-with st.sidebar:
-    st.title("APOLLO") 
-    st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
-    st.markdown("**v.3**")
-    st.markdown("---")
-    st.subheader("Home"); st.page_link("Home.py", label="Mission Control", icon="🛰️")
-    st.subheader("Modules")
-    st.page_link("pages/1_🌍_ATLAS.py", label="ATLAS", icon="🌍")
-    st.page_link("pages/2_💡_CORE.py", label="CORE", icon="💡")
-    st.page_link("pages/3_🚀_Saturn_V.py", label="Saturn V", icon="🚀")
-    st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
-    st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
-    st.page_link("pages/6_🔗_CREW.py", label="CREW", icon="🔗")
-    st.markdown("---")
-    
-    st.caption("ナビゲーション:")
-    st.caption("1. Mission Control でデータをアップロードし、前処理を実行します。")
-    st.caption("2. 上のリストから分析モジュールを選択します。")
-    
-    st.markdown("---")
-    st.caption("© 2025 しばやま")
+utils.render_sidebar()
 
 # ==============================================================================
 #  4. Analysis Logic
@@ -595,7 +554,12 @@ if st.session_state.analyzer:
             
             fig_net = go.Figure(data=[edge_trace, node_trace], layout=go.Layout(showlegend=False, margin=dict(b=0,l=0,r=0,t=0), height=600))
             fig_net.update_xaxes(visible=False); fig_net.update_yaxes(visible=False)
-            st.plotly_chart(fig_net, use_container_width=True)
+            # Pass width=None to allow the network graph to fill the container width (prevent clumping)
+            utils.update_fig_layout(fig_net, "共起ネットワーク図", height=600, width=None, theme_config=utils.get_theme_config("APOLLO Standard"))
+            fig_net.update_layout(margin=dict(l=10, r=10, t=40, b=10))
+            # Remove aspect ratio constraint (set by utils for hidden axes) to fill width
+            fig_net.update_yaxes(scaleanchor=None, scaleratio=None)
+            st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
 
         with tab2:
             st.dataframe(metrics_df.sort_values('媒介中心性', ascending=False), use_container_width=True)
@@ -640,7 +604,8 @@ if st.session_state.analyzer:
                 fig_hm.update_xaxes(type='category', side="bottom")
                 fig_hm.update_yaxes(type='category', autorange="reversed")
                 
-                st.plotly_chart(fig_hm, use_container_width=True)
+                utils.update_fig_layout(fig_hm, "コミュニティ × 技術トピック", height=600, theme_config=utils.get_theme_config("APOLLO Standard"), show_axes=True)
+                st.plotly_chart(fig_hm, use_container_width=True, config={'editable': False})
             else: st.info("データなし")
 
         with tab4:
@@ -649,16 +614,26 @@ if st.session_state.analyzer:
                 df_tr = analyzer.get_inventor_trends(year_range=year_range, applicants=sel_apps)
                 if not df_tr.empty:
                     fig_tr = px.bar(df_tr, x='出願年', y=['継続', '新規'], labels={'value':'人数'}, color_discrete_map={'新規':'#EF553B','継続':'#636EFA'})
-                    st.plotly_chart(fig_tr, use_container_width=True)
+                    utils.update_fig_layout(fig_tr, "発明者数推移", height=400, theme_config=utils.get_theme_config("APOLLO Standard"), show_axes=True)
+                    st.plotly_chart(fig_tr, use_container_width=True, config={'editable': False})
                 
                 st.markdown("##### タイムライン")
                 col_tl, _ = st.columns([1, 2])
                 with col_tl: top_n_tl = st.slider("トップ表示数", 5, 50, 20)
                 df_time = analyzer.get_inventor_timeline(year_range=year_range, applicants=sel_apps, top_n=top_n_tl)
                 if not df_time.empty:
-                    fig_time = px.scatter(df_time, x='出願年', y='発明者', size='出願数', color='発明者')
+                    # Sort inventors by total count descending (so highest count is at the top of Y-axis logic depending on display)
+                    # 出願数が多い順に上から表示
+                    total_counts = df_time.groupby('発明者')['出願数'].sum().sort_values(ascending=False)
+                    sorted_inventors = total_counts.index.tolist()
+
+                    fig_time = px.scatter(
+                        df_time, x='出願年', y='発明者', size='出願数', color='発明者',
+                        category_orders={'発明者': sorted_inventors}
+                    )
                     fig_time.update_layout(showlegend=False, height=max(400, top_n_tl * 25))
-                    st.plotly_chart(fig_time, use_container_width=True)
+                    utils.update_fig_layout(fig_time, "タイムライン", height=max(400, top_n_tl * 25), theme_config=utils.get_theme_config("APOLLO Standard"), show_axes=True)
+                    st.plotly_chart(fig_time, use_container_width=True, config={'editable': False})
             else: st.info("企業モードではタイムライン非表示")
 
         with tab5:
@@ -669,7 +644,7 @@ if st.session_state.analyzer:
                 kws = analyzer.get_keywords(sel, 50)
                 with c1:
                     if kws:
-                        wc = WordCloud(width=600, height=400, background_color='white', font_path=FONT_PATH, regexp=r"[\w']+").generate_from_frequencies(kws)
+                        wc = WordCloud(width=600, height=400, background_color='white', font_path=utils.get_japanese_font_path(), regexp=r"[\w']+").generate_from_frequencies(kws)
                         fig, ax = plt.subplots(); ax.imshow(wc, interpolation="bilinear"); ax.axis("off"); st.pyplot(fig)
                 with c2:
                     if kws: st.dataframe(pd.DataFrame(list(kws.items()), columns=['Word', 'Freq']), height=200)
