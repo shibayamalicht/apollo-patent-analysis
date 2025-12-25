@@ -1,12 +1,12 @@
 # ==================================================================
-# --- Environment Setup ---
+# --- 環境設定 ---
 # ==================================================================
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ['OMP_NUM_THREADS'] = '1'
 
 # ==================================================================
-# --- Libraries ---
+# --- ライブラリ ---
 # ==================================================================
 import streamlit as st
 import pandas as pd
@@ -26,7 +26,7 @@ from janome.tokenizer import Tokenizer
 warnings.filterwarnings('ignore')
 
 # ==================================================================
-# --- Page Config ---
+# --- ページ設定 ---
 # ==================================================================
 st.set_page_config(
     page_title="APOLLO | Mission Control", 
@@ -36,7 +36,7 @@ st.set_page_config(
 )
 
 # ==================================================================
-# --- Constants & Helpers ---
+# --- 定数とヘルパー関数 ---
 # ==================================================================
 
 import io
@@ -57,7 +57,7 @@ def load_tokenizer():
 t = load_tokenizer()
 
 def advanced_tokenize(text):
-    # Dynamic stopword retrieval
+    # ストップワードを動的に取得
     if 'stopwords' in st.session_state and st.session_state['stopwords']:
         current_stopwords = st.session_state['stopwords']
     else:
@@ -157,7 +157,7 @@ def smart_map_index(current_value, options, keywords):
     return 0
 
 # ==================================================================
-# --- 4. デザイン設定 ---
+# --- メイン画面描画 ---
 # ==================================================================
 
 utils.render_sidebar()
@@ -259,6 +259,10 @@ with container:
                 col_map['date'] = st.selectbox("出願日:", columns_with_none, index=smart_map_index(st.session_state.col_map.get('date'), columns_with_none, kw_date), key="col_date")
                 col_map['applicant'] = st.selectbox("出願人:", columns_with_none, index=smart_map_index(st.session_state.col_map.get('applicant'), columns_with_none, kw_applicant), key="col_applicant")
                 applicant_delimiter = st.text_input("出願人区切り文字:", value=st.session_state.delimiters.get('applicant', ';'), key="del_applicant")
+
+                # IPC (Required)
+                col_map['ipc'] = st.selectbox("国際特許分類 (IPC):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('ipc'), columns_with_none, kw_ipc), key="col_ipc")
+                ipc_delimiter = st.text_input("IPC区切り文字:", value=st.session_state.delimiters.get('ipc', ';'), key="del_ipc")
                 
             with col3:
                 st.markdown("##### 任意メタデータ項目")
@@ -267,9 +271,7 @@ with container:
                 col_map['inventor'] = st.selectbox("発明者 (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('inventor'), columns_with_none, kw_inventor), key="col_inventor")
                 inventor_delimiter = st.text_input("発明者区切り文字:", value=st.session_state.delimiters.get('inventor', ';'), key="del_inventor")
                 
-                # IPC
-                col_map['ipc'] = st.selectbox("IPC (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('ipc'), columns_with_none, kw_ipc), key="col_ipc")
-                ipc_delimiter = st.text_input("IPC区切り文字:", value=st.session_state.delimiters.get('ipc', ';'), key="del_ipc")
+
                 
                 # F-term
                 col_map['fterm'] = st.selectbox("Fターム (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('fterm'), columns_with_none, kw_fterm), key="col_fterm")
