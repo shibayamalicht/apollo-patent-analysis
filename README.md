@@ -1,5 +1,4 @@
----
-title: APOLLO v4 Patent Analysis
+title: APOLLO v.5 Patent Analysis
 emoji: 🚀
 colorFrom: blue
 colorTo: indigo
@@ -11,7 +10,7 @@ short_description: AI-Powered Patent Analysis Platform (JP/EN)
 license: mit
 ---
 
-# 🚀 APOLLO v4: Patent Analysis Platform
+# 🚀 APOLLO v.5: Patent Analysis Platform
 
 **APOLLO (Advanced Patent & Overall Landscape-analytics Logic Orbiter)** is an advanced, AI-powered patent analysis platform designed to visualize technology trends, competitor strategies, and inventor networks using state-of-the-art NLP techniques (SBERT, UMAP, HDBSCAN).
 
@@ -88,6 +87,15 @@ Saturn Vをベースにした、手動クラスタリング可能な探索的分
 * **Drill-down**: Detailed analysis of selected areas. (ドリルダウン分析)
 * **Visual Editing**: Edit clusters and labels interactively. (視覚的なクラスタ編集)
 
+### 8. 📝 VOYAGER (Strategic Reporting / 戦略レポート)
+**v.5 Update: The Curator Mode**
+Compiles snapshots from all modules into a cohesive strategic narrative.
+全モジュールから収集したスナップショット（証拠）を統合し、戦略的なストーリーを構築します。
+* **Snapshot Curator**: Collect important charts as "Evidence" across ATLAS, Saturn V, and Explorer. (モジュール横断的な証拠収集・スナップショット機能)
+* **Strategic Deep Dive**: Generates CSO-level strategic reports with Scenario Planning (Probable/Best/Risk). (CSO視点の詳細戦略レポート・シナリオプランニング機能)
+* **Evidence Download**: Download gathered evidence as images consistent with report references (`Evidence X.png`). (証拠画像のダウンロード)
+* **AI-Powered Insight**: Context-aware generation using Gemini 2.5 Flash. (Gemini 2.5 Flashによる文脈認識型インサイト生成)
+
 ---
 
 ## 🛠️ Requirements (動作環境)
@@ -98,7 +106,8 @@ Saturn Vをベースにした、手動クラスタリング可能な探索的分
     * `pandas`
     * `sentence-transformers` (AI Vectors)
     * `umap-learn`, `hdbscan` (Dimensionality Reduction & Clustering)
-    * `janome` (Japanese Tokenizer)
+    * `google-generativeai` (Likely required for VOYAGER)
+    * `kaleido` (Image Export)
     * `plotly` (Interactive Charts)
 
 ## 🚀 How to Run (実行方法)
@@ -113,4 +122,4 @@ Saturn Vをベースにした、手動クラスタリング可能な探索的分
     ```
 
 ---
-© 2025 しばやま
+© 2025-2026 しばやま

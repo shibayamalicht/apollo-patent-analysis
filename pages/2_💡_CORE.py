@@ -81,56 +81,135 @@ def advanced_tokenize_core(text):
         i += 1
     return " ".join(processed_tokens)
 
-# --- CORE 検索エンジン ---
-def build_regex_pattern(keyword): return re.escape(keyword)
-def build_near_regex(a, b, n): return r'(?:{}.{{0,{}}}?{}|{}.{{0,{}}}?{})'.format(a, n, b, b, n, a)
-def build_adj_regex(a, b, n): return r'{}.{{0,{}}}?{}'.format(a, n, b)
-def build_or_regex(a, b): return r'(?:{}|{})'.format(a, b)
+# --- CORE 検索エンジン (Recursive Descent Parser) ---
+class LogicNode:
+    def evaluate(self, text): raise NotImplementedError
 
-def split_by_operator(text, operator):
-    parts = []; balance = 0; current_chunk_start = 0
-    for i, char in enumerate(text):
-        if char == '(': balance += 1
-        elif char == ')': balance -= 1
-        elif char == operator and balance == 0:
-            parts.append(text[current_chunk_start:i].strip()); current_chunk_start = i + 1
-    parts.append(text[current_chunk_start:].strip())
-    return parts
+class AndNode(LogicNode):
+    def __init__(self, children): self.children = children
+    def evaluate(self, text): return all(c.evaluate(text) for c in self.children)
 
-@st.cache_data
-def parse_core_rule(rule_str):
-    tokens = re.findall(r'\(|\)|' r'\bnear\d+\b|' r'\badj\d+\b|' r'[\+]|' r'[^()\s\+]+', rule_str, re.IGNORECASE)
-    tokens = [t.strip() for t in tokens if t and t.strip()]
-    output_queue, op_stack = [], []; op_precedence = {}
-    for op in tokens:
-        if op.lower() == '+': op_precedence[op] = 1
-        elif op.lower().startswith(('near', 'adj')): op_precedence[op] = 3
-    for token in tokens:
-        if token == '(': op_stack.append(token)
-        elif token == ')':
-            while op_stack and op_stack[-1] != '(': output_queue.append(op_stack.pop())
-            if op_stack: op_stack.pop()
-        elif token.lower() in op_precedence:
-            while (op_stack and op_stack[-1] != '(' and op_precedence.get(op_stack[-1].lower(), 0) >= op_precedence[token.lower()]):
-                output_queue.append(op_stack.pop())
-            op_stack.append(token)
-        else: output_queue.append(token)
-    while op_stack: output_queue.append(op_stack.pop())
-    
-    regex_stack = []
-    for token in output_queue:
-        if token.lower() not in op_precedence and token not in '()':
-            norm = unicodedata.normalize('NFKC', token).lower()
-            regex_stack.append(build_regex_pattern(norm))
+class OrNode(LogicNode):
+    def __init__(self, children): self.children = children
+    def evaluate(self, text): return any(c.evaluate(text) for c in self.children)
+
+class RegexNode(LogicNode):
+    def __init__(self, pattern): 
+        try: self.pattern = re.compile(pattern, re.IGNORECASE | re.DOTALL)
+        except: self.pattern = None
+    def evaluate(self, text): return bool(self.pattern.search(text)) if self.pattern else False
+
+class CoreLogicParser:
+    def __init__(self):
+        self.tokens = []
+        self.pos = 0
+
+    def tokenize(self, rule_str):
+        # Tokenize: (, ), +, *, nearN, adjN, or literals
+        raw_tokens = re.findall(r'\(|\)|' r'\bnear\d+\b|' r'\badj\d+\b|' r'[\+\*]' r'|' r'[^\(\)\+\*\s]+', rule_str, re.IGNORECASE)
+        self.tokens = [t.strip() for t in raw_tokens if t.strip()]
+        self.pos = 0
+
+    def parse(self, rule_str):
+        self.tokenize(rule_str)
+        if not self.tokens: return None
+        node = self.expression()
+        if self.pos < len(self.tokens):
+            raise ValueError(f"Unexpected token at end: {self.tokens[self.pos]}")
+        return node
+
+    def expression(self):
+        # Expression -> Term { + Term }  (OR)
+        nodes = [self.term()]
+        while self.pos < len(self.tokens) and self.tokens[self.pos] == '+':
+            self.pos += 1
+            nodes.append(self.term())
+        return OrNode(nodes) if len(nodes) > 1 else nodes[0]
+
+    def term(self):
+        # Term -> Factor { * Factor } (AND)
+        nodes = [self.factor()]
+        while self.pos < len(self.tokens) and self.tokens[self.pos] == '*':
+            self.pos += 1
+            nodes.append(self.factor())
+        return AndNode(nodes) if len(nodes) > 1 else nodes[0]
+
+    def factor(self):
+        # Factor -> Atom { (nearN|adjN) Atom }
+        # Note: near/adj are treated as binary ops here, but strictly they form a single Regex Node in old Logic.
+        # To support (A+B) near C, we need to compile sub-parts to regex strings if possible.
+        # Limitation: near/adj can only apply to "Regex-compatible" nodes (Leaf or OR of Leafs). NO ANDs allowed inside near/adj.
+        
+        left = self.atom()
+        
+        while self.pos < len(self.tokens) and re.match(r'^(near|adj)\d+$', self.tokens[self.pos], re.IGNORECASE):
+            op = self.tokens[self.pos].lower()
+            self.pos += 1
+            right = self.atom()
+            
+            # recursive constraint check: Left and Right must be convertible to Regex String
+            l_rex = self.to_regex_string(left)
+            r_rex = self.to_regex_string(right)
+            n = int(re.findall(r'\d+', op)[0])
+            
+            if op.startswith('near'): pattern = r'(?:{}.{{0,{}}}?{}|{}.{{0,{}}}?{})'.format(l_rex, n, r_rex, r_rex, n, l_rex)
+            else: pattern = r'{}.{{0,{}}}?{}'.format(l_rex, n, r_rex) # adj
+            
+            left = RegexNode(pattern)
+            
+        return left
+
+    def atom(self):
+        if self.pos < len(self.tokens) and self.tokens[self.pos] == '(':
+            self.pos += 1
+            node = self.expression()
+            if self.pos < len(self.tokens) and self.tokens[self.pos] == ')':
+                self.pos += 1
+                return node
+            else:
+                raise ValueError("Missing closing parenthesis")
+        elif self.pos < len(self.tokens):
+            t = self.tokens[self.pos]
+            self.pos += 1
+            # Literal
+            norm = unicodedata.normalize('NFKC', t).lower()
+            return RegexNode(re.escape(norm))
         else:
-            if len(regex_stack) < 2: raise ValueError(f"Invalid rule: {rule_str}")
-            b, a = regex_stack.pop(), regex_stack.pop()
-            tl = token.lower()
-            if tl == '+': regex_stack.append(build_or_regex(a, b))
-            elif tl.startswith('near'): regex_stack.append(build_near_regex(a, b, int(re.findall(r'\d+', tl)[0])))
-            elif tl.startswith('adj'): regex_stack.append(build_adj_regex(a, b, int(re.findall(r'\d+', tl)[0])))
-    if len(regex_stack) != 1: raise ValueError(f"Invalid rule: {rule_str}")
-    return re.compile(regex_stack[0], re.IGNORECASE | re.DOTALL)
+            raise ValueError("Unexpected end of rule")
+
+    def to_regex_string(self, node):
+        # Helper to convert a Node back to regex string if it contains only OR/Literal
+        if isinstance(node, RegexNode): 
+            # Pattern inside RegexNode is already compiled or string? 
+            # In our class, it's compiled. We need the source string. 
+            # Implementation trick: Store source pattern in RegexNode
+            if hasattr(node, 'pattern') and node.pattern: return node.pattern.pattern
+            # If it was constructed blindly? 
+            # Let's modifying RegexNode to store source.
+            return "" 
+        if isinstance(node, OrNode):
+            parts = [self.to_regex_string(c) for c in node.children]
+            return r'(?:' + '|'.join(parts) + r')'
+        if isinstance(node, AndNode):
+             raise ValueError("Cannot use AND (*) inside a NEAR/ADJ condition. Use OR (+) only.")
+        return ""
+
+# Patch RegexNode to store source for recursion
+class RegexNode(LogicNode):
+    def __init__(self, pattern): 
+        self.source = pattern
+        try: self.pattern = re.compile(pattern, re.IGNORECASE | re.DOTALL)
+        except: self.pattern = None
+    def evaluate(self, text): return bool(self.pattern.search(text)) if self.pattern else False
+
+@st.cache_resource
+def parse_core_rule(rule_str):
+    try:
+        parser = CoreLogicParser()
+        return parser.parse(rule_str)
+    except Exception as e:
+        # st.error(f"Rule Parse Error: {e}") # Suppress during cache
+        return None
 
 @st.cache_data
 def prepare_axis_data_core(df, axis_col_name, delimiter):
@@ -147,6 +226,8 @@ def prepare_axis_data_core(df, axis_col_name, delimiter):
 
 @st.cache_data
 def convert_df_to_csv_core(df): return df.to_csv(encoding='utf-8-sig').encode('utf-8-sig')
+
+
 
 # ==================================================================
 # --- 4. アプリケーション初期化 & UI構成 ---
@@ -259,9 +340,14 @@ JSONをコピーしてシステムにそのままインポートします。
 # CORE論理式文法 (厳守)
 - `A + B` (OR): A または B
 - `A * B` (AND): A かつ B (順序問わず)
-- `A nearN B` (近傍): AとBが**N文字**以内で出現 (順序問わず)。Nは10〜40程度を推奨。
-- `A adjN B` (順序指定近傍): AがBの**N文字**以内にA→Bの順で出現。Nは1〜10程度を推奨。
-- **重要:** キーワードはスペースを含まない単一語（例: `二酸化炭素`）にしてください。スペースを含むフレーズは `adj1` で表現してください。
+- `()`: 括弧を使って優先順位を制御できます。入れ子も可能です。
+    - 例: `(水素 * (吸蔵 + 貯蔵) * (合金 + 材料))`
+    - 例: `(A * B) + (C * D)`
+- `A nearN B` (近傍): AとBがN文字以内 (順序不問)。
+- `A adjN B` (順序指定): A→BがN文字以内。
+- **重要:** `near` や `adj` の条件の内部には `*` (AND) を含めることはできません（`+` (OR) は可能）。
+    - OK: `(A + B) near10 C`
+    - NG: `(A * B) near10 C`
 
 # 最重要ルール (キーワード拡張と表記ゆれ)
 - サンプルに存在するキーワードをそのまま使うだけでは不十分です。
@@ -396,35 +482,29 @@ elif current_phase.startswith("フェーズ 3"):
                         combined_text = combined_text + " " + s
                     
                     rules = st.session_state.core_classification_rules
-                    compiled_rules = {}
+                    compiled_rule_nodes = {}
                     for ax, cats in rules.items():
-                        compiled_rules[ax] = []
+                        compiled_rule_nodes[ax] = []
                         for cn, cd in cats.items():
                             r_str = cd['rule'] if isinstance(cd, dict) else cd[0]
-                            or_parts = split_by_operator(r_str, '+')
-                            comp_or = []
-                            for op in or_parts:
-                                and_parts = split_by_operator(op, '*')
-                                comp_and = [parse_core_rule(ap.strip()) for ap in and_parts]
-                                comp_or.append(comp_and)
-                            compiled_rules[ax].append((cn, comp_or))
-                    
-                    def apply_rules(text, ax_rules):
+                            # Try parse
+                            node = parse_core_rule(r_str)
+                            if node:
+                                compiled_rule_nodes[ax].append((cn, node))
+                            else:
+                                st.warning(f"Failed to parse rule for {cn}: {r_str}")
+
+                    def apply_rules(text, ax_nodes):
                         text = _core_text_preprocessor(str(text))
                         hits = []
-                        for c_name, c_logic in ax_rules:
-                            match_or = False
-                            for and_block in c_logic:
-                                match_and = True
-                                for regex in and_block:
-                                    if not regex.search(text): match_and = False; break
-                                if match_and: match_or = True; break
-                            if match_or: hits.append(c_name)
+                        for c_name, node in ax_nodes:
+                            if node.evaluate(text):
+                                hits.append(c_name)
                         return ";".join(hits) if hits else "その他"
 
                     bar = st.progress(0)
                     for i, ax in enumerate(rules.keys()):
-                        df_res[ax] = combined_text.apply(lambda x: apply_rules(x, compiled_rules[ax]))
+                        df_res[ax] = combined_text.apply(lambda x: apply_rules(x, compiled_rule_nodes[ax]))
                         bar.progress((i+1)/len(rules))
                     
                     st.session_state.core_df_classified = df_res
@@ -513,7 +593,7 @@ elif current_phase.startswith("フェーズ 3"):
     {{
       "name": "新カテゴリ名",
       "definition": "...",
-      "rule": "論理式"
+      "rule": "論理式 (Allowed: `(A * B) + C`, `(A+B) near10 C` etc)"
     }}, ...
   ]
 }}
@@ -549,69 +629,182 @@ elif current_phase.startswith("フェーズ 4"):
         col_f1, col_f2 = st.columns(2)
         with col_f1: exclude_other = st.checkbox("「その他」を除外する", value=True)
         
-        if st.button("描画"):
-            def get_col_data(ax_name):
-                if ax_name == '出願年': return df_c['year'].fillna(0).astype(int).astype(str), None
-                if ax_name == '出願人': return df_c[col_map['applicant']].fillna('Unknown'), ';' 
-                if ax_name in axes: return df_c[ax_name], ';'
+        if st.button("描画 (分析実行)", type="primary"):
+            st.session_state.core_phase4_run = True
+
+        if st.session_state.get("core_phase4_run"):
+            st.markdown("---")
+            
+            # --- 1. グローバルな軸の順序を決定 (母集団全体で固定) ---
+            def get_col_data_global(target_df, ax_name):
+                if ax_name == '出願年': return target_df['year'].fillna(0).astype(int).astype(str), None
+                if ax_name == '出願人': return target_df[col_map['applicant']].fillna('Unknown'), ';' 
+                if ax_name in axes: return target_df[ax_name], ';'
                 return None, None
 
-            x_data, x_sep = get_col_data(x_ax); y_data, y_sep = get_col_data(y_ax)
-            temp_df = pd.DataFrame({'X': x_data, 'Y': y_data})
-            if x_sep: temp_df['X'] = temp_df['X'].astype(str).str.split(x_sep); temp_df = temp_df.explode('X')
-            if y_sep: temp_df['Y'] = temp_df['Y'].astype(str).str.split(y_sep); temp_df = temp_df.explode('Y')
+            # 全体データでクロス集計して軸順序を決定
+            x_data_g, x_sep_g = get_col_data_global(df_c, x_ax)
+            y_data_g, y_sep_g = get_col_data_global(df_c, y_ax)
+            temp_df_g = pd.DataFrame({'X': x_data_g, 'Y': y_data_g})
             
-            temp_df = temp_df.replace({'nan': np.nan, 'None': np.nan}).dropna()
+            if x_sep_g: temp_df_g['X'] = temp_df_g['X'].astype(str).str.split(x_sep_g); temp_df_g = temp_df_g.explode('X')
+            if y_sep_g: temp_df_g['Y'] = temp_df_g['Y'].astype(str).str.split(y_sep_g); temp_df_g = temp_df_g.explode('Y')
+            
+            temp_df_g = temp_df_g.replace({'nan': np.nan, 'None': np.nan}).dropna()
             if exclude_other:
-                temp_df = temp_df[(temp_df['X'] != 'その他') & (temp_df['Y'] != 'その他')]
+                temp_df_g = temp_df_g[(temp_df_g['X'] != 'その他') & (temp_df_g['Y'] != 'その他')]
             
-            if temp_df.empty: st.warning("データなし")
+            # --- 軸が出願人の場合のフィルタリング (Top N / 手動) ---
+            if '出願人' in [x_ax, y_ax]:
+                # 全データの出願人頻度を計算
+                app_s_all = df_c[col_map['applicant']].fillna('Unknown').astype(str).str.split(';')
+                app_counts_all = app_s_all.explode().str.strip().value_counts()
+                
+                st.markdown("##### 👥 出願人軸の表示設定")
+                app_filter_mode = st.radio("表示モード:", ["上位指定 (Top N)", "手動選択 (Manual)"], horizontal=True, key="core_app_axis_mode")
+                
+                target_apps_set = set()
+                if app_filter_mode == "上位指定 (Top N)":
+                    top_n_val = st.number_input("表示件数 (上位N社):", min_value=5, max_value=200, value=10, step=5, key="core_app_axis_n")
+                    target_apps_set = set(app_counts_all.head(top_n_val).index)
+                    st.info(f"上位 {top_n_val} 社を表示します（全 {len(app_counts_all)} 社中）")
+                else:
+                    target_apps_set = set(st.multiselect("表示する出願人を選択:", app_counts_all.index.tolist(), default=app_counts_all.head(10).index.tolist(), key="core_app_axis_manual"))
+                
+                # フィルタリング適用
+                if x_ax == '出願人':
+                    temp_df_g = temp_df_g[temp_df_g['X'].isin(target_apps_set)]
+                if y_ax == '出願人':
+                    temp_df_g = temp_df_g[temp_df_g['Y'].isin(target_apps_set)]
+            
+            if temp_df_g.empty:
+                st.warning("有効なデータがありません。")
             else:
-                ct = pd.crosstab(temp_df['Y'], temp_df['X'])
+                ct_g = pd.crosstab(temp_df_g['Y'], temp_df_g['X'])
                 
-                if x_ax == '出願年': x_ord = sorted(ct.columns, key=lambda x: int(x) if x.isdigit() else x)
-                else: x_ord = ct.sum(axis=0).sort_values(ascending=False).index.tolist()
+                # Sorting Global
+                if x_ax == '出願年': x_ord_global = sorted(ct_g.columns, key=lambda x: int(x) if x.isdigit() else x)
+                else: x_ord_global = ct_g.sum(axis=0).sort_values(ascending=False).index.tolist()
                 
-                if y_ax == '出願年': y_ord = sorted(ct.index, key=lambda x: int(x) if x.isdigit() else x)
-                else: y_ord = ct.sum(axis=1).sort_values(ascending=False).index.tolist()
+                if y_ax == '出願年': y_ord_global = sorted(ct_g.index, key=lambda x: int(x) if x.isdigit() else x)
+                else: y_ord_global = ct_g.sum(axis=1).sort_values(ascending=False).index.tolist()
+
+                # --- Sorting Adjustment: Force 'Others' to the end ---
+                if 'その他' in x_ord_global:
+                    x_ord_global.remove('その他')
+                    x_ord_global.append('その他')
                 
-                ct = ct.reindex(index=y_ord, columns=x_ord).fillna(0)
+                if 'その他' in y_ord_global:
+                    y_ord_global.remove('その他')
+                    y_ord_global.append('その他')
+
+                # --- 2. 出願人選択 (プルダウン) ---
+                target_applicant_options = ["全体 (Overall)"]
+                app_name_map = {} # label -> app_name
                 
-                if chart_type == "ヒートマップ":
-                    fig = px.imshow(
-                        ct, 
-                        labels=dict(x=x_ax, y=y_ax, color="件数"),
-                        x=ct.columns,
-                        y=ct.index,
-                        aspect="auto",
-                        color_continuous_scale='YlGnBu',
-                        text_auto=True
-                    )
+                if col_map.get('applicant') in df_c.columns:
+                    app_s = df_c[col_map['applicant']].fillna('Unknown').astype(str).str.split(';')
+                    app_exploded = app_s.explode().str.strip()
+                    top_apps = app_exploded.value_counts() # All applicants
                     
-                    fig.update_layout(
-                        title=f"{x_ax} × {y_ax}",
-                        height=max(600, len(ct)*40),
-                        yaxis=dict(title=y_ax),
-                        xaxis=dict(title=x_ax, side='bottom')
-                    )
-                    st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+                    for app_name, count in top_apps.items():
+                        if app_name and app_name != 'nan':
+                            label = f"{app_name} ({count})"
+                            target_applicant_options.append(label)
+                            app_name_map[label] = app_name
+                
+                selected_app_label = st.selectbox("出願人で絞り込み (Focus Applicant):", target_applicant_options)
+
+                # --- 3. データフィルタリング ---
+                if selected_app_label == "全体 (Overall)":
+                    df_target = df_c
+                else:
+                    target_app_name = app_name_map[selected_app_label]
+                    mask = df_c[col_map['applicant']].fillna('').astype(str).apply(lambda x: target_app_name in [s.strip() for s in x.split(';')])
+                    df_target = df_c[mask]
+                
+                st.markdown(f"**分析対象: {selected_app_label}**")
+
+                # --- 4. 描画関数 (Global Axisを適用) ---
+                def render_core_chart(sub_df, wrapper_key):
+                    # Local Data Prep
+                    x_d, x_s = get_col_data_global(sub_df, x_ax)
+                    y_d, y_s = get_col_data_global(sub_df, y_ax)
+                    t_df = pd.DataFrame({'X': x_d, 'Y': y_d})
+                    if x_s: t_df['X'] = t_df['X'].astype(str).str.split(x_s); t_df = t_df.explode('X')
+                    if y_s: t_df['Y'] = t_df['Y'].astype(str).str.split(y_s); t_df = t_df.explode('Y')
                     
-                else: # バブルチャート
-                    ct_long = ct.reset_index().melt(id_vars='Y', var_name='X', value_name='Count')
-                    ct_long = ct_long[ct_long['Count'] > 0]
-                    atlas_colors = theme_config["color_sequence"]
+                    t_df = t_df.replace({'nan': np.nan, 'None': np.nan}).dropna()
+                    if exclude_other:
+                        t_df = t_df[(t_df['X'] != 'その他') & (t_df['Y'] != 'その他')]
                     
-                    fig = px.scatter(
-                        ct_long, x='X', y='Y', size='Count', color='Y',
-                        size_max=60, color_discrete_sequence=atlas_colors,
-                        category_orders={'X': x_ord, 'Y': y_ord} 
-                    )
-                    fig.update_yaxes(categoryorder='array', categoryarray=y_ord, autorange='reversed', title=y_ax, type='category')
-                    fig.update_xaxes(categoryorder='array', categoryarray=x_ord, title=x_ax, side='bottom', type='category')
+                    # Create Crosstab
+                    ct_local = pd.crosstab(t_df['Y'], t_df['X'])
                     
-                    fig.update_layout(title=f"{x_ax} × {y_ax}", height=max(600, len(ct)*40), showlegend=False)
-                    st.plotly_chart(fig, use_container_width=True, config={'editable': False})
-        
+                    # Reindex with Global Orders (Forces matrix structure)
+                    ct_final = ct_local.reindex(index=y_ord_global, columns=x_ord_global).fillna(0)
+                    
+                    if chart_type == "ヒートマップ":
+                        fig = px.imshow(
+                            ct_final, 
+                            labels=dict(x=x_ax, y=y_ax, color="件数"),
+                            x=ct_final.columns,
+                            y=ct_final.index,
+                            aspect="auto",
+                            color_continuous_scale='YlGnBu',
+                            text_auto=True
+                        )
+                        fig.update_layout(
+                            height=max(600, len(ct_final)*40),
+                            yaxis=dict(title=y_ax),
+                            xaxis=dict(title=x_ax, side='bottom')
+                        )
+                        st.plotly_chart(fig, use_container_width=True, config={'editable': False}, key=f"core_chart_{wrapper_key}")
+                        
+                    else: # バブルチャート
+                        ct_long = ct_final.reset_index().melt(id_vars='Y', var_name='X', value_name='Count')
+                        ct_long = ct_long[ct_long['Count'] > 0] 
+                        
+                        atlas_colors = theme_config["color_sequence"]
+                        
+                        fig = px.scatter(
+                            ct_long, x='X', y='Y', size='Count', color='Y',
+                            size_max=60, color_discrete_sequence=atlas_colors,
+                            category_orders={'X': x_ord_global, 'Y': y_ord_global} 
+                        )
+                        
+                        # Explicitly FORCE Range to show all categories, even empty ones
+                        x_range = [-0.5, len(x_ord_global) - 0.5]
+                        # For Y, Plotly usually plots bottom-up for Scatter, but we want Matrix style (Top-down)?
+                        # `autorange='reversed'` does Top-down.
+                        # If reversed, range should be [len-0.5, -0.5]? Or just rely on autorange='reversed' with fixed categoryarray.
+                        # Let's try specifying range explicitly with reversed effect if needed, but 'reversed' + categoryarray works best usually.
+                        # The issue "missing parts" implies missing ticks.
+                        # We will force tickvals to be 0..N-1 to ensure all labels appear?
+                        # Or simply setting the range is robust.
+                        
+                        fig.update_yaxes(
+                            categoryorder='array', 
+                            categoryarray=y_ord_global, 
+                            title=y_ax, 
+                            type='category',
+                            range=[len(y_ord_global) - 0.5, -0.5] # Top-down Matrix Style
+                        )
+                        fig.update_xaxes(
+                            categoryorder='array', 
+                            categoryarray=x_ord_global, 
+                            title=x_ax, 
+                            side='bottom', 
+                            type='category',
+                            range=[-0.5, len(x_ord_global) - 0.5] # Ensure full width
+                        )
+                        
+                        fig.update_layout(height=max(600, len(ct_final)*40), showlegend=False)
+                        st.plotly_chart(fig, use_container_width=True, config={'editable': False}, key=f"core_chart_{wrapper_key}")
+
+
+                render_core_chart(df_target, "main_display")
+
         # CSVダウンロード
         st.markdown("---")
         csv_core = convert_df_to_csv_core(df_c)

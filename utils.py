@@ -179,11 +179,27 @@ def render_sidebar():
     st.markdown("""
     <style>
         html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-        [data-testid="stSidebar"] h1 { color: #003366; font-weight: 900 !important; font-size: 2.5rem !important; }
+        
+        /* H1 Title Spacing */
+        [data-testid="stSidebar"] h1 { 
+            color: #003366; 
+            font-weight: 900 !important; 
+            font-size: 2.5rem !important; 
+            margin-top: 0 !important; 
+            padding-top: 0 !important; 
+            margin-bottom: 0 !important;
+        }
         h1 { color: #003366; font-weight: 700; }
         h2, h3 { color: #333333; font-weight: 500; border-bottom: 2px solid #f0f0f0; padding-bottom: 5px; }
+        
+        /* Hide default nav */
         [data-testid="stSidebarNav"] { display: none !important; }
-        [data-testid="stSidebar"] .block-container { padding-top: 2rem; padding-bottom: 1rem; }
+        
+        /* Remove Top Whitespace (Robust Selectors) */
+        section[data-testid="stSidebar"] > div:first-child { padding-top: 0rem; }
+        [data-testid="stSidebarUserContent"] { padding-top: 0rem; }
+        [data-testid="stSidebar"] .block-container { padding-top: 0rem; padding-bottom: 1rem; }
+        
         .block-container { padding-top: 2rem; padding-bottom: 2rem; }
         .stButton>button { font-weight: 600; }
         .stTabs [data-baseweb="tab-list"] { gap: 8px; }
@@ -196,7 +212,7 @@ def render_sidebar():
     with st.sidebar:
         st.title("APOLLO") 
         st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
-        st.markdown("**v.4**")
+        st.markdown("**v.5**")
         st.markdown("---")
         st.subheader("Home"); st.page_link("Home.py", label="Mission Control", icon="🛰️")
         st.subheader("Modules")
@@ -207,10 +223,11 @@ def render_sidebar():
         st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
         st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
         st.page_link("pages/6_🔗_CREW.py", label="CREW", icon="🔗")
+        st.page_link("pages/8_📝_VOYAGER.py", label="VOYAGER", icon="📝")
         st.markdown("---")
         st.caption("ナビゲーション:\n1. Mission Control でデータをアップロードし、前処理を実行します。\n2. 上のリストから分析モジュールを選択します。")
         st.markdown("---")
-        st.caption("© 2025 しばやま")
+        st.caption("© 2025-2026 しばやま")
 
 # ==================================================================
 # --- 4. テーマ設定 (共通) ---
@@ -253,6 +270,71 @@ def get_theme_config(theme_name):
         }
     }
     return themes.get(theme_name, themes["APOLLO Standard"])
+
+# ==================================================================
+# --- 5. Snapshot (VOYAGER連携) ---
+# ==================================================================
+def render_snapshot_button(title, description, key, fig=None, data_summary=None):
+    """
+    グラフやデータをVOYAGER用に保存するボタンを表示する
+    """
+    if 'snapshots' not in st.session_state:
+        st.session_state['snapshots'] = []
+
+    # Check if already saved
+    is_saved = any(s['id'] == key for s in st.session_state['snapshots'])
+    
+    btn_label = "📸 Snapshot Saved" if is_saved else "📸 Save Snapshot"
+    btn_type = "primary" if not is_saved else "secondary"
+    
+    if st.button(btn_label, key=f"snap_btn_{key}", type=btn_type, disabled=is_saved):
+        snapshot_data = {
+            'id': key,
+            'title': title,
+            'description': description,
+            'data_summary': data_summary,
+            'module': st.session_state.get('current_page', 'Unknown'),
+            'timestamp': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        # Image conversion (Best effort)
+        import io
+        img_bytes = None
+        
+        try:
+            if fig:
+                # Plotly
+                if hasattr(fig, 'to_image'):
+                    try:
+                        # kaleido needed
+                        # Force width to 1200 unless specified to prevent 700 default (which causes square/vertical layout on tall charts)
+                        current_width = fig.layout.width if fig.layout.width else 1200
+                        # Keep scale=2 for high resolution
+                        img_bytes = fig.to_image(format="png", width=current_width, scale=2)
+                    except Exception as e:
+                        snapshot_data['image_error'] = f"Plotly Image Error (Kaleido): {str(e)}"
+                        st.warning(f"画像化に失敗しました (Kaleido Check): {e}")
+                
+                # Matplotlib
+                elif hasattr(fig, 'savefig'):
+                    try:
+                        buf = io.BytesIO()
+                        fig.savefig(buf, format='png', bbox_inches='tight')
+                        buf.seek(0)
+                        img_bytes = buf.getvalue()
+                    except Exception as e:
+                        snapshot_data['image_error'] = f"Matplotlib Image Error: {str(e)}"
+                        st.warning(f"画像化に失敗しました: {e}")
+                        
+        except Exception as e:
+            snapshot_data['image_error'] = f"General Image Error: {str(e)}"
+            
+        snapshot_data['image'] = img_bytes
+        st.session_state['snapshots'].append(snapshot_data)
+        st.rerun()
+
+    if is_saved:
+        st.success(f"'{title}' をVOYAGERポケットに保存しました")
 
 # ==================================================================
 # --- 5. AI アシスタント (共通) ---

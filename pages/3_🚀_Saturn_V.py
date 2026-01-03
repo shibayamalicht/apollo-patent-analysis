@@ -581,6 +581,22 @@ with tab_main:
             }
         })
 
+        # Snapshot Button
+        # Create safe summary
+        summary_cols = ['cluster_label']
+        if col_map.get('title') and col_map['title'] in df_universe.columns:
+            summary_cols.append(col_map['title'])
+        if col_map.get('applicant') and col_map['applicant'] in df_universe.columns:
+            summary_cols.append(col_map['applicant'])
+            
+        utils.render_snapshot_button(
+            title=f"特許ランドスケープ ({map_mode})",
+            description="技術クラスターと出願の分布を示す俯瞰マップ。",
+            key="saturn_main_snap",
+            fig=fig_main,
+            data_summary=df_universe[summary_cols].head(20).to_string()
+        )
+
         st.subheader("ラベル編集")
         utils.render_ai_label_assistant(st.session_state.df_main, 'cluster', "saturnv_labels_map", col_map, tfidf_matrix, feature_names, widget_key_prefix="main_label")
 
@@ -828,6 +844,14 @@ with tab_main:
                     'titleText': False
                 }
             })
+            
+            utils.render_snapshot_button(
+                title=f"Saturn V ドリルダウン: {st.session_state.drill_base_label}",
+                description="選択したクラスターの詳細マップ。",
+                key="saturn_drill_snap",
+                fig=fig_drill,
+                data_summary=df_drill.head(10).to_string()
+            )
             
             st.subheader("サブクラスタ・ラベル編集")
             utils.render_ai_label_assistant(df_drill, 'drill_cluster', "drill_labels_map", col_map, tfidf_matrix, feature_names, widget_key_prefix="drill_label")

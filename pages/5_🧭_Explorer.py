@@ -213,11 +213,13 @@ sorted_applicants = app_counts.index.tolist()
 app_count_dict = app_counts.to_dict()
 
 # 前処理
-if 'explorer_keywords' not in st.session_state:
+# 前処理 ("explorer_keywords"カラムがない場合のみ実行)
+if 'explorer_keywords' not in df_main.columns:
     with st.spinner("Explorer: テキスト解析とキーワード抽出を実行中..."):
         df_main['explorer_text'] = df_main[col_map['title']].fillna('') + ' ' + df_main[col_map['abstract']].fillna('')
         df_main['explorer_keywords'] = df_main['explorer_text'].apply(extract_compound_nouns)
-        st.session_state.explorer_keywords = True
+        # Column added to df_main (reference to session_state object should persist, but explicit update is safer if needed)
+        st.session_state.df_main = df_main
 
 # モード選択
 selected_tab = st.radio(
@@ -293,6 +295,20 @@ if selected_tab == "Global Overview":
                 fig_net_g.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
                 update_fig_layout(fig_net_g, "Global Co-occurrence Network", height=700, theme_config=theme_config)
                 st.plotly_chart(fig_net_g, use_container_width=True, config={'editable': False})
+                
+                # --- Snapshot (Global Network) ---
+                comm_summary = []
+                for i in range(len(communities)):
+                    comm_words = list(communities[i])[:5] # Top 5 words per community
+                    comm_summary.append(f"Cluster {i+1}: {', '.join(comm_words)}")
+                
+                utils.render_snapshot_button(
+                    title="全体共起ネットワーク (技術クラスター)",
+                    description="全期間を通じた技術用語の共起関係とクラスター構造。",
+                    key="exp_global_net_snap",
+                    fig=fig_net_g,
+                    data_summary="[Community Structures]\n" + "\n".join(comm_summary)
+                )
             else: st.warning("条件に一致する共起関係が見つかりませんでした。")
 
 # ==================================================================
@@ -360,6 +376,14 @@ elif selected_tab == "Trend Analysis":
                 fig_growth.update_layout(yaxis={'categoryorder':'total ascending'})
                 update_fig_layout(fig_growth, "Growth Rate Top 20", height=500, theme_config=theme_config)
                 st.plotly_chart(fig_growth, use_container_width=True, config={'editable': False})
+                
+                utils.render_snapshot_button(
+                    title="急上昇キーワード (Growth Rate)",
+                    description=f"直近期間 [{periods[0][0]}-{periods[0][1]}] で急増したキーワード。",
+                    key="exp_growth_snap",
+                    fig=fig_growth,
+                    data_summary=df_growth.to_string()
+                )
         else:
             st.warning("比較対象となる過去のデータ期間が不足しています。")
 
@@ -427,6 +451,17 @@ elif selected_tab == "Trend Analysis":
             fig_net.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
             update_fig_layout(fig_net, "Trend Network", height=700, theme_config=theme_config)
             st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
+
+            # --- Snapshot (Trend Network) ---
+            trend_summary = [f"{n}: Growth {c_rec_net.get(n,0)/(c_pst_net.get(n,0)+1):.2f}" for n in list(G.nodes())[:15]]
+            
+            utils.render_snapshot_button(
+                title="トレンド・共起ネットワーク",
+                description="技術用語の共起関係に成長率（赤=急上昇）を重ね合わせたマップ。",
+                key="exp_trend_net_snap",
+                fig=fig_net,
+                data_summary="[Top Growth Nodes]\n" + "\n".join(trend_summary)
+            )
 
 # ==================================================================
 # --- 6. Comparative Strategy (競合比較) ---
@@ -503,6 +538,14 @@ elif selected_tab == "Comparative Strategy":
             update_fig_layout(fig_tornado, "Tornado Chart", height=800, theme_config=theme_config)
             st.plotly_chart(fig_tornado, use_container_width=True, config={'editable': False})
             st.info("左側 (青系) が自社、右側 (赤/オレンジ系) が競合の出現数を示します。")
+            
+            utils.render_snapshot_button(
+                title=f"Tornado Chart ({my_comp} vs {target_comp})",
+                description="キーワード出現頻度の直接比較。左右への突出が各社の特徴を示す。",
+                key="exp_tornado_snap",
+                fig=fig_tornado,
+                data_summary=df_tornado[['Keyword', 'My Abs', 'Competitor Count']].tail(20).to_string()
+            )
 
         # 2. ワードクラウド
         st.markdown("##### 2. 企業別ワードクラウド")
@@ -569,6 +612,21 @@ elif selected_tab == "Comparative Strategy":
             fig_net.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
             update_fig_layout(fig_net, "Dominance Network", height=700, theme_config=theme_config)
             st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
+
+            # --- Snapshot (Dominance Network) ---
+            dom_summary = []
+            for n in list(G.nodes())[:20]: # Top nodes
+                m = c_my[n]; t = c_tgt[n]
+                dom_val = m/(m+t) if (m+t)>0 else 0.5
+                dom_summary.append(f"{n}: {my_comp}={m}, {target_comp}={t} (Dom={dom_val:.2f})")
+
+            utils.render_snapshot_button(
+                title=f"Dominance Network ({my_comp} vs {target_comp})",
+                description="共起ネットワーク上での両社の優劣（支配率）分布。",
+                key="exp_dom_net_snap",
+                fig=fig_net,
+                data_summary="[Dominance Analysis]\n" + "\n".join(dom_summary)
+            )
 
 # ==================================================================
 # --- 7. Context Search (文脈検索) ---

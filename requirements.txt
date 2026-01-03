@@ -13,3 +13,5 @@ wordcloud
 networkx
 openpyxl
 setuptools
+google-generativeai
+kaleido

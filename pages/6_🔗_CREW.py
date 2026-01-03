@@ -560,6 +560,15 @@ if st.session_state.analyzer:
             # Remove aspect ratio constraint (set by utils for hidden axes) to fill width
             fig_net.update_yaxes(scaleanchor=None, scaleratio=None)
             st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
+            
+            # Snapshot Button
+            utils.render_snapshot_button(
+                title=f"共起ネットワーク ({color_mode})",
+                description="発明者/出願人のつながりとコミュニティ構造を示すネットワーク図。",
+                key="crew_net_snap",
+                fig=fig_net,
+                data_summary=metrics_df.sort_values('媒介中心性', ascending=False).head(10).to_string()
+            )
 
         with tab2:
             st.dataframe(metrics_df.sort_values('媒介中心性', ascending=False), use_container_width=True)

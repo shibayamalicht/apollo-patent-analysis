@@ -144,8 +144,9 @@ except Exception as e:
 
 st.markdown("---")
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab1_line, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "件数推移", 
+    "件数推移（折れ線）",
     "出願人ランキング", 
     "IPCランキング", 
     "出願人×年 バブル", 
@@ -161,9 +162,21 @@ status_col = st.session_state.col_map.get('status')
 if status_col:
     # 全てのユニークなステータスを取得（ソートして順序を固定）
     unique_statuses_all = sorted(df_filtered[status_col].dropna().unique().astype(str))
-    base_colors = theme_config["color_sequence"]
+    # Pastel Blue / Distinguishable Palette (User Preferred)
+    pastel_blue_palette = [
+        "#AEC6CF", # Pastel Blue
+        "#779ECB", # Darker Pastel Blue
+        "#B39EB5", # Pastel Purple
+        "#FFB7B2", # Pastel Red (Soft)
+        "#CFCFC4", # Pastel Gray
+        "#B0E0E6", # Powder Blue
+        "#FFDAC1", # Pastel Peach
+        "#E2F0CB", # Pastel Green
+        "#FDFD96", # Pastel Yellow
+        "#FF6961"  # Pastel Red (Stronger)
+    ]
     # 循環的に色を割り当てる
-    status_color_map = {s: base_colors[i % len(base_colors)] for i, s in enumerate(unique_statuses_all)}
+    status_color_map = {s: pastel_blue_palette[i % len(pastel_blue_palette)] for i, s in enumerate(unique_statuses_all)}
 
 # 1. 件数推移
 with tab1:
@@ -194,7 +207,147 @@ with tab1:
                 fig = px.bar(x=plot_data.index, y=plot_data.values, labels={'x': '出願年', 'y': '出願件数'}, color_discrete_sequence=[theme_config["color_sequence"][0]])
             
             update_fig_layout(fig, f'出願件数時系列推移 ({int(stats_start_year)}年～{int(stats_end_year)}年)', theme_config=theme_config)
-            st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+            
+            st.session_state['atlas_fig_trend'] = fig
+            st.session_state['atlas_data_trend'] = plot_data
+
+    # Persistent Display
+    if 'atlas_fig_trend' in st.session_state:
+        fig = st.session_state['atlas_fig_trend']
+        plot_data = st.session_state['atlas_data_trend']
+        
+        st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+        
+        # Snapshot Button
+        utils.render_snapshot_button(
+            title=f"出願件数推移 ({int(stats_start_year)}-{int(stats_end_year)})",
+            description="市場全体の出願動向を示すトレンドグラフ。",
+            key="atlas_trend_snap",
+            fig=fig,
+            data_summary=plot_data.head(20).to_string() # Limit summary size
+        )
+
+# 1.5 件数推移（折れ線）
+with tab1_line:
+    st.subheader("件数推移 (折れ線グラフ)")
+    
+    col_line_1, col_line_2 = st.columns([2, 1])
+    
+    with col_line_1:
+        # Mode Selection
+        line_mode = st.radio("表示モード:", ["全体推移", "出願人比較"], horizontal=True, key="atlas_line_mode")
+    
+    with col_line_2:
+        # Status Breakdown Option (Only for Overall mode for clarity)
+        use_status_breakdown_line = False
+        if line_mode == "全体推移" and status_col:
+            st.write("") # Spacer
+            st.write("")
+            use_status_breakdown_line = st.checkbox("ステータス内訳を表示", key="atlas_use_status_line")
+    
+    target_applicants = []
+    
+    if line_mode == "出願人比較":
+        # Prepare applicant list with counts
+        if not df_filtered.empty:
+            # Explode and count
+            assignees_exploded_line = df_filtered.explode('applicant_main')
+            assignees_exploded_line['assignee_parsed'] = assignees_exploded_line['applicant_main'].str.strip()
+            
+            # Count per applicant
+            app_counts = assignees_exploded_line['assignee_parsed'].value_counts()
+            
+            # Create formatted options: "Name (Count)"
+            # Sort is implied by value_counts() which returns descending order
+            app_options = [f"{name} ({count})" for name, count in app_counts.items()]
+            app_map = {f"{name} ({count})": name for name, count in app_counts.items()}
+            
+            selected_options = st.multiselect(
+                "出願人を選択 (最大5社):", 
+                options=app_options,
+                max_selections=5,
+                key="atlas_line_applicants"
+            )
+            
+            # Map back to raw names
+            target_applicants = [app_map[opt] for opt in selected_options]
+    
+    if st.button("折れ線グラフを描画", key="atlas_run_map1_line"):
+        if df_filtered.empty:
+            st.warning("データがありません。")
+        else:
+            fig = None
+            plot_data = None
+            
+            if line_mode == "全体推移":
+                if use_status_breakdown_line and status_col:
+                     # Stacked Area Chart (Breakdown)
+                    plot_data = df_filtered.groupby(['year', status_col]).size().reset_index(name='count')
+                    
+                    fig = px.area(plot_data, x='year', y='count', color=status_col, markers=True,
+                                  labels={'year': '出願年', 'count': '出願件数', status_col: 'ステータス'},
+                                  color_discrete_map=status_color_map,
+                                  category_orders={status_col: sorted(status_color_map.keys())}
+                                 )
+                    fig.update_layout(title=dict(text=f'全体件数推移・内訳 ({int(stats_start_year)}年～{int(stats_end_year)}年)', font=dict(size=18)))
+                    
+                else:
+                    # Overall Trend (Standard Line)
+                    yearly_counts = df_filtered['year'].value_counts().sort_index()
+                    plot_data = yearly_counts.reindex(range(int(stats_start_year), int(stats_end_year) + 1), fill_value=0).reset_index()
+                    plot_data.columns = ['year', 'count']
+                    
+                    fig = px.line(plot_data, x='year', y='count', markers=True, 
+                                  labels={'year': '出願年', 'count': '出願件数'},
+                                  color_discrete_sequence=[theme_config["color_sequence"][0]])
+                    
+                    fig.update_layout(title=dict(text=f'全体件数推移 ({int(stats_start_year)}年～{int(stats_end_year)}年)', font=dict(size=18)))
+
+            else: # Applicant Comparison
+                if not target_applicants:
+                    st.warning("出願人を選択してください。")
+                else:
+                    # Filter data for selected applicants
+                    assignees_exploded_line = df_filtered.explode('applicant_main')
+                    assignees_exploded_line['assignee_parsed'] = assignees_exploded_line['applicant_main'].str.strip()
+                    
+                    df_target = assignees_exploded_line[assignees_exploded_line['assignee_parsed'].isin(target_applicants)]
+                    
+                    if df_target.empty:
+                        st.warning("選ばれた出願人のデータが期間内にありません。")
+                    else:
+                        plot_data = df_target.groupby(['year', 'assignee_parsed']).size().reset_index(name='count')
+                        
+                        fig = px.line(plot_data, x='year', y='count', color='assignee_parsed', markers=True,
+                                      labels={'year': '出願年', 'count': '出願件数', 'assignee_parsed': '出願人'},
+                                      color_discrete_sequence=theme_config["color_sequence"])
+                        
+                        fig.update_layout(title=dict(text='主要出願人の件数推移比較', font=dict(size=18)))
+            
+            if fig:
+                update_fig_layout(fig, '件数推移(折れ線)', theme_config=theme_config)
+                
+                # Check for session state initialization
+                if 'atlas_fig_trend_line' not in st.session_state:
+                     st.session_state['atlas_fig_trend_line'] = None
+                
+                st.session_state['atlas_fig_trend_line'] = fig
+                st.session_state['atlas_data_trend_line'] = plot_data
+
+    # Persistent Display
+    if 'atlas_fig_trend_line' in st.session_state and st.session_state['atlas_fig_trend_line'] is not None:
+        fig = st.session_state['atlas_fig_trend_line']
+        data = st.session_state['atlas_data_trend_line']
+        
+        st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+        
+        utils.render_snapshot_button(
+            title="件数推移 (折れ線)",
+            description="出願件数の時系列推移（折れ線グラフ）。全体または特定出願人の比較。",
+            key="atlas_trend_line_snap",
+            fig=fig,
+            data_summary=data.head(20).to_string() if data is not None else "No Data"
+        )
 
 # 2. 出願人ランキング
 with tab2:
@@ -238,10 +391,25 @@ with tab2:
                 fig = px.bar(x=assignee_counts.values, y=assignee_counts.index, orientation='h', labels={'x': '特許件数', 'y': '出願人'}, color_discrete_sequence=[theme_config["color_sequence"][1]])
             
             update_fig_layout(fig, f'出願人ランキング ({int(stats_start_year)}年～{int(stats_end_year)}年)', height=max(600, len(assignee_counts)*30), theme_config=theme_config)
-            st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+            
+            st.session_state['atlas_fig_ranking'] = fig
+            st.session_state['atlas_data_ranking'] = assignee_counts
 
-# 3. IPCランキング
-
+    # Persistent Display
+    if 'atlas_fig_ranking' in st.session_state:
+        fig = st.session_state['atlas_fig_ranking']
+        assignee_counts = st.session_state['atlas_data_ranking']
+        
+        st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+        
+        # Snapshot Button
+        utils.render_snapshot_button(
+            title=f"主要出願人ランキング ({int(stats_start_year)}-{int(stats_end_year)})",
+            description="特許出願件数に基づく市場の主要プレイヤーランキング。",
+            key="atlas_applicant_snap",
+            fig=fig,
+            data_summary=assignee_counts.head(20).to_string()
+        )
 
 # 3. IPCランキング
 with tab3:
@@ -257,7 +425,24 @@ with tab3:
             ipc_counts = ipc_parsed.value_counts().head(int(num_to_display_map3)).sort_values(ascending=True)
             fig = px.bar(x=ipc_counts.values, y=ipc_counts.index, orientation='h', labels={'x': '特許件数', 'y': 'IPC分類'}, color_discrete_sequence=[theme_config["color_sequence"][2]])
             update_fig_layout(fig, f'IPCランキング ({ipc_level_map3[1]})', height=max(600, len(ipc_counts)*30), theme_config=theme_config)
-            st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+            
+            st.session_state['atlas_fig_ipc'] = fig
+            st.session_state['atlas_data_ipc'] = ipc_counts
+
+    # Persistent Display
+    if 'atlas_fig_ipc' in st.session_state:
+        fig = st.session_state['atlas_fig_ipc']
+        data = st.session_state['atlas_data_ipc']
+        
+        st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+        
+        utils.render_snapshot_button(
+            title=f"IPCランキング ({ipc_level_map3[1]})",
+            description="技術分野 (IPC) 別の上位ランキング。",
+            key="atlas_ipc_snap",
+            fig=fig,
+            data_summary=data.head(20).to_string()
+        )
 
 # 4. 出願人×年 バブル
 with tab4:
@@ -289,17 +474,21 @@ with tab4:
             if use_status_breakdown_tab4 and status_col:
                 # --- グリッド状パイチャートの描画 ---
                 # 1. グリッド寸法の計算
-                years = sorted(df_target['year'].unique())
-                valid_years = [y for y in years if int(y) >= int(stats_start_year) and int(y) <= int(stats_end_year)]
-                # Re-filter data by valid years just in case
-                df_target = df_target[df_target['year'].isin(valid_years)]
+                # 1. Grid Dimension Calculation (Must be linear to match Standard Chart Axis)
+                start_y = int(stats_start_year)
+                end_y = int(stats_end_year)
+                
+                # Let's align with the filter range for stability
+                cols = list(range(start_y, end_y + 1))
+                
+                # Filter data to this range
+                df_target = df_target[df_target['year'].isin(cols)]
                 
                 if df_target.empty:
                     st.warning("指定期間内のデータがありません。")
                 else:
-                    # Rows = Applicants, Cols = Years
+                    # Rows = Applicants, Cols = Years (Linear Sequence)
                     rows = top_assignees 
-                    cols = valid_years
                     
                     n_rows = len(rows)
                     n_cols = len(cols)
@@ -312,9 +501,9 @@ with tab4:
                     max_total = total_counts['total'].max()
                     
                     # Layout Calculation
-                    x_margin_l = 0.25 # For Applicant Names (Increased for long names)
+                    x_margin_l = 0.20 # Increased to 0.20 to prevent label cutoff and align with Standard
                     x_margin_r = 0.02
-                    y_margin_b = 0.05 # For Years
+                    y_margin_b = 0.10 
                     y_margin_t = 0.05
                     
                     plot_width = 1.0 - (x_margin_l + x_margin_r)
@@ -348,22 +537,13 @@ with tab4:
                         annotations.append(dict(
                             x=x_margin_l - 0.01, y=y_center,
                             xref="paper", yref="paper",
-                            text=applicant,
+                            text="", # Handled by Y-axis now
                             showarrow=False, xanchor="right", yanchor="middle",
                             font=dict(size=12, color=theme_config["text_color"])
                         ))
                         
-                    # X-Axis Labels (Years)
-                    for j, year in enumerate(cols):
-                        x_center = x_margin_l + (j * cell_w) + (cell_w / 2)
-                        
-                        annotations.append(dict(
-                            x=x_center, y=y_margin_b - 0.02,
-                            xref="paper", yref="paper",
-                            text=str(year),
-                            showarrow=False, xanchor="center", yanchor="top",
-                            font=dict(size=12, color=theme_config["text_color"])
-                        ))
+                    # X-axis labels are now handled by layout.xaxis
+                    annotations = []
 
                     # Add Pie Traces
                     for i, applicant in enumerate(rows):
@@ -374,20 +554,17 @@ with tab4:
                                 total = cell_df['count'].sum()
                                 max_r = min(cell_w, cell_h) / 2 * 0.9
                                 scale_factor = (total / max_total) ** 0.5
-                                scaled_r = max_r * scale_factor
-                                
                                 # Use sqrt scaling for visual size
                                 y_center = (1.0 - y_margin_t) - (i * cell_h) - (cell_h / 2)
                                 x_center = x_margin_l + (j * cell_w) + (cell_w / 2)
                                 
                                 # Domain Calc
                                 d_w = cell_w * scale_factor
-                                d_h = cell_h * scale_factor
                                 
                                 x0 = x_center - (d_w / 2)
                                 x1 = x_center + (d_w / 2)
-                                y0 = y_center - (d_h / 2)
-                                y1 = y_center + (d_h / 2)
+                                y0 = y_center - (scale_factor * cell_h / 2) 
+                                y1 = y_center + (scale_factor * cell_h / 2)
                                 
                                 # Map colors explicitly
                                 labels = cell_df[status_col].astype(str).tolist()
@@ -405,20 +582,8 @@ with tab4:
                                     sort=False 
                                 ))
                     
-                    # Add Horizontal Grid Lines (At row centers)
+                    # Manual Grid Lines Removed (Handled by yaxis.showgrid)
                     shapes = []
-                    for i in range(n_rows):
-                        # Line Y position: Center of row i (where bubble sits)
-                        y_center = (1.0 - y_margin_t) - (i * cell_h) - (cell_h / 2)
-                        
-                        shapes.append(dict(
-                            type="line",
-                            xref="paper", yref="paper",
-                            x0=x_margin_l, y0=y_center,
-                            x1=1.0 - x_margin_r, y1=y_center,
-                            layer="below",
-                            line=dict(color="#eee", width=1)
-                        ))
                     
                     # Layout Finalization
                     fig.update_layout(
@@ -426,22 +591,96 @@ with tab4:
                         annotations=annotations,
                         shapes=shapes,
                         showlegend=True,
-                        xaxis=dict(visible=False),
-                        yaxis=dict(visible=False),
+                        xaxis=dict(
+                            visible=True,
+                            domain=[x_margin_l, 1.0 - x_margin_r],
+                            # Range: [min_year - 0.5, max_year + 0.5]
+                            range=[cols[0] - 0.5, cols[-1] + 0.5],
+                            tickmode='auto', 
+                            side='bottom',
+                            color=theme_config["text_color"],
+                            fixedrange=True, 
+                            showgrid=False,
+                            zeroline=False,
+                            showline=False
+                        ),
+                        yaxis=dict(
+                            visible=True,
+                            domain=[y_margin_b, 1.0 - y_margin_t],
+                            # Map rows (0..N-1) to Y-axis. Top-down order.
+                            range=[-0.5, n_rows - 0.5],
+                            tickmode='array',
+                            tickvals=list(range(n_rows)),
+                            ticktext=rows[::-1], # Reverse to put Top Applicant at Top
+                            color=theme_config["text_color"],
+                            fixedrange=True, 
+                            showgrid=True,   
+                            gridcolor="#eee",
+                            zeroline=False,
+                            showline=False
+                        ),
                         margin=dict(l=0, r=0, t=40, b=0),
-                        paper_bgcolor=theme_config["bg_color"],
+                        paper_bgcolor=theme_config["bg_color"], 
                         plot_bgcolor=theme_config["bg_color"],
                         font_color=theme_config["text_color"],
                         title=dict(text=f'出願年別 出願人動向 (内訳: {status_col})', font=dict(size=18, weight="normal"))
                     )
                     
-                    st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+                    # Save to unified state
+                    st.session_state['atlas_fig_bubble_tab4'] = fig
+                    st.session_state['atlas_data_bubble_tab4'] = df_target.head(20) # Approx summary
             else:
                 # Standard Bubble Chart
                 plot_data = df_target.groupby(['year', 'assignee_parsed']).size().reset_index(name='件数')
-                fig = px.scatter(plot_data, x='year', y='assignee_parsed', size='件数', color='assignee_parsed', labels={'year': '出願年', 'assignee_parsed': '出願人', '件数': '件数'}, color_discrete_sequence=theme_config["color_sequence"], category_orders={"assignee_parsed": top_assignees})
-                update_fig_layout(fig, '出願年別 出願人動向', height=700, theme_config=theme_config)
-                st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+                
+                # --- Shared Layout Constants ---
+                x_margin_l = 0.20 # Match Breakdown
+                x_margin_r = 0.02
+                y_margin_b = 0.10
+                y_margin_t = 0.05
+                
+                fig = px.scatter(plot_data, x='year', y='assignee_parsed', size='件数', color='assignee_parsed', 
+                                 labels={'year': '出願年', 'assignee_parsed': '出願人', '件数': '件数'}, 
+                                 color_discrete_sequence=theme_config["color_sequence"], 
+                                 category_orders={"assignee_parsed": top_assignees}) # px handles order
+                
+                # Apply Strict Layout to Match Breakdown
+                update_fig_layout(fig, '出願年別 出願人動向', height=max(700, len(top_assignees)*50), theme_config=theme_config)
+                
+                fig.update_layout(
+                     margin=dict(l=0, r=0, t=40, b=0),
+                     xaxis=dict(
+                         domain=[x_margin_l, 1.0 - x_margin_r],
+                         fixedrange=True,
+                         side='bottom'
+                     ),
+                     yaxis=dict(
+                         domain=[y_margin_b, 1.0 - y_margin_t],
+                         fixedrange=True,
+                         showgrid=True,
+                         gridcolor="#eee",
+                         visible=True # Ensure visible
+                     )
+                )
+                
+                # Save to unified state
+                st.session_state['atlas_fig_bubble_tab4'] = fig
+                st.session_state['atlas_data_bubble_tab4'] = plot_data
+
+    # Persistent Display (Unified)
+    if 'atlas_fig_bubble_tab4' in st.session_state:
+        fig = st.session_state['atlas_fig_bubble_tab4']
+        data = st.session_state['atlas_data_bubble_tab4']
+        
+        st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+        
+        utils.render_snapshot_button(
+            title="出願年別 出願人バブルチャート",
+            description="主要出願人の時系列活動量 (内訳含む)",
+            key="atlas_bubble_tab4_snap",
+            fig=fig,
+            data_summary=data.to_string() if hasattr(data, 'to_string') else "Data Summary"
+        )
 
 
 # 5. IPC×出願人 バブル
@@ -465,7 +704,24 @@ with tab5:
         else:
             fig = px.scatter(plot_data, x='assignee_parsed', y='ipc_parsed', size='件数', color='ipc_parsed', labels={'assignee_parsed': '出願人', 'ipc_parsed': 'IPC分類', '件数': '件数'}, color_discrete_sequence=theme_config["color_sequence"], category_orders={"ipc_parsed": top_ipcs})
             update_fig_layout(fig, f'IPC ({ipc_level_map5[1]}) × 出願人 ポートフォリオ', height=800, theme_config=theme_config)
-            st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+            
+            st.session_state['atlas_fig_bubble_ipc'] = fig
+            st.session_state['atlas_data_bubble_ipc'] = plot_data
+
+    # Persistent Display
+    if 'atlas_fig_bubble_ipc' in st.session_state:
+        fig = st.session_state['atlas_fig_bubble_ipc']
+        data = st.session_state['atlas_data_bubble_ipc']
+        
+        st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+        
+        utils.render_snapshot_button(
+            title=f"IPC x 出願人 ポートフォリオ",
+            description="主要出願人の技術分野（IPC）ごとの注力度合いを示すバブルチャート。",
+            key="atlas_bubble_ipc_snap",
+            fig=fig,
+            data_summary=data.head(20).to_string()
+        )
 
 # 6. 構成比マップ
 with tab6:
@@ -480,7 +736,10 @@ with tab6:
                 else:
                     fig = px.treemap(df_tree, path=['Section', 'Class', 'Subclass'], values='count', color='Section', color_discrete_sequence=theme_config["color_sequence"])
                     update_fig_layout(fig, 'IPC階層構造マップ', height=700, theme_config=theme_config)
-                    st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+                    
+                    st.session_state['atlas_fig_tree'] = fig
+                    st.session_state['atlas_data_tree'] = df_tree
+
             elif tree_mode == "出願人シェア":
                 df_tree = create_treemap_data(df_filtered, stats_start_year, stats_end_year, mode="applicant")
                 if df_tree.empty:
@@ -488,7 +747,24 @@ with tab6:
                 else:
                     fig = px.treemap(df_tree, path=['Root', 'Applicant'], values='count', color='count', color_continuous_scale='Blues', labels={'Applicant': '出願人', 'count': '件数', 'Root': '全体'})
                     update_fig_layout(fig, '出願人シェアマップ', height=700, theme_config=theme_config)
-                    st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+                    
+                    st.session_state['atlas_fig_tree'] = fig
+                    st.session_state['atlas_data_tree'] = df_tree
+
+    # Persistent Display
+    if 'atlas_fig_tree' in st.session_state:
+        fig = st.session_state['atlas_fig_tree']
+        data = st.session_state['atlas_data_tree']
+        
+        st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+        
+        utils.render_snapshot_button(
+            title="構成比マップ (Treemap)",
+            description="技術分野または出願人のシェア構成を示すツリーマップ。",
+            key="atlas_tree_snap",
+            fig=fig,
+            data_summary=data.head(20).to_string()
+        )
 
 # 7. ライフサイクルマップ
 with tab7:
@@ -557,11 +833,27 @@ with tab7:
                     yaxis_title="出願人数 (参入プレイヤー数)"
                 )
                 
-                st.plotly_chart(fig, use_container_width=True, config={'editable': False})
-                
-                st.markdown("""
-                ##### 💡 マップの読み方
-                * **右上へ伸びる**: 多くのプレイヤーが参入し、出願も増えている「成長期」。
-                * **右下へ向かう**: 出願数は多いが、プレイヤーが減っている（淘汰が進んでいる）「成熟期」。
-                * **左下へ戻る**: プレイヤーも出願も減っている「衰退期」または「ニッチ化」。
-                """)
+                st.session_state['atlas_fig_life'] = fig
+                st.session_state['atlas_data_life'] = lifecycle_data
+
+    # Persistent Display
+    if 'atlas_fig_life' in st.session_state:
+        fig = st.session_state['atlas_fig_life']
+        data = st.session_state['atlas_data_life']
+        
+        st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+        
+        st.markdown("""
+        ##### 💡 マップの読み方
+        * **右上へ伸びる**: 多くのプレイヤーが参入し、出願も増えている「成長期」。
+        * **右下へ向かう**: 出願数は多いが、プレイヤーが減っている（淘汰が進んでいる）「成熟期」。
+        * **左下へ戻る**: プレイヤーも出願も減っている「衰退期」または「ニッチ化」。
+        """)
+        
+        utils.render_snapshot_button(
+            title="技術ライフサイクルマップ",
+            description="出願件数と出願人数（参入企業数）の相関から、技術の成熟度を診断するマップ。",
+            key="atlas_life_snap",
+            fig=fig,
+            data_summary=data.head(20).to_string()
+        )
