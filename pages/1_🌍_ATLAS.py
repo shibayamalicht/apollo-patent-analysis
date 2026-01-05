@@ -219,12 +219,14 @@ with tab1:
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
         # Snapshot Button
+        snap_data = utils.generate_rich_summary(df_filtered)
+        snap_data['chart_data'] = plot_data.head(50).to_string()
         utils.render_snapshot_button(
             title=f"出願件数推移 ({int(stats_start_year)}-{int(stats_end_year)})",
             description="市場全体の出願動向を示すトレンドグラフ。",
             key="atlas_trend_snap",
             fig=fig,
-            data_summary=plot_data.head(20).to_string() # Limit summary size
+            data_summary=snap_data
         )
 
 # 1.5 件数推移（折れ線）
@@ -341,12 +343,14 @@ with tab1_line:
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
+        snap_data = utils.generate_rich_summary(df_filtered if 'df_target' not in locals() else df_target)
+        snap_data['chart_data'] = data.head(50).to_string() if data is not None else "No Data"
         utils.render_snapshot_button(
             title="件数推移 (折れ線)",
             description="出願件数の時系列推移（折れ線グラフ）。全体または特定出願人の比較。",
             key="atlas_trend_line_snap",
             fig=fig,
-            data_summary=data.head(20).to_string() if data is not None else "No Data"
+            data_summary=snap_data
         )
 
 # 2. 出願人ランキング
@@ -403,12 +407,14 @@ with tab2:
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
         # Snapshot Button
+        snap_data = utils.generate_rich_summary(df_filtered)
+        snap_data['chart_data'] = assignee_counts.head(50).to_string()
         utils.render_snapshot_button(
             title=f"主要出願人ランキング ({int(stats_start_year)}-{int(stats_end_year)})",
             description="特許出願件数に基づく市場の主要プレイヤーランキング。",
             key="atlas_applicant_snap",
             fig=fig,
-            data_summary=assignee_counts.head(20).to_string()
+            data_summary=snap_data
         )
 
 # 3. IPCランキング
@@ -436,12 +442,15 @@ with tab3:
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
+        # Snapshot Button
+        snap_data = utils.generate_rich_summary(df_filtered)
+        snap_data['chart_data'] = data.head(50).to_string()
         utils.render_snapshot_button(
             title=f"IPCランキング ({ipc_level_map3[1]})",
             description="技術分野 (IPC) 別の上位ランキング。",
             key="atlas_ipc_snap",
             fig=fig,
-            data_summary=data.head(20).to_string()
+            data_summary=snap_data
         )
 
 # 4. 出願人×年 バブル
@@ -474,7 +483,6 @@ with tab4:
             if use_status_breakdown_tab4 and status_col:
                 # --- グリッド状パイチャートの描画 ---
                 # 1. グリッド寸法の計算
-                # 1. Grid Dimension Calculation (Must be linear to match Standard Chart Axis)
                 start_y = int(stats_start_year)
                 end_y = int(stats_end_year)
                 
@@ -512,7 +520,7 @@ with tab4:
                     cell_w = plot_width / n_cols
                     cell_h = plot_height / n_rows
                     
-                    # Prepare Legend Colors (Use globally defined map)
+                    # Prepare Legend Colors
                     
                     # Filter map to only statuses present in this view for the legend
                     statuses_in_view = sorted(df_target[status_col].dropna().unique().astype(str))
@@ -537,7 +545,7 @@ with tab4:
                         annotations.append(dict(
                             x=x_margin_l - 0.01, y=y_center,
                             xref="paper", yref="paper",
-                            text="", # Handled by Y-axis now
+                            text="",
                             showarrow=False, xanchor="right", yanchor="middle",
                             font=dict(size=12, color=theme_config["text_color"])
                         ))
@@ -674,12 +682,14 @@ with tab4:
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
+        snap_data = utils.generate_rich_summary(data)
+        snap_data['chart_data'] = data.to_string() if hasattr(data, 'to_string') else "Data Summary"
         utils.render_snapshot_button(
             title="出願年別 出願人バブルチャート",
             description="主要出願人の時系列活動量 (内訳含む)",
             key="atlas_bubble_tab4_snap",
             fig=fig,
-            data_summary=data.to_string() if hasattr(data, 'to_string') else "Data Summary"
+            data_summary=snap_data
         )
 
 
@@ -715,12 +725,14 @@ with tab5:
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
+        snap_data = utils.generate_rich_summary(data)
+        snap_data['chart_data'] = data.head(50).to_string()
         utils.render_snapshot_button(
             title=f"IPC x 出願人 ポートフォリオ",
             description="主要出願人の技術分野（IPC）ごとの注力度合いを示すバブルチャート。",
             key="atlas_bubble_ipc_snap",
             fig=fig,
-            data_summary=data.head(20).to_string()
+            data_summary=snap_data
         )
 
 # 6. 構成比マップ
@@ -758,12 +770,14 @@ with tab6:
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
+        snap_data = utils.generate_rich_summary(df_filtered)
+        snap_data['chart_data'] = data.head(50).to_string()
         utils.render_snapshot_button(
             title="構成比マップ (Treemap)",
             description="技術分野または出願人のシェア構成を示すツリーマップ。",
             key="atlas_tree_snap",
             fig=fig,
-            data_summary=data.head(20).to_string()
+            data_summary=snap_data
         )
 
 # 7. ライフサイクルマップ
@@ -850,10 +864,12 @@ with tab7:
         * **左下へ戻る**: プレイヤーも出願も減っている「衰退期」または「ニッチ化」。
         """)
         
+        snap_data = utils.generate_rich_summary(df_filtered)
+        snap_data['chart_data'] = data.head(50).to_string()
         utils.render_snapshot_button(
             title="技術ライフサイクルマップ",
             description="出願件数と出願人数（参入企業数）の相関から、技術の成熟度を診断するマップ。",
             key="atlas_life_snap",
             fig=fig,
-            data_summary=data.head(20).to_string()
+            data_summary=snap_data
         )

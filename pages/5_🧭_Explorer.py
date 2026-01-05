@@ -218,7 +218,6 @@ if 'explorer_keywords' not in df_main.columns:
     with st.spinner("Explorer: テキスト解析とキーワード抽出を実行中..."):
         df_main['explorer_text'] = df_main[col_map['title']].fillna('') + ' ' + df_main[col_map['abstract']].fillna('')
         df_main['explorer_keywords'] = df_main['explorer_text'].apply(extract_compound_nouns)
-        # Column added to df_main (reference to session_state object should persist, but explicit update is safer if needed)
         st.session_state.df_main = df_main
 
 # モード選択
@@ -297,17 +296,35 @@ if selected_tab == "Global Overview":
                 st.plotly_chart(fig_net_g, use_container_width=True, config={'editable': False})
                 
                 # --- Snapshot (Global Network) ---
+                # 1. Community Structure
                 comm_summary = []
                 for i in range(len(communities)):
-                    comm_words = list(communities[i])[:5] # Top 5 words per community
-                    comm_summary.append(f"Cluster {i+1}: {', '.join(comm_words)}")
+                    comm_words = list(communities[i])[:5] 
+                    comm_summary.append(f"Group {i+1}: {', '.join(comm_words)}")
+                
+                # 2. Hubs (Degree Centrality)
+                deg_centrality = nx.degree_centrality(G_global)
+                sorted_hubs = sorted(deg_centrality.items(), key=lambda x: x[1], reverse=True)[:10]
+                hubs_str = ", ".join([f"{n}({val:.2f})" for n, val in sorted_hubs])
+
+                # 3. Strongest Edges
+                sorted_edges = sorted(G_global.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:10]
+                edges_str = ", ".join([f"{u}-{v}" for u, v, d in sorted_edges])
+
+                # Combine with Rich Summary
+                snap_data = utils.generate_rich_summary(df_main)
+                snap_data['network_stats'] = {
+                    "communities": "; ".join(comm_summary),
+                    "hubs": hubs_str,
+                    "edges": edges_str
+                }
                 
                 utils.render_snapshot_button(
                     title="全体共起ネットワーク (技術クラスター)",
                     description="全期間を通じた技術用語の共起関係とクラスター構造。",
                     key="exp_global_net_snap",
                     fig=fig_net_g,
-                    data_summary="[Community Structures]\n" + "\n".join(comm_summary)
+                    data_summary=snap_data
                 )
             else: st.warning("条件に一致する共起関係が見つかりませんでした。")
 
@@ -455,12 +472,27 @@ elif selected_tab == "Trend Analysis":
             # --- Snapshot (Trend Network) ---
             trend_summary = [f"{n}: Growth {c_rec_net.get(n,0)/(c_pst_net.get(n,0)+1):.2f}" for n in list(G.nodes())[:15]]
             
+            # Hubs & Edges
+            deg_centrality = nx.degree_centrality(G)
+            sorted_hubs = sorted(deg_centrality.items(), key=lambda x: x[1], reverse=True)[:10]
+            hubs_str = ", ".join([f"{n}({val:.2f})" for n, val in sorted_hubs])
+            
+            sorted_edges = sorted(G.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:10]
+            edges_str = ", ".join([f"{u}-{v}" for u, v, d in sorted_edges])
+
+            snap_data = utils.generate_rich_summary(df_target)
+            snap_data['network_stats'] = {
+                "hubs": hubs_str,
+                "edges": edges_str,
+                "notes": "Nodes colored by Growth Rate (Red=High, Blue=Low)."
+            }
+
             utils.render_snapshot_button(
                 title="トレンド・共起ネットワーク",
                 description="技術用語の共起関係に成長率（赤=急上昇）を重ね合わせたマップ。",
                 key="exp_trend_net_snap",
                 fig=fig_net,
-                data_summary="[Top Growth Nodes]\n" + "\n".join(trend_summary)
+                data_summary=snap_data
             )
 
 # ==================================================================
@@ -620,12 +652,27 @@ elif selected_tab == "Comparative Strategy":
                 dom_val = m/(m+t) if (m+t)>0 else 0.5
                 dom_summary.append(f"{n}: {my_comp}={m}, {target_comp}={t} (Dom={dom_val:.2f})")
 
+            # Hubs & Edges
+            deg_centrality = nx.degree_centrality(G)
+            sorted_hubs = sorted(deg_centrality.items(), key=lambda x: x[1], reverse=True)[:10]
+            hubs_str = ", ".join([f"{n}({val:.2f})" for n, val in sorted_hubs])
+            
+            sorted_edges = sorted(G.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:10]
+            edges_str = ", ".join([f"{u}-{v}" for u, v, d in sorted_edges])
+
+            snap_data = utils.generate_rich_summary(df_2)
+            snap_data['network_stats'] = {
+                "hubs": hubs_str,
+                "edges": edges_str,
+                "notes": f"Dominance: {my_comp} vs {target_comp}. Blue favorable to {my_comp}, Red favorable to {target_comp}."
+            }
+
             utils.render_snapshot_button(
                 title=f"Dominance Network ({my_comp} vs {target_comp})",
                 description="共起ネットワーク上での両社の優劣（支配率）分布。",
                 key="exp_dom_net_snap",
                 fig=fig_net,
-                data_summary="[Dominance Analysis]\n" + "\n".join(dom_summary)
+                data_summary=snap_data
             )
 
 # ==================================================================

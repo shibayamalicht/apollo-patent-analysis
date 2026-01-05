@@ -41,9 +41,8 @@ class LLMClient:
         try:
             if self.provider == "Google Gemini":
                 model = genai.GenerativeModel(self.model_name)
-                # GeminiはSystem promptを引数で渡すか、役割指定が異なる場合があるが、
-                # 1.5 Pro以降は system_instruction が使える (最新SDK)。
-                # ここでは簡易的に結合して渡すか、generate_contentで対応
+                # Gemini 1.5 Pro以降のモデル対応
+                # System promptは本来 system_instruction で渡すべきですが、簡易的に結合して処理します
                 full_prompt = f"【System Instructions】\n{system_prompt}\n\n【User Request】\n{user_prompt}"
                 response = model.generate_content(full_prompt)
                 return response.text
@@ -114,8 +113,7 @@ with st.expander("⚙️ AIエンジン設定 (API Key)", expanded=True):
     final_api_key = api_key_input if api_key_input else api_key_env
 
     with col_model:
-        # Model Selection (Updated with user-provided list)
-        # Model Selection (Updated with user-provided list)
+        # Model Selection
         model_options = [
             "gemini-2.5-flash"
         ]
@@ -135,7 +133,6 @@ else:
     snapshots = st.session_state['snapshots']
     
     # Grid display for snapshots
-    # 削除操作があるため、インデックスで回すか、再描画を意識する
     cols = st.columns(3)
     indices_to_remove = []
     
@@ -154,7 +151,10 @@ else:
                 st.caption(f"Source: {snap.get('module', 'Unknown')} | {snap.get('timestamp')}")
                 with st.expander("Memo / Data"):
                     st.write(snap.get('description', ''))
-                    st.code(snap.get('data_summary', '')[:200] + "...")
+                    ds_preview = snap.get('data_summary', '')
+                    if isinstance(ds_preview, dict):
+                         ds_preview = str(ds_preview)
+                    st.code(str(ds_preview)[:200] + "...")
                 
                 if st.button("🗑️ 削除", key=f"del_{snap['id']}_{i}"):
                     indices_to_remove.append(i)
@@ -235,7 +235,41 @@ with col_act:
             context_str += f"\n### Evidence {i+1}: {snap['title']}\n"
             context_str += f"- Description: {snap['description']}\n"
             context_str += f"- Source Module: {snap['module']}\n"
-            context_str += f"- Data Summary: {snap['data_summary']}\n"
+            
+            # --- STRUCTURED DATA HANDLING (v5.1 High-Res) ---
+            data_sum = snap.get('data_summary', '')
+            if isinstance(data_sum, dict):
+                # 統計情報
+                if 'stats' in data_sum:
+                    s = data_sum['stats']
+                    context_str += f"- [Statistics]\n"
+                    if 'cagr' in s: context_str += f"  - CAGR: {s['cagr']} (Trend: {s.get('trend', 'N/A')})\n"
+                    if 'hhi' in s: context_str += f"  - HHI: {s['hhi']:.3f} ({s.get('hhi_status', 'N/A')})\n"
+                
+                # 代表特許
+                if 'representatives' in data_sum and data_sum['representatives']:
+                     context_str += f"- [Representative Patents (Top {len(data_sum['representatives'])})]\n"
+                     for rep in data_sum['representatives']:
+                         context_str += f"  {rep}\n"
+                
+                # Chart Data (Numerical values)
+                if 'chart_data' in data_sum:
+                    context_str += f"- [Chart Data]\n{data_sum['chart_data']}\n"
+
+                # Network Statistics (Graph Analysis)
+                if 'network_stats' in data_sum:
+                    ns = data_sum['network_stats']
+                    context_str += f"- [Network Structure Analysis]\n"
+                    if 'hubs' in ns: context_str += f"  - Top Hubs (Centrality): {ns['hubs']}\n"
+                    if 'edges' in ns: context_str += f"  - Strongest Connections: {ns['edges']}\n"
+                    if 'communities' in ns: context_str += f"  - Community Groups: {ns['communities']}\n"
+                
+                # エラー情報など
+                if 'error' in data_sum:
+                     context_str += f"- [Note] Data extraction partial error: {data_sum['error']}\n"
+            else:
+                # Legacy String
+                context_str += f"- Data Summary: {data_sum}\n"
         
         # 2. System Prompt Selection
         system_prompt_std = """
@@ -254,6 +288,7 @@ with col_act:
            - **Key Findings:** 箇条書きで3〜5点。証拠を紐付けること。
            - **Strategic Recommendation:** 今後のアクション提案。
         6. **言語:** 日本語 (ビジネスプロフェッショナルなトーン)。
+        7. **情報の正確性:** ランキング上位に含まれていない企業や技術（圏外データ）について言及する場合は、必ず「**ランキング上位には含まれていませんが**」や「**圏外ですが**」といった前置きを行い、ユーザーに誤解を与えないこと。
         """
 
         system_prompt_deep = """
@@ -305,6 +340,7 @@ with col_act:
         -   Mid-term Strategy (中期的布石)。
 
         **言語:** 日本語 (極めて高度で洗練された戦略ビジネス用語を使用)
+        **情報の正確性:** ランキング上位に含まれていない企業や技術（圏外データ）について言及する場合は、必ず「**ランキング上位には含まれていませんが**」や「**圏外ですが**」といった前置きを行い、ユーザーに誤解を与えないこと。
         """
 
         system_prompt = system_prompt_deep if "Deep Dive" in report_mode else system_prompt_std
@@ -347,7 +383,7 @@ if 'last_report' in st.session_state:
                             st.warning("(No Image)")
                         st.caption(snap.get('description', ''))
                 else:
-                    st.warning(f"[Missing Evidence {part}]")
+                    st.caption(f"※ AIが Evidence {part} を参照しましたが、該当するスナップショットは見つかりませんでした。この部位はハルシネーションの可能性があるため、検討してください。")
             else:
                 # Normal text
                 if part.strip():

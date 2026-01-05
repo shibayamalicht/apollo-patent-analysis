@@ -589,12 +589,14 @@ with tab_main:
         if col_map.get('applicant') and col_map['applicant'] in df_universe.columns:
             summary_cols.append(col_map['applicant'])
             
+        snap_data = utils.generate_rich_summary(df_universe)
+        snap_data['chart_data'] = df_universe[summary_cols].head(50).to_string()
         utils.render_snapshot_button(
             title=f"特許ランドスケープ ({map_mode})",
             description="技術クラスターと出願の分布を示す俯瞰マップ。",
             key="saturn_main_snap",
             fig=fig_main,
-            data_summary=df_universe[summary_cols].head(20).to_string()
+            data_summary=snap_data
         )
 
         st.subheader("ラベル編集")
@@ -845,12 +847,14 @@ with tab_main:
                 }
             })
             
+            snap_data = utils.generate_rich_summary(df_drill)
+            snap_data['chart_data'] = df_drill.head(50).to_string()
             utils.render_snapshot_button(
                 title=f"Saturn V ドリルダウン: {st.session_state.drill_base_label}",
                 description="選択したクラスターの詳細マップ。",
                 key="saturn_drill_snap",
                 fig=fig_drill,
-                data_summary=df_drill.head(10).to_string()
+                data_summary=snap_data
             )
             
             st.subheader("サブクラスタ・ラベル編集")

@@ -212,7 +212,7 @@ def render_sidebar():
     with st.sidebar:
         st.title("APOLLO") 
         st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
-        st.markdown("**v.5**")
+        st.markdown("**v5.1.0**")
         st.markdown("---")
         st.subheader("Home"); st.page_link("Home.py", label="Mission Control", icon="🛰️")
         st.subheader("Modules")
@@ -234,7 +234,7 @@ def render_sidebar():
 # ==================================================================
 def get_theme_config(theme_name):
     """テーマに応じたカラー設定を返す"""
-    import plotly.express as px  # Import here or at top
+    import plotly.express as px
     
     themes = {
         "APOLLO Standard": {
@@ -274,6 +274,120 @@ def get_theme_config(theme_name):
 # ==================================================================
 # --- 5. Snapshot (VOYAGER連携) ---
 # ==================================================================
+def calculate_hhi(counts):
+    """ヘルフィンダール・ハーシュマン指数 (HHI) を計算し、公取委基準で判定する"""
+    if not counts or sum(counts) == 0: return 0.0, "データ不足"
+    
+    total = sum(counts)
+    shares = [c / total for c in counts]
+    hhi = sum([s ** 2 for s in shares])
+    
+    # 公正取引委員会の基準 (0-1スケール)
+    if hhi < 0.10: status = "競争的 (分散)"
+    elif hhi < 0.18: status = "中程度の集中"
+    else: status = "寡占的 (高集中)"
+    
+    return hhi, status
+
+def calculate_cagr_slope(df_subset, year_col='year'):
+    """年平均成長率(CAGR)とトレンド(Slope)を計算する"""
+    if year_col not in df_subset.columns: return None, None
+    
+    years = df_subset[year_col].dropna().astype(int)
+    if years.empty: return None, None
+    
+    counts = years.value_counts().sort_index()
+    if len(counts) < 2: return 0.0, "Stable"
+    
+    # 直近3-5年のトレンドを見る
+    y_vals = counts.index.values
+    c_vals = counts.values
+    
+    # Slope (線形回帰)
+    try:
+        slope, _ = np.polyfit(y_vals, c_vals, 1)
+        if slope > 0.5: trend = "急上昇 📈"
+        elif slope > 0: trend = "増加傾向 ↗️"
+        elif slope > -0.5: trend = "減少傾向 ↘️"
+        else: trend = "失速 📉"
+    except:
+        trend = "不明"
+        slope = 0
+        
+    # CAGR (最初と最後)
+    try:
+        start_val = c_vals[0] if c_vals[0] > 0 else 1
+        end_val = c_vals[-1]
+        n_years = max(1, y_vals[-1] - y_vals[0])
+        cagr = (end_val / start_val) ** (1/n_years) - 1
+    except:
+        cagr = 0.0
+        
+    return cagr, trend
+
+@st.cache_data(show_spinner=False)
+def generate_rich_summary(df_target, title_col='title', abstract_col='abstract', n_representatives=5):
+    """
+    VOYAGER v5.1用の高解像度サマリを生成する (Cached)
+    - 統計情報 (HHI, CAGR, Trend)
+    - 代表特許 (Centroid Distance)
+    """
+    summary = {
+        "stats": {},
+        "representatives": []
+    }
+    
+    # 1. 統計情報の計算 (年次推移がある場合)
+    if 'year' in df_target.columns:
+        cagr, trend = calculate_cagr_slope(df_target)
+        summary['stats']['cagr'] = f"{cagr:.1%}" if cagr is not None else "N/A"
+        summary['stats']['trend'] = trend if trend else "N/A"
+
+    # 2. HHI (市場集中度) の計算
+    try:
+        # 出願人情報 ('applicant_main') を利用して市場集中度を算出
+        if 'applicant_main' in df_target.columns:
+            all_apps = [a for sublist in df_target['applicant_main'] for a in sublist]
+            counts = pd.Series(all_apps).value_counts().tolist()
+            hhi, hhi_status = calculate_hhi(counts)
+            summary['stats']['hhi'] = hhi
+            summary['stats']['hhi_status'] = hhi_status
+    except: pass
+        
+    # 3. 代表特許の抽出 (Centroid Distance)
+    if 'sbert_embeddings' in st.session_state and not df_target.empty:
+        try:
+            # df_targetのindexを使ってembeddingsを抽出
+            # 前提: df_mainのindexがresetされておらず、embeddingsと1対1対応していること
+            valid_indices = [i for i in df_target.index if i < len(st.session_state.sbert_embeddings)]
+            
+            if valid_indices:
+                vectors = st.session_state.sbert_embeddings[valid_indices]
+                centroid = np.mean(vectors, axis=0)
+                
+                # 重心との距離計算 (Cosine Similarity相当)
+                dots = np.dot(vectors, centroid)
+                
+                # 上位N件のインデックスを取得
+                top_n_local_indices = np.argsort(dots)[::-1][:n_representatives]
+                top_global_indices = [valid_indices[i] for i in top_n_local_indices]
+                
+                # データ取得
+                reps = []
+                for idx in top_global_indices:
+                    try:
+                        row = st.session_state.df_main.loc[idx]
+                        title = str(row.get(title_col, 'No Title')).replace('\n', ' ')
+                        abstract = str(row.get(abstract_col, 'No Abstract')).replace('\n', ' ')[:200] + "..." # 長すぎたらカット
+                        reps.append(f"- 【{title}】 {abstract}")
+                    except: pass
+                
+                summary['representatives'] = reps
+        except Exception as e:
+            summary['error'] = str(e)
+
+    return summary
+
 def render_snapshot_button(title, description, key, fig=None, data_summary=None):
     """
     グラフやデータをVOYAGER用に保存するボタンを表示する
@@ -309,8 +423,8 @@ def render_snapshot_button(title, description, key, fig=None, data_summary=None)
                         # kaleido needed
                         # Force width to 1200 unless specified to prevent 700 default (which causes square/vertical layout on tall charts)
                         current_width = fig.layout.width if fig.layout.width else 1200
-                        # Keep scale=2 for high resolution
-                        img_bytes = fig.to_image(format="png", width=current_width, scale=2)
+                        # Keep scale=2 for high resolution -> Reduced to 1.5 for performance
+                        img_bytes = fig.to_image(format="png", width=current_width, scale=1.5)
                     except Exception as e:
                         snapshot_data['image_error'] = f"Plotly Image Error (Kaleido): {str(e)}"
                         st.warning(f"画像化に失敗しました (Kaleido Check): {e}")

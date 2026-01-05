@@ -561,15 +561,6 @@ if st.session_state.analyzer:
             fig_net.update_yaxes(scaleanchor=None, scaleratio=None)
             st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
             
-            # Snapshot Button
-            utils.render_snapshot_button(
-                title=f"共起ネットワーク ({color_mode})",
-                description="発明者/出願人のつながりとコミュニティ構造を示すネットワーク図。",
-                key="crew_net_snap",
-                fig=fig_net,
-                data_summary=metrics_df.sort_values('媒介中心性', ascending=False).head(10).to_string()
-            )
-
         with tab2:
             st.dataframe(metrics_df.sort_values('媒介中心性', ascending=False), use_container_width=True)
             st.download_button("CSVダウンロード", metrics_df.to_csv().encode('utf-8'), "crew_metrics.csv", "text/csv")
@@ -600,7 +591,7 @@ if st.session_state.analyzer:
                 # 4. カラーマップ (0を薄いグレーに)
                 custom_colorscale = [[0.0, "#f9f9f9"], [0.01, "#eff3ff"], [1.0, "#08519c"]]
                 
-                # 5. 描画 (text_autoは使わず、text引数とupdate_tracesで明示する)
+                # 5. 描画
                 fig_hm = px.imshow(
                     ct, 
                     aspect="auto", 
@@ -631,7 +622,6 @@ if st.session_state.analyzer:
                 with col_tl: top_n_tl = st.slider("トップ表示数", 5, 50, 20)
                 df_time = analyzer.get_inventor_timeline(year_range=year_range, applicants=sel_apps, top_n=top_n_tl)
                 if not df_time.empty:
-                    # Sort inventors by total count descending (so highest count is at the top of Y-axis logic depending on display)
                     # 出願数が多い順に上から表示
                     total_counts = df_time.groupby('発明者')['出願数'].sum().sort_values(ascending=False)
                     sorted_inventors = total_counts.index.tolist()
