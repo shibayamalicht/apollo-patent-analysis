@@ -9,9 +9,10 @@ janome
 sentence-transformers
 umap-learn
 hdbscan
-wordcloud
+wordcloud>=1.9.3
 networkx
 openpyxl
 setuptools
 google-generativeai
 kaleido
+Pillow<10.0.0
