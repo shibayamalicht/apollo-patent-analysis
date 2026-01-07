@@ -16,3 +16,4 @@ setuptools
 google-generativeai
 kaleido
 Pillow
+reportlab
