@@ -223,15 +223,21 @@ with tab1:
         snap_data = utils.generate_rich_summary(df_filtered, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=0)
         snap_data['module'] = 'ATLAS'
         
-        # Optimize Chart Data
         # Optimize Chart Data (Wide Format: Year | Total Only)
-
-        if 'year' in plot_data.columns and 'count' in plot_data.columns:
-             # Group by Year and Sum Count, ignoring Status
+        if hasattr(plot_data, 'columns') and 'year' in plot_data.columns and 'count' in plot_data.columns:
+             # Group by Year and Sum Count, ignoring Status (Stacked Bar)
              df_snap_safe = plot_data.groupby('year')['count'].sum().reset_index()
              df_snap_safe['year'] = df_snap_safe['year'].astype(int)
+        elif hasattr(plot_data, 'reset_index'):
+             # Handle Series case (Standard Bar) -> Convert to DataFrame
+             df_snap_safe = plot_data.reset_index()
+             if df_snap_safe.shape[1] == 2:
+                 df_snap_safe.columns = ['year', 'count']
+             # Ensure year is int if possible
+             if 'year' in df_snap_safe.columns:
+                 df_snap_safe['year'] = df_snap_safe['year'].astype(int)
         else:
-            df_snap_safe = plot_data.copy()
+            df_snap_safe = pd.DataFrame(plot_data)
             
         # Ensure we don't exceed token limits but prioritize showing full year range
         snap_data['chart_data'] = df_snap_safe.head(50).to_string(index=False)
