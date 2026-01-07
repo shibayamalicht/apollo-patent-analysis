@@ -470,7 +470,8 @@ with tab_b:
                     color='Group_Custom', 
                     color_discrete_map=current_color_map, 
                     hover_name=st.session_state.mega_axis_label, 
-                    log_y=True
+                    log_y=True,
+                    custom_data=['Group_Custom']
                 )
                 fig.update_traces(hovertemplate=_get_hover_template_mode2())
 

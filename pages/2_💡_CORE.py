@@ -136,7 +136,7 @@ class CoreLogicParser:
 
     def factor(self):
         # Factor -> Atom { (nearN|adjN) Atom }
-        # Note: near/adj are treated as binary ops here, but strictly they form a single Regex Node in old Logic.
+
         # To support (A+B) near C, we need to compile sub-parts to regex strings if possible.
         # Limitation: near/adj can only apply to "Regex-compatible" nodes (Leaf or OR of Leafs). NO ANDs allowed inside near/adj.
         
@@ -798,9 +798,47 @@ elif current_phase.startswith("フェーズ 4"):
                             type='category',
                             range=[-0.5, len(x_ord_global) - 0.5] # Ensure full width
                         )
-                        
-                        fig.update_layout(height=max(600, len(ct_final)*40), showlegend=False)
                         st.plotly_chart(fig, use_container_width=True, config={'editable': False}, key=f"core_chart_{wrapper_key}")
+
+                    
+                    # --- Snapshot (Dynamic) ---
+                    # Generate Matrix CSV for AI
+                    # Optimize Matrix Size for Large Datasets (Top 20x20)
+                    if ct_final.shape[0] > 20 or ct_final.shape[1] > 20:
+                         # Calculate Row/Col sums to find Top items
+                         top_rows = ct_final.sum(axis=1).sort_values(ascending=False).head(20).index
+                         top_cols = ct_final.sum(axis=0).sort_values(ascending=False).head(20).index
+                         # Slicing
+                         ct_ai_safe = ct_final.loc[top_rows, top_cols]
+                         matrix_csv = ct_ai_safe.to_csv()
+                         note = f"(Truncated to Top 20x20 from {ct_final.shape})"
+                    else:
+                         matrix_csv = ct_final.to_csv()
+                         note = ""
+
+                    # Construct Data Summary for VOYAGER
+                    # Construct Data Summary for VOYAGER
+                    snap_data = {
+                        'module': 'CORE',
+                        'type': 'matrix',
+                        'axes': {'x': x_ax, 'y': y_ax},
+                        'matrix_data': matrix_csv,
+                        'matrix_context': f"Analysis Target: {selected_app_label}",
+                        'stats': {
+                            'total_count': int(ct_final.sum().sum()),
+                            'max_value': int(ct_final.max().max())
+                        },
+                        'chart_data': f"Matrix ({y_ax} vs {x_ax}) - Target: {selected_app_label}\n{matrix_csv}" 
+                    }
+
+                    utils.render_snapshot_button(
+                        title=f"CORE Map ({selected_app_label}): {x_ax} vs {y_ax}",
+                        description=f"COREマトリクス分析: {x_ax} (X) × {y_ax} (Y)。対象: {selected_app_label}。",
+                        key=f"core_snap_{x_ax}_{y_ax}_{selected_app_label}", 
+                        fig=fig,
+                        data_summary=snap_data
+                    )
+
 
 
                 render_core_chart(df_target, "main_display")

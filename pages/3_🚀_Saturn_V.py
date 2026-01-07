@@ -514,7 +514,7 @@ with tab_main:
         if not df_ghost.empty:
             ghost_color = '#dddddd'
             ghost_opacity = 0.4
-            fig_main.add_trace(go.Scattergl(
+            fig_main.add_trace(go.Scatter(
                 x=df_ghost['umap_x'], y=df_ghost['umap_y'], mode='markers', 
                 marker=dict(color=ghost_color, size=3, opacity=ghost_opacity, line=dict(width=0)), 
                 hoverinfo='skip', name='その他 (Ghost)'
@@ -526,22 +526,54 @@ with tab_main:
             is_applicant_filtered = "ALL" not in applicant_values
             
             if is_applicant_filtered:
+                # Applicant Drill Down Mode
                 palette = px.colors.qualitative.Bold
                 for i, app_name in enumerate(applicant_values):
                     mask = df_focus[col_map['applicant']].fillna('').str.contains(re.escape(app_name))
                     df_app = df_focus[mask]
                     if not df_app.empty:
-                        fig_main.add_trace(go.Scattergl(
+                        fig_main.add_trace(go.Scatter(
                             x=df_app['umap_x'], y=df_app['umap_y'], mode='markers',
                             marker=dict(color=palette[i % len(palette)], size=6, opacity=0.9, line=marker_line),
                             hoverinfo='text', hovertext=df_app['hover_text'], name=app_name
                         ))
             else:
-                fig_main.add_trace(go.Scattergl(
-                    x=df_focus['umap_x'], y=df_focus['umap_y'], mode='markers', 
-                    marker=dict(color=df_focus['cluster'], colorscale=theme_config["color_sequence"], showscale=False, size=5, opacity=0.8, line=marker_line), 
-                    hoverinfo='text', hovertext=df_focus['hover_text'], name='特許'
-                ))
+                # Standard Mode (Cluster Coloring)
+
+                if 'cluster' in df_focus.columns:
+                    df_focus_valid = df_focus[df_focus['cluster'] != -1]
+                    df_focus_noise = df_focus[df_focus['cluster'] == -1]
+                else:
+                    df_focus_valid = df_focus
+                    df_focus_noise = pd.DataFrame()
+
+                # Plot Valid Clusters
+                if not df_focus_valid.empty:
+                    fig_main.add_trace(go.Scatter(
+                        x=df_focus_valid['umap_x'], y=df_focus_valid['umap_y'], mode='markers', 
+                        marker=dict(
+                            color=df_focus_valid['cluster'], 
+                            colorscale=theme_config["color_sequence"], 
+                            showscale=False, 
+                            size=5, 
+                            opacity=0.8, 
+                            line=marker_line
+                        ), 
+                        hoverinfo='text', hovertext=df_focus_valid['hover_text'], name='特許 (Valid)'
+                    ))
+                
+                # Plot Noise (Separate Trace)
+                if not df_focus_noise.empty:
+                    fig_main.add_trace(go.Scatter(
+                        x=df_focus_noise['umap_x'], y=df_focus_noise['umap_y'], mode='markers', 
+                        marker=dict(
+                            color='#999999', 
+                            size=3, 
+                            opacity=0.3, 
+                            line=dict(width=0)
+                        ), 
+                        hoverinfo='text', hovertext=df_focus_noise['hover_text'], name='Noise'
+                    ))
 
         # ラベル追加
         if show_labels_chk:
@@ -549,9 +581,11 @@ with tab_main:
             target_cids = cluster_values if "ALL" not in cluster_values else label_data_source['cluster'].unique()
             color_sequence = theme_config["color_sequence"]
             sorted_unique_cids = sorted(df_universe['cluster'].unique()) 
-
-            for cid, grp in label_data_source[label_data_source['cluster'].isin(target_cids)].groupby('cluster'):
-                if cid == -1: continue
+            
+            # Filter Noise from labels
+            valid_label_data = label_data_source[label_data_source['cluster'] != -1]
+            
+            for cid, grp in valid_label_data[valid_label_data['cluster'].isin(target_cids)].groupby('cluster'):
                 mean_pos = grp[['umap_x', 'umap_y']].mean()
                 label_txt = grp['cluster_label'].iloc[0]
                 try:
@@ -568,6 +602,44 @@ with tab_main:
 
         norm_msg = " (絶対評価)" if use_abs_scale and map_mode == "密度マップ (Density)" else ""
         utils.update_fig_layout(fig_main, f"Saturn V - メインマップ{norm_msg}", height=1000, theme_config=theme_config)
+        
+
+        # 1. Aspect Ratio: Enforce 1:1 to prevent distortion/squashing.
+        # 2. Focus-Aware: Zoom to Valid Clusters in Focus (Exclude Noise).
+        
+        if not df_focus.empty and 'cluster' in df_focus.columns:
+             # Use only VALID clusters for bounds calculation
+             target_df = df_focus[df_focus['cluster'] != -1]
+        else:
+             target_df = df_focus if not df_focus.empty else df_universe
+             if 'cluster' in target_df.columns:
+                 target_df = target_df[target_df['cluster'] != -1]
+
+        if not target_df.empty:
+             # Calculate bounds
+             x_min, x_max = target_df['umap_x'].min(), target_df['umap_x'].max()
+             y_min, y_max = target_df['umap_y'].min(), target_df['umap_y'].max()
+             
+             # Calculate spread
+             x_range = x_max - x_min
+             y_range = y_max - y_min
+             
+             # Add Padding (10%)
+             pad_factor = 0.1
+             x_pad = x_range * pad_factor if x_range > 0 else 1.0
+             y_pad = y_range * pad_factor if y_range > 0 else 1.0
+             
+             # Apply new ranges with Fixed Aspect Ratio matching
+             fig_main.update_layout(
+                xaxis=dict(range=[x_min - x_pad, x_max + x_pad], autorange=False),
+                yaxis=dict(
+                    range=[y_min - y_pad, y_max + y_pad], 
+                    autorange=False,
+                    scaleanchor="x", 
+                    scaleratio=1
+                )
+             )
+
         st.plotly_chart(fig_main, use_container_width=True, config={
             'editable': True,
             'edits': {
@@ -584,13 +656,39 @@ with tab_main:
         # Snapshot Button
         # Create safe summary
         summary_cols = ['cluster_label']
+        if 'year' in df_universe.columns: summary_cols.append('year')
         if col_map.get('title') and col_map['title'] in df_universe.columns:
             summary_cols.append(col_map['title'])
         if col_map.get('applicant') and col_map['applicant'] in df_universe.columns:
             summary_cols.append(col_map['applicant'])
             
-        snap_data = utils.generate_rich_summary(df_universe)
-        snap_data['chart_data'] = df_universe[summary_cols].head(50).to_string()
+
+        df_summary_source = df_universe[df_universe['cluster'] != -1] if 'cluster' in df_universe.columns else df_universe
+            
+        snap_data = utils.generate_rich_summary(df_summary_source, title_col=col_map['title'], abstract_col=col_map['abstract'])
+        snap_data['module'] = 'Saturn V'
+        
+        # Optimize Chart Data (Prevent Token Overflow)
+        df_snap_safe = df_summary_source[summary_cols].head(30).copy()
+        # Text Truncation
+        for c in summary_cols:
+            if df_snap_safe[c].dtype == object:
+                df_snap_safe[c] = df_snap_safe[c].astype(str).str.slice(0, 50) + "..."
+        
+        snap_data['chart_data'] = df_snap_safe.to_string(index=False)
+        
+
+        try:
+             cluster_counts_snap = df_universe['cluster'].value_counts()
+             cluster_summary_lines = []
+             for cid in sorted(df_universe['cluster'].unique()):
+                 if cid == -1: continue
+                 label = st.session_state.saturnv_labels_map.get(cid, f"Cluster {cid}")
+                 count = cluster_counts_snap.get(cid, 0)
+                 cluster_summary_lines.append(f"- {label} ({count}件)")
+             snap_data['cluster_summary'] = "全クラスタ構成（上位から）:\n" + "\n".join(cluster_summary_lines)
+        except: pass
+        
         utils.render_snapshot_button(
             title=f"特許ランドスケープ ({map_mode})",
             description="技術クラスターと出願の分布を示す俯瞰マップ。",
@@ -847,8 +945,38 @@ with tab_main:
                 }
             })
             
-            snap_data = utils.generate_rich_summary(df_drill)
-            snap_data['chart_data'] = df_drill.head(50).to_string()
+            # Create safe summary
+            summary_cols_d = ['drill_cluster_label']
+            if 'year' in df_drill.columns: summary_cols_d.append('year')
+            if col_map.get('title') and col_map['title'] in df_drill.columns:
+                summary_cols_d.append(col_map['title'])
+            if col_map.get('applicant') and col_map['applicant'] in df_drill.columns:
+                summary_cols_d.append(col_map['applicant'])
+                
+            snap_data = utils.generate_rich_summary(df_drill, title_col=col_map['title'], abstract_col=col_map['abstract'])
+            snap_data['module'] = 'Saturn V'
+            
+            # Optimize Chart Data (Prevent Token Overflow)
+            df_snap_safe_d = df_drill[summary_cols_d].head(30).copy()
+            # Text Truncation
+            for c in summary_cols_d:
+                if df_snap_safe_d[c].dtype == object:
+                    df_snap_safe_d[c] = df_snap_safe_d[c].astype(str).str.slice(0, 50) + "..."
+            
+            snap_data['chart_data'] = df_snap_safe_d.to_string(index=False)
+
+
+            try:
+                 cluster_counts_snap_d = df_drill['drill_cluster'].value_counts()
+                 cluster_summary_lines_d = []
+                 for cid in sorted(df_drill['drill_cluster'].unique()):
+                     if cid == -1: continue
+                     label = drill_labels_map.get(cid, f"Sub-Cluster {cid}")
+                     count = cluster_counts_snap_d.get(cid, 0)
+                     cluster_summary_lines_d.append(f"- {label} ({count}件)")
+                 snap_data['cluster_summary'] = f"サブクラスタ構成 ({st.session_state.drill_base_label}):\n" + "\n".join(cluster_summary_lines_d)
+            except: pass
+
             utils.render_snapshot_button(
                 title=f"Saturn V ドリルダウン: {st.session_state.drill_base_label}",
                 description="選択したクラスターの詳細マップ。",

@@ -212,7 +212,7 @@ def render_sidebar():
     with st.sidebar:
         st.title("APOLLO") 
         st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
-        st.markdown("**v5.1.0**")
+        st.markdown("**v5.2.0**")
         st.markdown("---")
         st.subheader("Home"); st.page_link("Home.py", label="Mission Control", icon="🛰️")
         st.subheader("Modules")
@@ -374,15 +374,53 @@ def generate_rich_summary(df_target, title_col='title', abstract_col='abstract',
                 
                 # データ取得
                 reps = []
+                invalid_count = 0
+                
+                # Column mapping for enhanced info
+                col_map = st.session_state.get('col_map', {})
+                app_col = col_map.get('applicant', 'applicant')
+                
                 for idx in top_global_indices:
                     try:
                         row = st.session_state.df_main.loc[idx]
-                        title = str(row.get(title_col, 'No Title')).replace('\n', ' ')
-                        abstract = str(row.get(abstract_col, 'No Abstract')).replace('\n', ' ')[:200] + "..." # 長すぎたらカット
-                        reps.append(f"- 【{title}】 {abstract}")
+                        t_val = str(row.get(title_col, ''))
+                        a_val = str(row.get(abstract_col, ''))
+                        
+                        # Enhanced Info
+                        y_val = str(row.get('year', 'N/A'))
+                        app_val = "N/A"
+                        if app_col and app_col in row:
+                            val = row[app_col]
+                            if isinstance(val, list):
+                                # Clean join: Filter out None/nan/invalid
+                                clean_vals = [str(x).strip() for x in val if x and str(x).lower() != 'nan']
+                                app_val = ", ".join(clean_vals)
+                            else: app_val = str(val)
+                        
+                        # Check validity
+                        if (not t_val or t_val == 'nan') and (not a_val or a_val == 'nan'):
+                             invalid_count += 1
+                             title = "No Title"
+                             abstract = "No Abstract"
+                        else:
+                             title = t_val if t_val and t_val != 'nan' else "No Title"
+                             abstract = a_val if a_val and a_val != 'nan' else "No Abstract"
+                        
+                        title = title.replace('\n', ' ')
+                        abstract = abstract.replace('\n', ' ')[:200] + "..." 
+                        
+                        # Clean up Applicant (truncate if too long)
+                        if len(app_val) > 30: app_val = app_val[:30] + "..."
+                        
+                        reps.append(f"- 【{title}】 (出願: {y_val}, {app_val}) {abstract}")
                     except: pass
                 
-                summary['representatives'] = reps
+                # If mostly invalid, don't show
+                if len(reps) > 0 and (invalid_count / len(reps)) > 0.5:
+                     summary['representatives'] = [] # Suppress
+                else:
+                     summary['representatives'] = reps
+
         except Exception as e:
             summary['error'] = str(e)
 
@@ -402,12 +440,17 @@ def render_snapshot_button(title, description, key, fig=None, data_summary=None)
     btn_type = "primary" if not is_saved else "secondary"
     
     if st.button(btn_label, key=f"snap_btn_{key}", type=btn_type, disabled=is_saved):
+        # Determine Module Name (Prioritize data_summary['module'] if available)
+        module_name = st.session_state.get('current_page', 'Unknown')
+        if data_summary and isinstance(data_summary, dict) and 'module' in data_summary:
+            module_name = data_summary['module']
+
         snapshot_data = {
             'id': key,
             'title': title,
             'description': description,
             'data_summary': data_summary,
-            'module': st.session_state.get('current_page', 'Unknown'),
+            'module': module_name,
             'timestamp': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
@@ -420,11 +463,46 @@ def render_snapshot_button(title, description, key, fig=None, data_summary=None)
                 # Plotly
                 if hasattr(fig, 'to_image'):
                     try:
-                        # kaleido needed
-                        # Force width to 1200 unless specified to prevent 700 default (which causes square/vertical layout on tall charts)
-                        current_width = fig.layout.width if fig.layout.width else 1200
-                        # Keep scale=2 for high resolution -> Reduced to 1.5 for performance
-                        img_bytes = fig.to_image(format="png", width=current_width, scale=1.5)
+                        # --- Smart Resolution & Aspect Ratio ---
+                        # Base Width for High-Res
+                        base_width = 1600
+                        use_width = base_width
+                        use_height = 1000 # Default fallback
+                        
+                        # 1. Map Mode (Saturn V): Match Data Aspect Ratio (1:1)
+                        # 2. Chart Mode (ATLAS): Enforce Wide Format (16:9)
+                        
+                        is_saturn_v = module_name == 'Saturn V'
+                        
+                        try:
+                            if is_saturn_v:
+                                # SATURN V: Calculate aspect ratio from axis ranges
+                                xaxis = fig.layout.xaxis
+                                yaxis = fig.layout.yaxis
+                                if xaxis.range and yaxis.range:
+                                    x_range = xaxis.range[1] - xaxis.range[0]
+                                    y_range = yaxis.range[1] - yaxis.range[0]
+                                    if x_range > 0 and y_range > 0:
+                                        # Calculate height to match data aspect ratio
+                                        ratio = x_range / y_range
+                                        calc_height = base_width / ratio
+                                        # Clamp height slightly less aggressively for maps
+                                        calc_height = max(600, min(calc_height, 2400))
+                                        use_height = int(calc_height)
+                                    else:
+                                        use_height = int(base_width * 0.618)
+                                else:
+                                    # Fallback if no ranges
+                                    use_height = 1000
+                            else:
+                                # ATLAS / Charts: Standard Wide Format (16:9)
+                                use_height = int(base_width * 9 / 16)
+                                
+                        except:
+                            use_height = 1000
+
+                        # Increase scale to 3.0 for Ultra High Res
+                        img_bytes = fig.to_image(format="png", width=use_width, height=use_height, scale=3.0)
                     except Exception as e:
                         snapshot_data['image_error'] = f"Plotly Image Error (Kaleido): {str(e)}"
                         st.warning(f"画像化に失敗しました (Kaleido Check): {e}")

@@ -219,8 +219,22 @@ with tab1:
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
         # Snapshot Button
-        snap_data = utils.generate_rich_summary(df_filtered)
-        snap_data['chart_data'] = plot_data.head(50).to_string()
+        # Snapshot Button
+        snap_data = utils.generate_rich_summary(df_filtered, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=0)
+        snap_data['module'] = 'ATLAS'
+        
+        # Optimize Chart Data
+        # Optimize Chart Data (Wide Format: Year | Total Only)
+
+        if 'year' in plot_data.columns and 'count' in plot_data.columns:
+             # Group by Year and Sum Count, ignoring Status
+             df_snap_safe = plot_data.groupby('year')['count'].sum().reset_index()
+             df_snap_safe['year'] = df_snap_safe['year'].astype(int)
+        else:
+            df_snap_safe = plot_data.copy()
+            
+        # Ensure we don't exceed token limits but prioritize showing full year range
+        snap_data['chart_data'] = df_snap_safe.head(50).to_string(index=False)
         utils.render_snapshot_button(
             title=f"出願件数推移 ({int(stats_start_year)}-{int(stats_end_year)})",
             description="市場全体の出願動向を示すトレンドグラフ。",
@@ -291,7 +305,7 @@ with tab1_line:
                                   color_discrete_map=status_color_map,
                                   category_orders={status_col: sorted(status_color_map.keys())}
                                  )
-                    fig.update_layout(title=dict(text=f'全体件数推移・内訳 ({int(stats_start_year)}年～{int(stats_end_year)}年)', font=dict(size=18)))
+                    fig.update_layout(title=dict(text=f'全体件数推移・内訳 ({int(stats_start_year)}年～{int(stats_end_year)}年)', font=dict(size=18)), yaxis=dict(rangemode='tozero'))
                     
                 else:
                     # Overall Trend (Standard Line)
@@ -303,7 +317,7 @@ with tab1_line:
                                   labels={'year': '出願年', 'count': '出願件数'},
                                   color_discrete_sequence=[theme_config["color_sequence"][0]])
                     
-                    fig.update_layout(title=dict(text=f'全体件数推移 ({int(stats_start_year)}年～{int(stats_end_year)}年)', font=dict(size=18)))
+                    fig.update_layout(title=dict(text=f'全体件数推移 ({int(stats_start_year)}年～{int(stats_end_year)}年)', font=dict(size=18)), yaxis=dict(rangemode='tozero'))
 
             else: # Applicant Comparison
                 if not target_applicants:
@@ -318,13 +332,25 @@ with tab1_line:
                     if df_target.empty:
                         st.warning("選ばれた出願人のデータが期間内にありません。")
                     else:
-                        plot_data = df_target.groupby(['year', 'assignee_parsed']).size().reset_index(name='count')
+                        # Ensure all years are represented for each applicant (fill 0)
+                        full_years = range(int(stats_start_year), int(stats_end_year) + 1)
+                        plot_data_list = []
+                        
+                        for app in target_applicants:
+                            sub = df_target[df_target['assignee_parsed'] == app]
+                            yearly = sub['year'].value_counts().sort_index()
+                            yearly = yearly.reindex(full_years, fill_value=0).reset_index()
+                            yearly.columns = ['year', 'count']
+                            yearly['assignee_parsed'] = app
+                            plot_data_list.append(yearly)
+                            
+                        plot_data = pd.concat(plot_data_list, ignore_index=True)
                         
                         fig = px.line(plot_data, x='year', y='count', color='assignee_parsed', markers=True,
                                       labels={'year': '出願年', 'count': '出願件数', 'assignee_parsed': '出願人'},
                                       color_discrete_sequence=theme_config["color_sequence"])
                         
-                        fig.update_layout(title=dict(text='主要出願人の件数推移比較', font=dict(size=18)))
+                        fig.update_layout(title=dict(text='主要出願人の件数推移比較', font=dict(size=18)), yaxis=dict(rangemode='tozero'))
             
             if fig:
                 update_fig_layout(fig, '件数推移(折れ線)', theme_config=theme_config)
@@ -342,9 +368,20 @@ with tab1_line:
         data = st.session_state['atlas_data_trend_line']
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
-        
-        snap_data = utils.generate_rich_summary(df_filtered if 'df_target' not in locals() else df_target)
-        snap_data['chart_data'] = data.head(50).to_string() if data is not None else "No Data"
+        # Snapshot Button
+        snap_data = utils.generate_rich_summary(df_filtered if 'df_target' not in locals() else df_target, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=0)
+        snap_data['module'] = 'ATLAS'
+        # Optimize Chart Data
+        # Optimize Chart Data (Wide Format for Applicants)
+        if data is not None and not data.empty:
+             if 'assignee_parsed' in data.columns:
+                 # Pivot: Year | App A | App B ...
+                 df_pivot = data.pivot(index='year', columns='assignee_parsed', values='count').fillna(0).astype(int).reset_index()
+                 snap_data['chart_data'] = df_pivot.head(40).to_string(index=False)
+             else:
+                 snap_data['chart_data'] = data.head(40).to_string(index=False)
+        else:
+             snap_data['chart_data'] = "No Data"
         utils.render_snapshot_button(
             title="件数推移 (折れ線)",
             description="出願件数の時系列推移（折れ線グラフ）。全体または特定出願人の比較。",
@@ -407,8 +444,15 @@ with tab2:
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
         # Snapshot Button
-        snap_data = utils.generate_rich_summary(df_filtered)
-        snap_data['chart_data'] = assignee_counts.head(50).to_string()
+        # Snapshot Button
+        snap_data = utils.generate_rich_summary(df_filtered, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=0)
+        snap_data['module'] = 'ATLAS'
+        
+        # Optimize Chart Data
+        df_snap_safe = assignee_counts.head(30).reset_index()
+        df_snap_safe.columns = ['Applicant', 'Count']
+        df_snap_safe['Applicant'] = df_snap_safe['Applicant'].astype(str).str.slice(0, 50)
+        snap_data['chart_data'] = df_snap_safe.to_string(index=False)
         utils.render_snapshot_button(
             title=f"主要出願人ランキング ({int(stats_start_year)}-{int(stats_end_year)})",
             description="特許出願件数に基づく市場の主要プレイヤーランキング。",
@@ -443,8 +487,15 @@ with tab3:
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
         # Snapshot Button
-        snap_data = utils.generate_rich_summary(df_filtered)
-        snap_data['chart_data'] = data.head(50).to_string()
+        # Snapshot Button
+        # Snapshot Button
+        snap_data = utils.generate_rich_summary(df_filtered, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=0)
+        snap_data['module'] = 'ATLAS'
+        
+        # Optimize Chart Data
+        df_snap_safe = data.head(30).reset_index()
+        df_snap_safe.columns = ['IPC', 'Count']
+        snap_data['chart_data'] = df_snap_safe.to_string(index=False)
         utils.render_snapshot_button(
             title=f"IPCランキング ({ipc_level_map3[1]})",
             description="技術分野 (IPC) 別の上位ランキング。",
@@ -634,9 +685,12 @@ with tab4:
                         title=dict(text=f'出願年別 出願人動向 (内訳: {status_col})', font=dict(size=18, weight="normal"))
                     )
                     
-                    # Save to unified state
-                    st.session_state['atlas_fig_bubble_tab4'] = fig
-                    st.session_state['atlas_data_bubble_tab4'] = df_target.head(20) # Approx summary
+                # Save to unified state
+                st.session_state['atlas_fig_bubble_tab4'] = fig
+
+                # Re-create grid data for state storage since it was local
+                grid_data_export = df_target.groupby(['year', 'assignee_parsed', status_col]).size().reset_index(name='count')
+                st.session_state['atlas_data_bubble_tab4'] = grid_data_export
             else:
                 # Standard Bubble Chart
                 plot_data = df_target.groupby(['year', 'assignee_parsed']).size().reset_index(name='件数')
@@ -682,8 +736,44 @@ with tab4:
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
-        snap_data = utils.generate_rich_summary(data)
-        snap_data['chart_data'] = data.to_string() if hasattr(data, 'to_string') else "Data Summary"
+        # Snapshot Button
+        # Snapshot Button
+        snap_data = utils.generate_rich_summary(data, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=0)
+        snap_data['module'] = 'ATLAS'
+        
+        # Optimize Chart Data
+        # Optimize Chart Data
+        if hasattr(data, 'head'):
+
+             # Copy data to avoid mutating session state
+             chart_df = data.copy()
+             
+             # Normalize column names (件数 -> count)
+             if '件数' in chart_df.columns:
+                 chart_df.rename(columns={'件数': 'count'}, inplace=True)
+             
+             # If data is 'grid_data_export' (Year, Applicant, Status, Count) or 'plot_data' (Year, Applicant, Count)
+             
+             # Filter only necessary columns
+             target_cols = [c for c in ['year', 'assignee_parsed', 'count', status_col] if c in chart_df.columns]
+             df_snap_safe = chart_df[target_cols].copy()
+             
+             # Format
+             if 'assignee_parsed' in df_snap_safe.columns:
+                 df_snap_safe['assignee_parsed'] = df_snap_safe['assignee_parsed'].astype(str).str.slice(0, 30)
+             
+             # Pivot for readability (Year | App | Count...) is still long.
+             # Maybe Pivot: Year vs Applicant (Values = Total Count)
+             if 'year' in df_snap_safe.columns and 'assignee_parsed' in df_snap_safe.columns:
+                 # Aggregate to remove status if just showing bubble position
+                 df_pivot = df_snap_safe.groupby(['year', 'assignee_parsed'])['count'].sum().reset_index()
+                 df_pivot = df_pivot.pivot(index='year', columns='assignee_parsed', values='count').fillna(0).astype(int).reset_index()
+                 snap_data['chart_data'] = df_pivot.head(40).to_string(index=False)
+             else:
+                 snap_data['chart_data'] = df_snap_safe.head(40).to_string(index=False)
+        else:
+             snap_data['chart_data'] = "Data Summary"
+
         utils.render_snapshot_button(
             title="出願年別 出願人バブルチャート",
             description="主要出願人の時系列活動量 (内訳含む)",
@@ -725,8 +815,17 @@ with tab5:
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
-        snap_data = utils.generate_rich_summary(data)
-        snap_data['chart_data'] = data.head(50).to_string()
+        # Snapshot Button
+        # Snapshot Button
+        snap_data = utils.generate_rich_summary(data, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=0)
+        snap_data['module'] = 'ATLAS'
+        
+        # Optimize Chart Data (IPC Bubble)
+        df_snap_safe = data.head(30).copy()
+        if 'assignee_parsed' in df_snap_safe.columns:
+             df_snap_safe['assignee_parsed'] = df_snap_safe['assignee_parsed'].astype(str).str.slice(0, 50)
+        snap_data['chart_data'] = df_snap_safe.to_string(index=False)
+
         utils.render_snapshot_button(
             title=f"IPC x 出願人 ポートフォリオ",
             description="主要出願人の技術分野（IPC）ごとの注力度合いを示すバブルチャート。",
@@ -770,8 +869,16 @@ with tab6:
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
-        snap_data = utils.generate_rich_summary(df_filtered)
-        snap_data['chart_data'] = data.head(50).to_string()
+        # Snapshot Button
+        snap_data = utils.generate_rich_summary(df_filtered, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=0)
+        snap_data['module'] = 'ATLAS'
+        
+        # Optimize Chart Data (Treemap)
+        df_snap_safe = data.head(30).copy()
+        if 'Applicant' in df_snap_safe.columns:
+             df_snap_safe['Applicant'] = df_snap_safe['Applicant'].astype(str).str.slice(0, 50)
+        snap_data['chart_data'] = df_snap_safe.to_string(index=False)
+
         utils.render_snapshot_button(
             title="構成比マップ (Treemap)",
             description="技術分野または出願人のシェア構成を示すツリーマップ。",
@@ -864,8 +971,12 @@ with tab7:
         * **左下へ戻る**: プレイヤーも出願も減っている「衰退期」または「ニッチ化」。
         """)
         
-        snap_data = utils.generate_rich_summary(df_filtered)
-        snap_data['chart_data'] = data.head(50).to_string()
+        snap_data = utils.generate_rich_summary(df_filtered, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=0)
+        snap_data['module'] = 'ATLAS'
+        
+        # Optimize Chart Data (Lifecycle)
+        df_snap_safe = data.head(30).copy()
+        snap_data['chart_data'] = df_snap_safe.to_string(index=False)
         utils.render_snapshot_button(
             title="技術ライフサイクルマップ",
             description="出願件数と出願人数（参入企業数）の相関から、技術の成熟度を診断するマップ。",

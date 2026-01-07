@@ -312,7 +312,8 @@ if selected_tab == "Global Overview":
                 edges_str = ", ".join([f"{u}-{v}" for u, v, d in sorted_edges])
 
                 # Combine with Rich Summary
-                snap_data = utils.generate_rich_summary(df_main)
+                snap_data = utils.generate_rich_summary(df_main, title_col=col_map['title'], abstract_col=col_map['abstract'])
+                snap_data['module'] = 'Explorer'
                 snap_data['network_stats'] = {
                     "communities": "; ".join(comm_summary),
                     "hubs": hubs_str,
@@ -399,7 +400,7 @@ elif selected_tab == "Trend Analysis":
                     description=f"直近期間 [{periods[0][0]}-{periods[0][1]}] で急増したキーワード。",
                     key="exp_growth_snap",
                     fig=fig_growth,
-                    data_summary=df_growth.to_string()
+                    data_summary=df_growth.to_string(index=False)
                 )
         else:
             st.warning("比較対象となる過去のデータ期間が不足しています。")
@@ -480,7 +481,8 @@ elif selected_tab == "Trend Analysis":
             sorted_edges = sorted(G.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:10]
             edges_str = ", ".join([f"{u}-{v}" for u, v, d in sorted_edges])
 
-            snap_data = utils.generate_rich_summary(df_target)
+            snap_data = utils.generate_rich_summary(df_target, title_col=col_map['title'], abstract_col=col_map['abstract'])
+            snap_data['module'] = 'Explorer'
             snap_data['network_stats'] = {
                 "hubs": hubs_str,
                 "edges": edges_str,
@@ -576,7 +578,7 @@ elif selected_tab == "Comparative Strategy":
                 description="キーワード出現頻度の直接比較。左右への突出が各社の特徴を示す。",
                 key="exp_tornado_snap",
                 fig=fig_tornado,
-                data_summary=df_tornado[['Keyword', 'My Abs', 'Competitor Count']].tail(20).to_string()
+                data_summary=df_tornado[['Keyword', 'My Abs', 'Competitor Count']].tail(20).to_string(index=False)
             )
 
         # 2. ワードクラウド
@@ -660,7 +662,8 @@ elif selected_tab == "Comparative Strategy":
             sorted_edges = sorted(G.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:10]
             edges_str = ", ".join([f"{u}-{v}" for u, v, d in sorted_edges])
 
-            snap_data = utils.generate_rich_summary(df_2)
+            snap_data = utils.generate_rich_summary(df_2, title_col=col_map['title'], abstract_col=col_map['abstract'])
+            snap_data['module'] = 'Explorer'
             snap_data['network_stats'] = {
                 "hubs": hubs_str,
                 "edges": edges_str,

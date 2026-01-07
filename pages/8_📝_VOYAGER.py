@@ -4,6 +4,7 @@ import os
 import utils
 import matplotlib.pyplot as plt
 import japanize_matplotlib
+import pdf_generator
 
 # ライブラリの動的インポート (エラーハンドリング用)
 try:
@@ -38,17 +39,46 @@ class LLMClient:
         if self.error_msg:
             raise ValueError(self.error_msg)
 
-        try:
-            if self.provider == "Google Gemini":
-                model = genai.GenerativeModel(self.model_name)
-                # Gemini 1.5 Pro以降のモデル対応
-                # System promptは本来 system_instruction で渡すべきですが、簡易的に結合して処理します
-                full_prompt = f"【System Instructions】\n{system_prompt}\n\n【User Request】\n{user_prompt}"
-                response = model.generate_content(full_prompt)
-                return response.text
+        import time
+        import re
 
-        except Exception as e:
-            raise RuntimeError(f"LLM生成エラー: {e}")
+        max_retries = 3
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                if self.provider == "Google Gemini":
+                    model = genai.GenerativeModel(self.model_name)
+                    # Gemini 1.5 Pro以降のモデル対応
+                    full_prompt = f"【System Instructions】\n{system_prompt}\n\n【User Request】\n{user_prompt}"
+                    response = model.generate_content(full_prompt)
+                    return response.text
+
+            except Exception as e:
+                error_str = str(e)
+                last_error = e
+                # Check for Rate Limit (429) or Quota Exceeded
+                if "429" in error_str or "Quota exceeded" in error_str or "Resource has been exhausted" in error_str:
+                    if attempt < max_retries - 1:
+                        wait_time = 60 # Safe default
+                        # Try to parse wait time from error message
+                        match = re.search(r'retry in (\d+(\.\d+)?)s', error_str)
+                        if match:
+                            wait_time = float(match.group(1)) + 10 # Add 10s buffer
+                        
+                        st.toast(f"⏳ Rate Limit Hit. Retrying in {int(wait_time)}s... ({attempt+1}/{max_retries})", icon="⚠️")
+                        
+                        # Use progress bar for waiting if possible, or just sleep
+                        with st.empty():
+                            for i in range(int(wait_time), 0, -1):
+                                st.write(f"⚠️ API Quota Limit. Waiting {i} seconds to retry...")
+                                time.sleep(1)
+                        continue
+                
+                # If not a retryable error or max retries reached
+                break
+        
+        raise RuntimeError(f"LLM Generation Failed: {last_error}")
 
 # ==================================================================
 # --- ページ設定 ---
@@ -195,8 +225,6 @@ with col_obj:
 # ==================================================================
 # --- 5. Report Generation ---
 # ==================================================================
-# --- 5. Report Generation ---
-# ==================================================================
 report_placeholder = st.empty()
 generated_report = ""
 
@@ -214,62 +242,103 @@ with col_act:
     st.write("")
     
     # Validation
-    missing_items = []
-    if not final_api_key:
-        missing_items.append("API Key (Google API Key)")
+    missing_items_common = []
     if len(snapshots) == 0:
-        missing_items.append("Snapshots (分析の証拠画像)")
+        missing_items_common.append("Snapshots (分析の証拠画像)")
     if len(mission_objective) <= 5:
-        missing_items.append("Mission Objective (5文字以上の目的記述)")
+        missing_items_common.append("Mission Objective (5文字以上の目的記述)")
 
-    is_ready = len(missing_items) == 0
+    missing_items_gen = missing_items_common.copy()
+    if not final_api_key:
+        missing_items_gen.append("API Key (Google API Key)")
+
+    is_ready_preview = len(missing_items_common) == 0
+    is_ready_gen = len(missing_items_gen) == 0
     
-    if not is_ready:
-        st.warning(f"⚠️ レポート生成には以下が必要です: {', '.join(missing_items)}")
+    if not is_ready_gen:
+        if not is_ready_preview:
+             st.warning(f"⚠️ プレビュー・生成には以下が必要です: {', '.join(missing_items_common)}")
+        elif not final_api_key:
+             st.info("ℹ️ API Keyが未設定のため、レポート生成はできませんが、「プロンプト・プレビュー」は利用可能です。")
 
-    if st.button("🚀 Analyze & Generate Report", type="primary", disabled=not is_ready):
-        
+    # --- Prompt Construction Helper ---
+    def build_voyager_prompts(objective, current_snapshots, mode):
         # 1. Context Construction
-        context_str = f"## Mission Objective\n{mission_objective}\n\n## Collected Evidence (Snapshots)\n"
-        for i, snap in enumerate(snapshots):
-            context_str += f"\n### Evidence {i+1}: {snap['title']}\n"
-            context_str += f"- Description: {snap['description']}\n"
-            context_str += f"- Source Module: {snap['module']}\n"
+        c_str = f"## Mission Objective\n{objective}\n\n## Collected Evidence (Snapshots)\n"
+        for i, snap in enumerate(current_snapshots):
+            c_str += f"\n### Evidence {i+1}: {snap['title']}\n"
+            c_str += f"- Description: {snap.get('description', '')}\n" # Safeguard get
+            c_str += f"- Source Module: {snap.get('module', 'Unknown')}\n"
             
             # --- STRUCTURED DATA HANDLING (v5.1 High-Res) ---
-            data_sum = snap.get('data_summary', '')
+            
+            # Recursive Cleaner for List Artifacts (['a', 'b'] -> "a, b")
+            def clean_data_for_prompt(data, key=None):
+                # Don't flatten 'representatives' list, as it is iterated later
+                if key == 'representatives' and isinstance(data, list):
+                     return data
+                     
+                if isinstance(data, dict):
+                    return {k: clean_data_for_prompt(v, k) for k, v in data.items()}
+                elif isinstance(data, list):
+                    # Join lists into clean strings
+                    return ", ".join([str(x) for x in data if x is not None])
+                elif isinstance(data, (int, float)):
+                    return data
+                elif isinstance(data, str):
+                    return data
+                else:
+                    return str(data)
+
+            raw_data_sum = snap.get('data_summary', '')
+            data_sum = clean_data_for_prompt(raw_data_sum) if isinstance(raw_data_sum, dict) else raw_data_sum
+            
             if isinstance(data_sum, dict):
                 # 統計情報
                 if 'stats' in data_sum:
                     s = data_sum['stats']
-                    context_str += f"- [Statistics]\n"
-                    if 'cagr' in s: context_str += f"  - CAGR: {s['cagr']} (Trend: {s.get('trend', 'N/A')})\n"
-                    if 'hhi' in s: context_str += f"  - HHI: {s['hhi']:.3f} ({s.get('hhi_status', 'N/A')})\n"
+                    c_str += f"- [Statistics]\n"
+                    if 'cagr' in s: c_str += f"  - CAGR: {s['cagr']} (Trend: {s.get('trend', 'N/A')})\n"
+                    if 'hhi' in s: c_str += f"  - HHI: {s['hhi']:.3f} ({s.get('hhi_status', 'N/A')})\n"
                 
                 # 代表特許
                 if 'representatives' in data_sum and data_sum['representatives']:
-                     context_str += f"- [Representative Patents (Top {len(data_sum['representatives'])})]\n"
+                     c_str += f"- [Representative Patents (Top {len(data_sum['representatives'])})]\n"
                      for rep in data_sum['representatives']:
-                         context_str += f"  {rep}\n"
+                         c_str += f"  {rep}\n"
                 
                 # Chart Data (Numerical values)
                 if 'chart_data' in data_sum:
-                    context_str += f"- [Chart Data]\n{data_sum['chart_data']}\n"
+                    c_str += f"- [Chart Data]\n{data_sum['chart_data']}\n"
 
                 # Network Statistics (Graph Analysis)
                 if 'network_stats' in data_sum:
                     ns = data_sum['network_stats']
-                    context_str += f"- [Network Structure Analysis]\n"
-                    if 'hubs' in ns: context_str += f"  - Top Hubs (Centrality): {ns['hubs']}\n"
-                    if 'edges' in ns: context_str += f"  - Strongest Connections: {ns['edges']}\n"
-                    if 'communities' in ns: context_str += f"  - Community Groups: {ns['communities']}\n"
+                    c_str += f"- [Network Structure Analysis]\n"
+                    
+                    def clean_join(val):
+                        if isinstance(val, list):
+                            return ", ".join([str(x) for x in val if x])
+                        return str(val)
+
+                    if 'hubs' in ns: c_str += f"  - Top Hubs (Centrality): {clean_join(ns['hubs'])}\n"
+                    if 'edges' in ns: c_str += f"  - Strongest Connections: {clean_join(ns['edges'])}\n"
+                    if 'communities' in ns: c_str += f"  - Community Groups: {clean_join(ns['communities'])}\n"
+                
+
+                if 'cluster_summary' in data_sum:
+                    c_str += f"- [Cluster Composition]\n{data_sum['cluster_summary']}\n"
+                
+
+                if 'matrix_context' in data_sum:
+                    c_str += f"- [Context Note] {data_sum['matrix_context']}\n"
                 
                 # エラー情報など
                 if 'error' in data_sum:
-                     context_str += f"- [Note] Data extraction partial error: {data_sum['error']}\n"
+                     c_str += f"- [Note] Data extraction partial error: {data_sum['error']}\n"
             else:
                 # Legacy String
-                context_str += f"- Data Summary: {data_sum}\n"
+                c_str += f"- Data Summary: {data_sum}\n"
         
         # 2. System Prompt Selection
         system_prompt_std = """
@@ -280,8 +349,10 @@ with col_act:
         ### ルール
         1. **証拠の解釈:** 各Snapshotの `Title` (例: "技術ライフサイクル", "Treemap", "Network") と `Description` を注意深く読み取り、それがどのような分析視点（時系列、シェア、関係性、成長度など）を提供しているかを正確に理解すること。
         2. **証拠に基づく論証:** 必ず提供されたスナップショットの内容を引用・参照して論を展開すること。
-        3. **画像の配置:** 文中で特定の証拠（スナップショット）に言及する際は、その場所に `[[Evidence X]]` というプレースホルダーを挿入すること（XはEvidence番号）。これにより、レポート表示時に実際の画像がそこに埋め込まれます。
-           - 例: "...右肩上がりの推移を示しています。[[Evidence 1]] このことから..."
+        3. **画像の配置:** 文中で特定の証拠（スナップショット）に言及する際は、**必ず段落の末尾や一塊の文章の終わり**に `[[Evidence X]]` を挿入すること。
+           - **絶対ルール:** 文章の途中や、「。」の直前・直後以外の場所（文中）に画像を挿入してはならない。読解を妨げるため、必ず改行前や段落の区切りに置くこと。
+           - 正しい例: "...右肩上がりの推移を示しています。[[Evidence 1]]\n\nこのことから..."
+           - 悪い例: "...推移を示して[[Evidence 1]]います..."
         4. **目的志向:** ユーザーの「問い」に対して明確な答えや仮説を提示すること。
         5. **構造化:** 以下の構成で出力すること。
            - **Executive Summary:** 3行要約。
@@ -304,15 +375,21 @@ with col_act:
             -   各Evidenceについて、単に「何が起きているか」だけでなく「なぜ起きているか（技術的・事業的背景）」「次に何が起きるか」まで踏み込んで考察してください。
             -   **すべてのEvidence** を必ず論証に組み込んでください。
 
-        2.  **Scenario Planning (シナリオプランニング):**
+        2.  **Matrix & White Space Analysis (マトリクス分析):**
+            -   Evidenceに「COREマトリクス」が含まれる場合、以下の視点で分析してください。
+                -   **Hotspots (Red Ocean):** 特許が集中している領域。競合が激しい成熟市場。
+                -   **White Spaces (Blue Ocean):** 特許が極端に少ない（またはゼロの）領域。ここが「未開拓の機会」なのか、それとも「実現不可能な組み合わせ」なのかを技術的知見から推論してください。
+            -   **[Chart Data]** のCSVデータ（行列データ）を詳細に読み解き、具体的なカテゴリ名の組み合わせ（例: 「技術A」×「課題B」は空白であるため...）を指摘してください。
+
+        3.  **Scenario Planning (シナリオプランニング):**
             -   単一の予測だけでなく、以下の3つのシナリオを提示してください。
                 -   **Probable Scenario (蓋然性が高い未来):** 現状の延長線。
                 -   **Best Case (自社にとっての好機):** 自社技術が市場標準となる、または競合が失速するケース。
                 -   **Risk Scenario (脅威の顕在化):** 技術パラダイムシフトや新規参入によるディスラプション。
 
-        3.  **Strict Evidence Linking:**
+        4.  **Strict Evidence Linking:**
             -   すべての主張は、提供された `[[Evidence X]]` によって裏付けられている必要があります。
-            -   画像プレースホルダー `[[Evidence X]]` を文脈に合わせて適切な位置に配置してください（各セクションに最低1つ以上）。
+            - 画像プレースホルダー `[[Evidence X]]` は、**必ず段落やセクションの最後**に配置してください。文中の挿入は禁止です。
 
         ### Report Structure (Output Format)
         以下のセクション構成を厳守してください。
@@ -343,16 +420,39 @@ with col_act:
         **情報の正確性:** ランキング上位に含まれていない企業や技術（圏外データ）について言及する場合は、必ず「**ランキング上位には含まれていませんが**」や「**圏外ですが**」といった前置きを行い、ユーザーに誤解を与えないこと。
         """
 
-        system_prompt = system_prompt_deep if "Deep Dive" in report_mode else system_prompt_std
-        
-        with st.spinner("VOYAGER AI is analyzing your snapshots..."):
-            try:
-                client = LLMClient(llm_provider, final_api_key, llm_model)
-                generated_report = client.generate_text(system_prompt, context_str)
-                st.session_state['last_report'] = generated_report
-                st.success("Analysis Complete!")
-            except Exception as e:
-                st.error(f"Error: {e}")
+        sys_p = system_prompt_deep if "Deep Dive" in mode else system_prompt_std
+        return sys_p, c_str
+
+    col_btn_1, col_btn_2 = st.columns([1, 1])
+
+    with col_btn_1:
+        if st.button("📜 Preview Prompt (APIなし)", help="AIに送るプロンプトを確認・コピーします。APIは消費しません。", disabled=not is_ready_preview):
+            sys_p, user_c = build_voyager_prompts(mission_objective, snapshots, report_mode)
+            full_text = f"【System Instructions】\n{sys_p}\n\n【User Request & Data】\n{user_c}"
+            st.session_state['voyager_prompt_preview'] = full_text
+            st.toast("プロンプトを生成しました！下の画面で確認してください。", icon="📋")
+
+    with col_btn_2:
+        if st.button("🚀 Analyze & Generate Report", type="primary", disabled=not is_ready_gen):
+            sys_p, user_c = build_voyager_prompts(mission_objective, snapshots, report_mode)
+            
+            with st.spinner("VOYAGER AI is analyzing your snapshots..."):
+                try:
+                    client = LLMClient(llm_provider, final_api_key, llm_model)
+                    generated_report = client.generate_text(sys_p, user_c)
+                    st.session_state['last_report'] = generated_report
+                    st.success("Analysis Complete!")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # Prompt Preview Area
+    if 'voyager_prompt_preview' in st.session_state and st.session_state['voyager_prompt_preview']:
+        with st.expander("📜 Prompt Window (Copy & Paste to ChatGPT/Claude)", expanded=True):
+            st.info("以下のプロンプトをコピーして、お好みのAIチャットボットに貼り付けて分析させることも可能です。")
+            st.code(st.session_state['voyager_prompt_preview'], language='markdown')
+            if st.button("Close Preview", key="close_preview"):
+                del st.session_state['voyager_prompt_preview']
+                st.rerun()
 
 # Display Report
 if 'last_report' in st.session_state:
@@ -394,3 +494,28 @@ if 'last_report' in st.session_state:
         with st.expander("📋 Copy Report Text (Markdown)", expanded=False):
             st.code(generated_report, language="markdown")
             st.info("右上のコピーボタンでテキストをクリップボードにコピーできます。画像は「右クリック→画像をコピー」で取得してください。")
+
+        # 3. PDF Download
+        st.markdown("---")
+        col_pdf, _ = st.columns([1, 2])
+        with col_pdf:
+            if pdf_generator.HAS_REPORTLAB:
+                # Generate PDF if not already in session (lazy load for old sessions)
+                if 'last_pdf' not in st.session_state or st.session_state.get('last_pdf_source') != generated_report:
+                     with st.spinner("Generating PDF Document..."):
+                         pdf_bytes, pdf_err = pdf_generator.generate_pdf(generated_report, snapshots, mission_objective)
+                         if pdf_bytes:
+                             st.session_state['last_pdf'] = pdf_bytes
+                             st.session_state['last_pdf_source'] = generated_report # Cache invalidation
+                         else:
+                             st.error(f"PDF Generation Failed: {pdf_err}")
+                
+                if 'last_pdf' in st.session_state:
+                    st.download_button(
+                        label="📄 Download PDF Report (Cool & Styled)",
+                        data=st.session_state['last_pdf'],
+                        file_name="VOYAGER_Strategy_Report.pdf",
+                        mime="application/pdf"
+                    )
+            else:
+                st.warning("⚠️ PDF Export is unavailable. Please install `reportlab`.\n`pip install reportlab`")
