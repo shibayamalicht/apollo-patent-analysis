@@ -234,31 +234,7 @@ with container:
         st.markdown("##### (オプション) 非特許情報 (NPL) のインポート")
         with st.expander("論文・ニュース・政策文書などを取り込む (NPL)", expanded=False):
             
-            # AIプロンプトヘルプ
-            if st.toggle("🤖 AIで政策データを作成する方法 (Deep Research)"):
-                st.markdown("""
-                ChatGPT (o1/Pro) や Gemini Advanced, Perplexity Pro などの **Deep Research (推論・検索)** 機能を持つAIに、以下のプロンプトを入力してCSVを作成させてください。
-                そのCSVをそのままApolloに読み込むことができます。
-                """)
-                st.code("""
-                【命令】
-                あなたは世界最高のリサーチャーです。
-                以下のテーマに関する主要な「法規制」「政策」「補助金」「ガイドライン」を、日米欧中を中心に徹底的に調査してください。
-                結果を以下のカラムを持つCSV形式で出力してください。コードブロック内にCSVのみを記述すること。
 
-                【調査テーマ】
-                [ここにテーマを入力: 例: リチウムイオン電池のリサイクル規制, 生成AIの著作権法規制]
-
-                【出力フォーマット(CSV schema)】
-                Title, Abstract, Date, Region, Status, Source
-                
-                - Title: 政策・規制の名称 (具体的かつ簡潔に)
-                - Abstract: その規制が何を禁止/促進しているかの要約 (日本語で100〜200文字程度。ここが分析の肝になります)
-                - Date: 施行日または発表日 (YYYY-MM-DD または YYYY)
-                - Region: 対象国・地域 (EU, US, JP, CN, Global)
-                - Status: [検討中, 施行済み, 改正案] のいずれか
-                - Source: 情報源の組織名またはURL
-                """, language="text")
 
             # --- NPL蓄積ロジック ---
             if 'df_npl_accumulated' not in st.session_state:
