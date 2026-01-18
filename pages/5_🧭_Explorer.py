@@ -875,7 +875,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
 # ==================================================================
 # --- 7. Context Search (文脈検索) ---
 # ==================================================================
-elif selected_tab.startswith("Context Search"):
+elif "Context Search" in selected_tab:
     st.subheader("Context Search (KWIC: KeyWord In Context)")
     search_kw = st.text_input("検索したいキーワードを入力してください:", "")
     
