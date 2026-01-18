@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import japanize_matplotlib
 import utils
+import utils_ai
 
 # ==================================================================
 # --- 1. 設定・ヘルパー関数 ---
@@ -32,6 +33,8 @@ st.set_page_config(
     page_icon="🧭",
     layout="wide"
 )
+
+st.session_state['current_page'] = 'Explorer'
 
 
 
@@ -49,7 +52,7 @@ if FONT_PATH:
 
 def update_fig_layout(fig, title, height=600, theme_config=None, show_legend=True):
     if theme_config:
-        # Sanitize title
+        # タイトルのサニタイズ
         if isinstance(title, str):
             title = re.sub(r'<[^>]+>', '', title)
 
@@ -212,18 +215,24 @@ if col_map['applicant'] in df_main.columns:
 sorted_applicants = app_counts.index.tolist()
 app_count_dict = app_counts.to_dict()
 
-# 前処理
-# 前処理 ("explorer_keywords"カラムがない場合のみ実行)
-if 'explorer_keywords' not in df_main.columns:
+# 前処理 ("explorer_keywords_fixed"カラムがない場合のみ実行)
+if 'explorer_keywords_fixed' not in df_main.columns:
     with st.spinner("Explorer: テキスト解析とキーワード抽出を実行中..."):
         df_main['explorer_text'] = df_main[col_map['title']].fillna('') + ' ' + df_main[col_map['abstract']].fillna('')
-        df_main['explorer_keywords'] = df_main['explorer_text'].apply(extract_compound_nouns)
+        
+        # 最新のストップワードを使用して抽出
+        # 共通ロジック (utils.extract_keywords) を使用
+        # キャッシュ活用のためtokenizerを明示的に渡すことも検討可能だが、現在はutils内で解決
+        # current_swを確実に使用するために引数で渡す
+        df_main['explorer_keywords_fixed'] = df_main['explorer_text'].apply(
+            lambda x: utils.extract_keywords(x, tokenizer=None, stopwords=current_sw)
+        )
         st.session_state.df_main = df_main
 
 # モード選択
 selected_tab = st.radio(
     "分析モードを選択:",
-    ["Global Overview", "Trend Analysis", "Comparative Strategy", "Context Search (KWIC)"],
+    ["全体俯瞰 (Global Overview)", "トレンド分析 (Trend Analysis)", "競合比較戦略 (Comparative Strategy)", "文脈検索 (Context Search/KWIC)"],
     horizontal=True
 )
 
@@ -232,11 +241,11 @@ st.markdown("---")
 # ==================================================================
 # --- 4. Global Overview (全体俯瞰) ---
 # ==================================================================
-if selected_tab == "Global Overview":
+if selected_tab == "全体俯瞰 (Global Overview)":
     st.subheader("Global Overview")
     
     top_n_cloud = st.number_input("ワードクラウド単語数", 10, 100, 50, key="go_cloud_n")
-    all_keywords = [w for sublist in df_main['explorer_keywords'] for w in sublist]
+    all_keywords = [w for sublist in df_main['explorer_keywords_fixed'] for w in sublist]
     word_counts = Counter(all_keywords)
     
     if not word_counts:
@@ -254,7 +263,9 @@ if selected_tab == "Global Overview":
             c_all = Counter(all_keywords)
             top_nodes_global = [w for w, c in c_all.most_common(global_net_top_n)]
             pair_counts_global = Counter()
-            for kws in df_main['explorer_keywords']:
+            top_nodes_global = [w for w, c in c_all.most_common(global_net_top_n)]
+            pair_counts_global = Counter()
+            for kws in df_main['explorer_keywords_fixed']:
                 valid_w = [w for w in set(kws) if w in top_nodes_global]
                 if len(valid_w) >= 2:
                     for pair in combinations(sorted(valid_w), 2): pair_counts_global[pair] += 1
@@ -295,44 +306,109 @@ if selected_tab == "Global Overview":
                 update_fig_layout(fig_net_g, "Global Co-occurrence Network", height=700, theme_config=theme_config)
                 st.plotly_chart(fig_net_g, use_container_width=True, config={'editable': False})
                 
-                # --- Snapshot (Global Network) ---
-                # 1. Community Structure
+                # --- スナップショット (全体ネットワーク) ---
+                # 1. コミュニティ構造
                 comm_summary = []
                 for i in range(len(communities)):
                     comm_words = list(communities[i])[:5] 
                     comm_summary.append(f"Group {i+1}: {', '.join(comm_words)}")
                 
-                # 2. Hubs (Degree Centrality)
+                # 2. ハブ (次数中心性)
                 deg_centrality = nx.degree_centrality(G_global)
                 sorted_hubs = sorted(deg_centrality.items(), key=lambda x: x[1], reverse=True)[:10]
                 hubs_str = ", ".join([f"{n}({val:.2f})" for n, val in sorted_hubs])
 
-                # 3. Strongest Edges
+                # 3. 最強エッジ
                 sorted_edges = sorted(G_global.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:10]
                 edges_str = ", ".join([f"{u}-{v}" for u, v, d in sorted_edges])
 
-                # Combine with Rich Summary
+                # リッチサマリーと統合
+                # ネットワーク文脈用のキーワード中心抽出を使用
+                top_kw_global = [w for w, c in c_all.most_common(20)] # Top 20 for scoring
+                network_reps = utils.get_keyword_centric_representatives(df_main, top_kw_global, n_reps=10)
+                
+                # Format for summary
+                rep_lines = ["\n**代表的特許 (ネットワーク中心性ベース):**"]
+                for i, r in enumerate(network_reps):
+                     rep_lines.append(f"{i+1}. 【{r['title']}】 ({r['applicant']}) - {r['abstract'][:80]}...")
+                
                 snap_data = utils.generate_rich_summary(df_main, title_col=col_map['title'], abstract_col=col_map['abstract'])
                 snap_data['module'] = 'Explorer'
                 snap_data['network_stats'] = {
+                    "nodes": G_global.number_of_nodes(),
+                    "edges": G_global.number_of_edges(),
                     "communities": "; ".join(comm_summary),
                     "hubs": hubs_str,
-                    "edges": edges_str
+                    "edges_list": edges_str
                 }
+                # キーワード中心の代表特許を注入
+                if network_reps:
+                    snap_data['cluster_summary'] = (snap_data.get('cluster_summary', '') + "\n".join(rep_lines))
+
+                # AIインサイト (全体) - 上部へ移動
+                insight_context_g = f"""
+                **チャートタイプ**: 全体共起ネットワーク (Explorer)
+                **対象データ**: 全データの共起頻度上位 {global_net_top_n} キーワード。
+                **手法**: 複合名詞の共起分析 + モジュラリティ最適化によるコミュニティ検出。
+                **視覚的エンコーディング**:
+                - **ノード**: 技術キーワード。サイズは出現頻度。
+                - **エッジ**: 共起関係（つながりの強さ）。
+                - **色**: 自動検出されたコミュニティ（技術群）。
+                **目的**: 技術体系の全体構造と、主要な技術テーマ群を理解すること。
+                """
+                insight_role = "あなたは技術トレンドの専門家です。共起ネットワークから技術体系を読み解きます。"
+                insight_inst_g = """
+                ネットワーク図の統計情報を元に分析してください：
+                1. **主要テーマ**: どのような技術コミュニティ（グループ）が形成されていますか？
+                2. **ハブ**: 中心的な役割を果たしている技術概念（ハブ）は何ですか？
+                3. **関係性**: 強く結びついている技術ペアから、この分野の技術的な「常識」や「基本構成」を読み取ってください。
+                """
                 
+                full_context_g = f"""
+### AI Insight Context (Auto-Generated)
+{insight_context_g}
+
+### Analyst Instructions
+{insight_inst_g}
+"""
+                snap_data['ai_insight_context'] = full_context_g
+
                 utils.render_snapshot_button(
                     title="全体共起ネットワーク (技術クラスター)",
                     description="全期間を通じた技術用語の共起関係とクラスター構造。",
-                    key="exp_global_net_snap",
                     fig=fig_net_g,
-                    data_summary=snap_data
+                    data_summary=snap_data,
+                    key="exp_global_snap"
                 )
+
+                # AI Insight Button
+                insight_context_g = f"""
+
+                **チャートタイプ**: 全体共起ネットワーク (Explorer)
+                **対象データ**: 全データの共起頻度上位 {global_net_top_n} キーワード。
+                **手法**: 複合名詞の共起分析 + モジュラリティ最適化によるコミュニティ検出。
+                **視覚的エンコーディング**:
+                - **ノード**: 技術キーワード。サイズは出現頻度。
+                - **エッジ**: 共起関係（つながりの強さ）。
+                - **色**: 自動検出されたコミュニティ（技術群）。
+                **目的**: 技術体系の全体構造と、主要な技術テーマ群を理解すること。
+                """
+                insight_role = "あなたは技術トレンドの専門家です。共起ネットワークから技術体系を読み解きます。"
+                insight_inst_g = """
+                ネットワーク図の統計情報を元に分析してください：
+                1. **主要テーマ**: どのような技術コミュニティ（グループ）が形成されていますか？
+                2. **ハブ**: 中心的な役割を果たしている技術概念（ハブ）は何ですか？
+                3. **関係性**: 強く結びついている技術ペアから、この分野の技術的な「常識」や「基本構成」を読み取ってください。
+                """
+                prompt_g = utils_ai.generate_ai_insight_prompt(insight_role, insight_context_g, snap_data, insight_inst_g)
+                utils_ai.render_ai_insight_button(prompt_g, "exp_global_insight")
+
             else: st.warning("条件に一致する共起関係が見つかりませんでした。")
 
 # ==================================================================
 # --- 5. Trend Analysis (時系列分析) ---
 # ==================================================================
-elif selected_tab == "Trend Analysis":
+elif selected_tab == "トレンド分析 (Trend Analysis)":
     st.subheader("Trend Analysis")
     
     target_filter = st.selectbox(
@@ -377,8 +453,8 @@ elif selected_tab == "Trend Analysis":
             df_recent = df_target[(df_target['year'] >= periods[0][0]) & (df_target['year'] <= periods[0][1])]
             df_past = df_target[(df_target['year'] >= periods[1][0]) & (df_target['year'] <= periods[1][1])]
             
-            c_recent = Counter([w for sublist in df_recent['explorer_keywords'] for w in sublist])
-            c_past = Counter([w for sublist in df_past['explorer_keywords'] for w in sublist])
+            c_recent = Counter([w for sublist in df_recent['explorer_keywords_fixed'] for w in sublist])
+            c_past = Counter([w for sublist in df_past['explorer_keywords_fixed'] for w in sublist])
             
             growth_data = []
             min_freq = max(2, len(df_recent) * 0.01)
@@ -411,7 +487,7 @@ elif selected_tab == "Trend Analysis":
         for i, (start, end) in enumerate(periods):
             with cols[i % 3]:
                 df_p = df_target[(df_target['year'] >= start) & (df_target['year'] <= end)]
-                kws_p = [w for sublist in df_p['explorer_keywords'] for w in sublist]
+                kws_p = [w for sublist in df_p['explorer_keywords_fixed'] for w in sublist]
                 st.markdown(f"**{start} - {end}** ({len(df_p)}件)")
                 if kws_p: generate_wordcloud_and_list(kws_p, f"{start}-{end}", 30, FONT_PATH)
             
@@ -421,12 +497,12 @@ elif selected_tab == "Trend Analysis":
         with col_net1: ta_net_n = st.slider("抽出単語数", 30, 100, 60, key="ta_net_n")
         with col_net2: ta_net_th = st.slider("共起閾値", 0.01, 0.3, 0.05, 0.01, key="ta_net_th")
         
-        all_target_kw = [w for sublist in df_target['explorer_keywords'] for w in sublist]
+        all_target_kw = [w for sublist in df_target['explorer_keywords_fixed'] for w in sublist]
         c_all = Counter(all_target_kw)
         top_nodes = [w for w, c in c_all.most_common(ta_net_n)]
         
         pair_counts = Counter()
-        for kws in df_target['explorer_keywords']:
+        for kws in df_target['explorer_keywords_fixed']:
             valid_w = [w for w in set(kws) if w in top_nodes]
             if len(valid_w) >= 2:
                 for pair in combinations(sorted(valid_w), 2): pair_counts[pair] += 1
@@ -442,9 +518,9 @@ elif selected_tab == "Trend Analysis":
             pos = nx.spring_layout(G, k=0.8, seed=42)
             node_colors, node_texts = [], []
             
-            c_rec_net = Counter([w for sublist in df_target[df_target['year'] >= periods[0][0]]['explorer_keywords'] for w in sublist])
+            c_rec_net = Counter([w for sublist in df_target[df_target['year'] >= periods[0][0]]['explorer_keywords_fixed'] for w in sublist])
             if len(periods) > 1:
-                c_pst_net = Counter([w for sublist in df_target[(df_target['year'] >= periods[1][0]) & (df_target['year'] <= periods[1][1])]['explorer_keywords'] for w in sublist])
+                c_pst_net = Counter([w for sublist in df_target[(df_target['year'] >= periods[1][0]) & (df_target['year'] <= periods[1][1])]['explorer_keywords_fixed'] for w in sublist])
             else:
                 c_pst_net = Counter()
 
@@ -470,10 +546,10 @@ elif selected_tab == "Trend Analysis":
             update_fig_layout(fig_net, "Trend Network", height=700, theme_config=theme_config)
             st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
 
-            # --- Snapshot (Trend Network) ---
+            # --- スナップショット (トレンドネットワーク) ---
             trend_summary = [f"{n}: Growth {c_rec_net.get(n,0)/(c_pst_net.get(n,0)+1):.2f}" for n in list(G.nodes())[:15]]
             
-            # Hubs & Edges
+            # ハブとエッジ
             deg_centrality = nx.degree_centrality(G)
             sorted_hubs = sorted(deg_centrality.items(), key=lambda x: x[1], reverse=True)[:10]
             hubs_str = ", ".join([f"{n}({val:.2f})" for n, val in sorted_hubs])
@@ -482,25 +558,92 @@ elif selected_tab == "Trend Analysis":
             edges_str = ", ".join([f"{u}-{v}" for u, v, d in sorted_edges])
 
             snap_data = utils.generate_rich_summary(df_target, title_col=col_map['title'], abstract_col=col_map['abstract'])
+            
+            # トレンドネットワーク用のキーワード中心抽出を使用 (成長率=赤色ノードに注目)
+            # Find nodes with high growth rate
+            growth_nodes = sorted([n for n in G.nodes()], key=lambda n: c_rec_net.get(n, 0) - c_pst_net.get(n, 0), reverse=True)[:15]
+            trend_reps = utils.get_keyword_centric_representatives(df_target, growth_nodes, n_reps=10)
+            
+            rep_lines_t = ["\n**代表的特許 (成長領域・キーワードベース):**"]
+            for i, r in enumerate(trend_reps):
+                 rep_lines_t.append(f"{i+1}. 【{r['title']}】 ({r['applicant']}) - {r['abstract'][:80]}...")
+            
             snap_data['module'] = 'Explorer'
             snap_data['network_stats'] = {
+                "nodes": G.number_of_nodes(),
+                "edges": G.number_of_edges(),
                 "hubs": hubs_str,
-                "edges": edges_str,
+                "edges_list": edges_str,
                 "notes": "Nodes colored by Growth Rate (Red=High, Blue=Low)."
             }
+            if trend_reps:
+                snap_data['cluster_summary'] = (snap_data.get('cluster_summary', '') + "\n".join(rep_lines_t))
+
+             # AIインサイト (トレンド) - 上部へ移動
+            insight_context_t = f"""
+            **チャートタイプ**: トレンド・共起ネットワーク (成長率)
+            **対象データ**: 時系列比較による急上昇キーワードを含む共起ネットワーク。
+            **手法**: 期間比較による成長率(Growth Rate)の算出。
+            **視覚的エンコーディング**:
+            - **赤色ノード**: 高成長（萌芽）技術。
+            - **青色ノード**: 低成長/減少（陳腐化）技術。
+            - **エッジ**: 共起関係。
+            **目的**: 技術ネットワークのどこで新しい技術が生まれているか（萌芽領域）を特定すること。
+            """
+            insight_role = "あなたは技術トレンドの専門家です。共起ネットワークから技術体系を読み解きます。"
+            insight_inst_t = """
+            ネットワーク図の成長率（Growth）情報を元に分析してください：
+            1. **萌芽技術**: 赤く表示されている（成長率が高い）キーワードは、どの技術領域（コミュニティ）に出現していますか？
+            2. **技術の陳腐化**: 青く表示されている（成長率が低い）キーワードは、どのような技術ですか？
+            3. **シフト**: 既存のハブ技術から、新しい成長技術へのシフトや融合の兆しは見えますか？
+            """
+
+            full_context_t = f"""
+### AI Insight Context (Auto-Generated)
+{insight_context_t}
+
+### Analyst Instructions
+{insight_inst_t}
+"""
+            snap_data['ai_insight_context'] = full_context_t
 
             utils.render_snapshot_button(
                 title="トレンド・共起ネットワーク",
                 description="技術用語の共起関係に成長率（赤=急上昇）を重ね合わせたマップ。",
-                key="exp_trend_net_snap",
                 fig=fig_net,
-                data_summary=snap_data
+                data_summary=snap_data,
+                key="exp_trend_snap"
             )
+            
+            # AI Insight Button
+            insight_context_t = f"""
+
+            **チャートタイプ**: トレンド・共起ネットワーク (成長率)
+            **対象データ**: 時系列比較による急上昇キーワードを含む共起ネットワーク。
+            **手法**: 期間比較による成長率(Growth Rate)の算出。
+            **視覚的エンコーディング**:
+            - **赤色ノード**: 高成長（萌芽）技術。
+            - **青色ノード**: 低成長/減少（陳腐化）技術。
+            - **エッジ**: 共起関係。
+            **目的**: 技術ネットワークのどこで新しい技術が生まれているか（萌芽領域）を特定すること。
+            """
+            insight_role = "あなたは技術トレンドの専門家です。共起ネットワークから技術体系を読み解きます。"
+            insight_inst_t = """
+            ネットワーク図の成長率（Growth）情報を元に分析してください：
+            1. **萌芽技術**: 赤く表示されている（成長率が高い）キーワードは、どの技術領域（コミュニティ）に出現していますか？
+            2. **技術の陳腐化**: 青く表示されている（成長率が低い）キーワードは、どのような技術ですか？
+            3. **シフト**: 既存のハブ技術から、新しい成長技術へのシフトや融合の兆しは見えますか？
+            """
+            # Add specific network stats for prompt
+            snap_data['trend_network_summary'] = trend_summary
+            prompt_t = utils_ai.generate_ai_insight_prompt(insight_role, insight_context_t, snap_data, insight_inst_t)
+            utils_ai.render_ai_insight_button(prompt_t, "exp_trend_insight")
+
 
 # ==================================================================
 # --- 6. Comparative Strategy (競合比較) ---
 # ==================================================================
-elif selected_tab == "Comparative Strategy":
+elif selected_tab == "競合比較戦略 (Comparative Strategy)":
     st.subheader("Comparative Strategy")
     
     c1, c2 = st.columns(2)
@@ -525,14 +668,14 @@ elif selected_tab == "Comparative Strategy":
                 mask = df_main['applicant_main'].apply(lambda x: isinstance(x, list) and app_name in x)
             else:
                 mask = df_main[col_map['applicant']].fillna('').str.contains(re.escape(app_name))
-            return [w for sublist in df_main[mask]['explorer_keywords'] for w in sublist]
+            return [w for sublist in df_main[mask]['explorer_keywords_fixed'] for w in sublist]
 
         words_my = get_keywords_for_app(my_comp)
         words_target = get_keywords_for_app(target_comp)
         c_my = Counter(words_my)
         c_tgt = Counter(words_target)
         
-        # 1. Tornado Chart
+        # 1. トルネードチャート
         st.markdown("##### 1. キーワード出現頻度比較 (Tornado Chart)")
         all_keys = set(list(c_my.keys()) + list(c_tgt.keys()))
         valid_keys = [k for k in all_keys if (c_my[k] + c_tgt[k]) >= 3]
@@ -576,9 +719,9 @@ elif selected_tab == "Comparative Strategy":
             utils.render_snapshot_button(
                 title=f"Tornado Chart ({my_comp} vs {target_comp})",
                 description="キーワード出現頻度の直接比較。左右への突出が各社の特徴を示す。",
-                key="exp_tornado_snap",
                 fig=fig_tornado,
-                data_summary=df_tornado[['Keyword', 'My Abs', 'Competitor Count']].tail(20).to_string(index=False)
+                data_summary=df_tornado[['Keyword', 'My Abs', 'Competitor Count']].tail(20).to_string(index=False),
+                key="exp_tornado_snap"
             )
 
         # 2. ワードクラウド
@@ -608,7 +751,7 @@ elif selected_tab == "Comparative Strategy":
         df_2 = df_main[mask_2]
         
         pair_counts = Counter()
-        for kws in df_2['explorer_keywords']:
+        for kws in df_2['explorer_keywords_fixed']:
             valid_w = [w for w in set(kws) if w in top_nodes]
             if len(valid_w) >= 2:
                 for pair in combinations(sorted(valid_w), 2): pair_counts[pair] += 1
@@ -647,14 +790,14 @@ elif selected_tab == "Comparative Strategy":
             update_fig_layout(fig_net, "Dominance Network", height=700, theme_config=theme_config)
             st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
 
-            # --- Snapshot (Dominance Network) ---
+            # --- スナップショット (支配率ネットワーク) ---
             dom_summary = []
             for n in list(G.nodes())[:20]: # Top nodes
                 m = c_my[n]; t = c_tgt[n]
                 dom_val = m/(m+t) if (m+t)>0 else 0.5
                 dom_summary.append(f"{n}: {my_comp}={m}, {target_comp}={t} (Dom={dom_val:.2f})")
 
-            # Hubs & Edges
+            # ハブとエッジ情報の抽出
             deg_centrality = nx.degree_centrality(G)
             sorted_hubs = sorted(deg_centrality.items(), key=lambda x: x[1], reverse=True)[:10]
             hubs_str = ", ".join([f"{n}({val:.2f})" for n, val in sorted_hubs])
@@ -665,18 +808,65 @@ elif selected_tab == "Comparative Strategy":
             snap_data = utils.generate_rich_summary(df_2, title_col=col_map['title'], abstract_col=col_map['abstract'])
             snap_data['module'] = 'Explorer'
             snap_data['network_stats'] = {
+                "nodes": G.number_of_nodes(),
+                "edges": G.number_of_edges(),
                 "hubs": hubs_str,
-                "edges": edges_str,
+                "edges_list": edges_str,
                 "notes": f"Dominance: {my_comp} vs {target_comp}. Blue favorable to {my_comp}, Red favorable to {target_comp}."
             }
+            
+            # 支配率分析のためのキーワード中心の代表特許抽出
+            # 戦略: 全体の上位ノードに基づいて、競合状況（主戦場）を把握する
+            dom_reps = utils.get_keyword_centric_representatives(df_2, list(G.nodes()), n_reps=10)
+            rep_lines_d = ["\n**代表的特許 (支配率ネットワーク・キーワードベース):**"]
+            for i, r in enumerate(dom_reps):
+                 rep_lines_d.append(f"{i+1}. 【{r['title']}】 ({r['applicant']}) - {r['abstract'][:80]}...")
+
+            if dom_reps:
+                snap_data['cluster_summary'] = (snap_data.get('cluster_summary', '') + "\n".join(rep_lines_d))
+
+
+             # AI Insight (比較分析) - 設定
+            insight_context_c = f"""
+            **チャートタイプ**: 支配率共起ネットワーク (Dominance Network)
+            **対象データ**: 2社({my_comp} vs {target_comp})の共起ネットワーク比較。
+            **手法**: 出現頻度比率による支配率算出。
+            **視覚的エンコーディング**:
+            - **青色ノード**: {my_comp} が優勢な技術領域。
+            - **赤色ノード**: {target_comp} が優勢な技術領域。
+            - **白色/中間色**: 拮抗している領域（激戦区）。
+            **目的**: 競合との強み・弱みの違い、技術ポートフォリオの重複と差異を可視化すること。
+            """
+            insight_role = "あなたは知財戦略コンサルタントです。競合分析を行い、差別化戦略を立案します。"
+            insight_inst_c = """
+            ネットワーク図の支配率（Dominance）情報を元に分析してください：
+            1. **自社の強み**: 青く表示されている（自社優勢）領域は、具体的にどのような技術ですか？
+            2. **競合の強み**: 赤く表示されている（競合優勢）領域は、どのような技術ですか？自社に欠けているものは？
+            3. **激戦区**: 色が白に近い（拮抗している）領域はどこですか？そこでの主導権争いはどうなっていますか？
+            """
+
+            full_context_c = f"""
+### AI Insight Context (Auto-Generated)
+{insight_context_c}
+
+### Analyst Instructions
+{insight_inst_c}
+"""
+            snap_data['ai_insight_context'] = full_context_c
 
             utils.render_snapshot_button(
                 title=f"Dominance Network ({my_comp} vs {target_comp})",
                 description="共起ネットワーク上での両社の優劣（支配率）分布。",
-                key="exp_dom_net_snap",
                 fig=fig_net,
-                data_summary=snap_data
+                data_summary=snap_data,
+                key="exp_dom_snap"
             )
+
+            # ネットワーク統計情報を追加
+            snap_data['dominance_summary'] = dom_summary
+            prompt_c = utils_ai.generate_ai_insight_prompt(insight_role, insight_context_c, snap_data, insight_inst_c)
+            utils_ai.render_ai_insight_button(prompt_c, "exp_dom_insight")
+
 
 # ==================================================================
 # --- 7. Context Search (文脈検索) ---

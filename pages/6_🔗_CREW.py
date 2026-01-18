@@ -20,7 +20,7 @@ import japanize_matplotlib
 import utils
 
 # ==============================================================================
-#  1. Page Config (Must be first)
+#  1. ページ設定 (最優先)
 # ==============================================================================
 st.set_page_config(
     page_title="APOLLO | CREW", 
@@ -29,11 +29,13 @@ st.set_page_config(
 )
 
 # ==============================================================================
-#  2. Font Setup
+# ==============================================================================
+#  2. フォント設定
+# ==============================================================================
 # ==============================================================================
 
 
-# --- Custom CSS ---
+# --- カスタムCSS ---
 st.markdown("""
 <style>
 
@@ -45,12 +47,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-#  3. Sidebar Navigation
+# ==============================================================================
+#  3. サイドバーナビゲーション
+# ==============================================================================
 # ==============================================================================
 utils.render_sidebar()
 
 # ==============================================================================
-#  4. Analysis Logic
+# ==============================================================================
+#  4. 分析ロジック (Analyzer Class)
+# ==============================================================================
 # ==============================================================================
 class PatentAnalyzer:
     def __init__(self, df, col_inv, col_date, col_assignee=None, embeddings=None):
@@ -398,7 +404,9 @@ class PatentAnalyzer:
         return timeline.rename(columns={'inventors_list': '発明者', 'year': '出願年'})
 
 # ==============================================================================
-#  5. Main UI Logic
+# ==============================================================================
+#  5. メインUIロジック
+# ==============================================================================
 # ==============================================================================
 st.title("🔗 CREW")
 st.markdown("##### Co-occurrence Relationship Exploration Web")
@@ -428,7 +436,9 @@ if 'analyzer' not in st.session_state:
     st.session_state.analyzer = None
 
 # ==============================================================================
-#  6. Settings & Filters
+# ==============================================================================
+#  6. 設定とフィルタ
+# ==============================================================================
 # ==============================================================================
 
 st.markdown("### Analysis Settings")
@@ -554,10 +564,10 @@ if st.session_state.analyzer:
             
             fig_net = go.Figure(data=[edge_trace, node_trace], layout=go.Layout(showlegend=False, margin=dict(b=0,l=0,r=0,t=0), height=600))
             fig_net.update_xaxes(visible=False); fig_net.update_yaxes(visible=False)
-            # Pass width=None to allow the network graph to fill the container width (prevent clumping)
+            # 幅いっぱいに広げるためにwidth=Noneを渡す (凝縮防止)
             utils.update_fig_layout(fig_net, "共起ネットワーク図", height=600, width=None, theme_config=utils.get_theme_config("APOLLO Standard"))
             fig_net.update_layout(margin=dict(l=10, r=10, t=40, b=10))
-            # Remove aspect ratio constraint (set by utils for hidden axes) to fill width
+            # アスペクト比制限を解除 (隠された軸設定による制限を回避)
             fig_net.update_yaxes(scaleanchor=None, scaleratio=None)
             st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
             

@@ -18,7 +18,13 @@ from sklearn.metrics.pairwise import euclidean_distances
 
 # 機械学習・自然言語処理
 from umap import UMAP 
-import hdbscan 
+import hdbscan
+from sentence_transformers import SentenceTransformer
+
+# 共通ユーティリティ
+import utils
+import utils_ai
+import utils_spatial
 from wordcloud import WordCloud
 from janome.tokenizer import Tokenizer
 import networkx as nx
@@ -28,7 +34,7 @@ from scipy.spatial import ConvexHull
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import japanize_matplotlib
-import utils
+
 
 # 警告を非表示
 warnings.filterwarnings('ignore')
@@ -41,6 +47,8 @@ st.set_page_config(
     page_icon="🚀", 
     layout="wide"
 )
+
+st.session_state['current_page'] = 'Saturn V'
 
 # ==================================================================
 # --- 2. フォント設定 ---
@@ -601,11 +609,11 @@ with tab_main:
                 )
 
         norm_msg = " (絶対評価)" if use_abs_scale and map_mode == "密度マップ (Density)" else ""
-        utils.update_fig_layout(fig_main, f"Saturn V - メインマップ{norm_msg}", height=1000, theme_config=theme_config)
+        utils.update_fig_layout(fig_main, f"Saturn V - メインマップ{norm_msg}", height=1200, theme_config=theme_config)
         
 
-        # 1. Aspect Ratio: Enforce 1:1 to prevent distortion/squashing.
-        # 2. Focus-Aware: Zoom to Valid Clusters in Focus (Exclude Noise).
+        # 1. アスペクト比: 歪みを防ぐため1:1を強制
+        # 2. フォーカス: 有効なクラスタにズーム（ノイズ除外）
         
         if not df_focus.empty and 'cluster' in df_focus.columns:
              # Use only VALID clusters for bounds calculation
@@ -624,13 +632,14 @@ with tab_main:
              x_range = x_max - x_min
              y_range = y_max - y_min
              
-             # Add Padding (10%)
-             pad_factor = 0.1
+             # Add Padding (2%)
+             pad_factor = 0.02
              x_pad = x_range * pad_factor if x_range > 0 else 1.0
              y_pad = y_range * pad_factor if y_range > 0 else 1.0
              
              # Apply new ranges with Fixed Aspect Ratio matching
              fig_main.update_layout(
+                height=1200,
                 xaxis=dict(range=[x_min - x_pad, x_max + x_pad], autorange=False),
                 yaxis=dict(
                     range=[y_min - y_pad, y_max + y_pad], 
@@ -653,8 +662,8 @@ with tab_main:
             }
         })
 
-        # Snapshot Button
-        # Create safe summary
+        # スナップショットボタン
+        # 安全なサマリーを作成
         summary_cols = ['cluster_label']
         if 'year' in df_universe.columns: summary_cols.append('year')
         if col_map.get('title') and col_map['title'] in df_universe.columns:
@@ -668,9 +677,9 @@ with tab_main:
         snap_data = utils.generate_rich_summary(df_summary_source, title_col=col_map['title'], abstract_col=col_map['abstract'])
         snap_data['module'] = 'Saturn V'
         
-        # Optimize Chart Data (Prevent Token Overflow)
+        # チャートデータの最適化（トークンオーバーフロー防止）
         df_snap_safe = df_summary_source[summary_cols].head(30).copy()
-        # Text Truncation
+        # テキストの切り捨て
         for c in summary_cols:
             if df_snap_safe[c].dtype == object:
                 df_snap_safe[c] = df_snap_safe[c].astype(str).str.slice(0, 50) + "..."
@@ -681,21 +690,114 @@ with tab_main:
         try:
              cluster_counts_snap = df_universe['cluster'].value_counts()
              cluster_summary_lines = []
+             
+             # クラスタごとの代表特許を抽出
+             cluster_reps = utils.get_cluster_representatives(df_universe, cluster_col='cluster', n_reps=3)
+
              for cid in sorted(df_universe['cluster'].unique()):
                  if cid == -1: continue
                  label = st.session_state.saturnv_labels_map.get(cid, f"Cluster {cid}")
                  count = cluster_counts_snap.get(cid, 0)
                  cluster_summary_lines.append(f"- {label} ({count}件)")
+                 
+                # 代表特許を追加
+                 if cid in cluster_reps:
+                     for rep in cluster_reps[cid]:
+                         cluster_summary_lines.append(rep)
+
              snap_data['cluster_summary'] = "全クラスタ構成（上位から）:\n" + "\n".join(cluster_summary_lines)
         except: pass
         
-        utils.render_snapshot_button(
-            title=f"特許ランドスケープ ({map_mode})",
-            description="技術クラスターと出願の分布を示す俯瞰マップ。",
-            key="saturn_main_snap",
-            fig=fig_main,
-            data_summary=snap_data
-        )
+        # AI Insight コンテキストの準備（スナップショット生成前）
+        if st.session_state.saturnv_cluster_done:
+            insight_context = f"""
+            **マップタイプ**: 技術ランドスケープ (Saturn V - Telescope)
+            **分析対象**: 全体俯瞰マップ。
+            **手法**: SBERT (文章ベクトル化) + UMAP (次元圧縮) + HDBSCAN (クラスタリング)。
+            **視覚的エンコーディング**:
+            - **点**: 個々の特許/文献。距離が近いほど意味的に類似しています。
+            - **クラスタ**: 色分けされたグループは、自動検出された技術領域を表します。
+            - **配置**: マップ全体の「形状」が技術空間の広がりを表します。
+            **目的**: マクロな視点で技術全体の構造を把握し、主要なテーマ（クラスタ）や未開拓領域（空白地帯）を発見すること。
+            """
+            
+            insight_role = "あなたはシニア特許アナリストです。技術俯瞰図から戦略的な示唆を導きます。"
+            
+            insight_instruction = """
+            ランドスケープの構造を分析してください：
+            1. **主要テーマ**: どのような技術クラスタが形成されていますか？（ラベル参照）
+            2. **技術の関係性**: どのクラスタとどのクラスタが近接していますか？そこから読み取れる技術的なシナジーや関連性は？
+            3. **注目領域**: ユーザーの関心（フィルタ結果など）に基づき、特に注目すべき領域はどこですか？
+            **重要**: 回答は箇条書きで、技術的な洞察を深掘りしてください。
+            """
+
+            # 空間情報の計算
+            spatial_info = utils_spatial.generate_spatial_cluster_summary(
+                df_universe, 'cluster', 'umap_x', 'umap_y', label_map=st.session_state.saturnv_labels_map
+            )
+            
+            # スナップショット用に統合
+            full_ai_context = f"""
+### AI Insight Context (Auto-Generated)
+{insight_context}
+
+### Spatial Context
+{spatial_info}
+
+### Analyst Instructions
+{insight_instruction}
+"""
+            snap_data['ai_insight_context'] = full_ai_context
+
+        # スナップショットボタン
+        try:
+            fig_main_snap = fig_main 
+            utils.render_snapshot_button(
+                title=f"Saturn V: Landscape Map ({date_bin_filter_w})",
+                description="Global technology landscape map showing cluster distribution and proximity based on semantic similarity.",
+                fig=fig_main_snap,
+                data_summary=snap_data,
+                key="saturn_main_snap"
+            )
+        except Exception as e:
+             st.error(f"スナップショット生成エラー: {e}")
+
+        if st.session_state.saturnv_cluster_done:
+            # AIインサイト (メインマップ)
+            insight_context = f"""
+            **マップタイプ**: 技術ランドスケープ (Saturn V - Telescope)
+            **分析対象**: 全体俯瞰マップ。
+            **手法**: SBERT (文章ベクトル化) + UMAP (次元圧縮) + HDBSCAN (クラスタリング)。
+            **視覚的エンコーディング**:
+            - **点**: 個々の特許/文献。距離が近いほど意味的に類似しています。
+            - **クラスタ**: 色分けされたグループは、自動検出された技術領域を表します。
+            - **配置**: マップ全体の「形状」が技術空間の広がりを表します。
+            **目的**: マクロな視点で技術全体の構造を把握し、主要なテーマ（クラスタ）や未開拓領域（空白地帯）を発見すること。
+            """
+            
+            insight_role = "あなたはシニア特許アナリストです。技術俯瞰図から戦略的な示唆を導きます。"
+            
+            insight_instruction = """
+            ランドスケープの構造を分析してください：
+            1. **主要テーマ**: どのような技術クラスタが形成されていますか？（ラベル参照）
+            2. **技術の関係性**: どのクラスタとどのクラスタが近接していますか？そこから読み取れる技術的なシナジーや関連性は？
+            3. **注目領域**: ユーザーの関心（フィルタ結果など）に基づき、特に注目すべき領域はどこですか？
+            **重要**: 回答は箇条書きで、技術的な洞察を深掘りしてください。
+            """
+
+            # 空間情報の計算
+            spatial_info = utils_spatial.generate_spatial_cluster_summary(
+                df_universe, 'cluster', 'umap_x', 'umap_y', label_map=st.session_state.saturnv_labels_map
+            )
+
+            # 生成 (空間情報を追加コンテキストとして渡す)
+            prompt = utils_ai.generate_ai_insight_prompt(
+                insight_role, insight_context, snap_data, insight_instruction, 
+                extra_content=f"\n# 空間配置情報 (Spatial Context)\n{spatial_info}"
+            )
+            
+            utils_ai.render_ai_insight_button(prompt, "saturn_main_insight")
+
 
         st.subheader("ラベル編集")
         utils.render_ai_label_assistant(st.session_state.df_main, 'cluster', "saturnv_labels_map", col_map, tfidf_matrix, feature_names, widget_key_prefix="main_label")
@@ -902,11 +1004,33 @@ with tab_main:
                         except: pass
 
             marker_line_d = dict(width=1, color='white') if drill_map_mode == "密度マップ (Density)" else dict(width=0)
-            fig_drill.add_trace(go.Scattergl(
-                x=df_drill_plot['drill_x'], y=df_drill_plot['drill_y'], mode='markers',
-                marker=dict(color=df_drill_plot['drill_cluster'], colorscale=theme_config["color_sequence"] if isinstance(theme_config["color_sequence"], str) else 'turbo', showscale=False, size=5, opacity=0.8, line=marker_line_d),
-                hoverinfo='text', hovertext=df_drill_plot['drill_hover_text'], name='表示対象'
-            ))
+            
+            # Split Data into Signal (Valid) and Noise
+            df_drill_valid = df_drill_plot[df_drill_plot['drill_cluster'] != -1]
+            df_drill_noise = df_drill_plot[df_drill_plot['drill_cluster'] == -1]
+            
+            # 1. Plot Noise (Grey Background) - Always plot if present and not filtered out
+            if not df_drill_noise.empty:
+                fig_drill.add_trace(go.Scattergl(
+                    x=df_drill_noise['drill_x'], y=df_drill_noise['drill_y'], mode='markers',
+                    marker=dict(color='#dddddd', size=4, opacity=0.4, line=dict(width=0)),
+                    hoverinfo='text', hovertext=df_drill_noise['drill_hover_text'], name='Noise'
+                ))
+
+            # 2. Plot Valid Sub-clusters (Colored)
+            if not df_drill_valid.empty:
+                fig_drill.add_trace(go.Scattergl(
+                    x=df_drill_valid['drill_x'], y=df_drill_valid['drill_y'], mode='markers',
+                    marker=dict(
+                        color=df_drill_valid['drill_cluster'], 
+                        colorscale=theme_config["color_sequence"] if isinstance(theme_config["color_sequence"], str) else 'turbo', 
+                        showscale=False, 
+                        size=6, 
+                        opacity=0.9, 
+                        line=marker_line_d
+                    ),
+                    hoverinfo='text', hovertext=df_drill_valid['drill_hover_text'], name='Sub-clusters'
+                ))
             
             annotations_drill = []
             if drill_show_labels_chk:
@@ -967,24 +1091,82 @@ with tab_main:
 
 
             try:
-                 cluster_counts_snap_d = df_drill['drill_cluster'].value_counts()
-                 cluster_summary_lines_d = []
-                 for cid in sorted(df_drill['drill_cluster'].unique()):
-                     if cid == -1: continue
-                     label = drill_labels_map.get(cid, f"Sub-Cluster {cid}")
-                     count = cluster_counts_snap_d.get(cid, 0)
-                     cluster_summary_lines_d.append(f"- {label} ({count}件)")
-                 snap_data['cluster_summary'] = f"サブクラスタ構成 ({st.session_state.drill_base_label}):\n" + "\n".join(cluster_summary_lines_d)
+                cluster_counts_snap_d = df_drill['drill_cluster'].value_counts()
+                cluster_summary_lines_d = []
+                
+                # Extract representatives for sub-clusters
+                cluster_reps_d = utils.get_cluster_representatives(df_drill, cluster_col='drill_cluster', n_reps=3)
+
+                for cid in sorted(df_drill['drill_cluster'].unique()):
+                    if cid == -1: continue
+                    label = drill_labels_map.get(cid, f"Sub-Cluster {cid}")
+                    count = cluster_counts_snap_d.get(cid, 0)
+                    cluster_summary_lines_d.append(f"- {label} ({count}件)")
+                    
+                    # Append representatives
+                    if cid in cluster_reps_d:
+                        for rep in cluster_reps_d[cid]:
+                            cluster_summary_lines_d.append(rep)
+                 
+                snap_data['cluster_summary'] = "ドリルダウン・クラスタ構成 (詳細):\n" + "\n".join(cluster_summary_lines_d)
             except: pass
 
-            utils.render_snapshot_button(
-                title=f"Saturn V ドリルダウン: {st.session_state.drill_base_label}",
-                description="選択したクラスターの詳細マップ。",
-                key="saturn_drill_snap",
-                fig=fig_drill,
-                data_summary=snap_data
+            # Draw Snapshot Button with Context
+            
+            # Prepare AI Insight Context (Drill)
+            drill_insight_context = f"""
+            **マップタイプ**: 技術ドリルダウン (Saturn V - Probe)
+            **分析対象**: クラスタ「{st.session_state.drill_base_label}」の詳細マップ。
+            **手法**: 再計算されたUMAP (局所的構造) + HDBSCAN (サブクラスタ)。
+            **視覚的エンコーディング**:
+            - **点**: 特定クラスタ内の特許/文献。
+            - **色**: サブクラスタ (詳細テーマ)。
+            **目的**: 選択された上位クラスタ（親分類）の内部にある、詳細なサブ構造を分析すること。
+            """
+            insight_role = "あなたはシニア特許アナリストです。技術俯瞰図から戦略的な示唆を導きます。"
+            drill_insight_instruction = """
+            提供されたデータを元に、この特定技術領域（クラスタ）の内部構造を分析してください：
+            1. **サブテーマの構成**: この技術領域はどのような細かいサブテーマ（サブクラスタ）に分かれていますか？
+            2. **詳細な内容**: 代表的な特許/文献から、具体的にどのような技術課題や解決策が議論されているか要約してください。
+            3. **出願傾向**: (もし年次情報があれば) 最近のトレンドはどうなっていますか？
+            """
+            
+            # Spatial Info (Drill)
+            drill_spatial_info = utils_spatial.generate_spatial_cluster_summary(
+                df_drill, 'drill_cluster', 'drill_x', 'drill_y', label_map=drill_labels_map
             )
             
+            # Combine for Snapshot
+            full_drill_context = f"""
+### AI Insight Context (Auto-Generated)
+{drill_insight_context}
+
+### Spatial Context
+{drill_spatial_info}
+
+### Analyst Instructions
+{drill_insight_instruction}
+"""
+            snap_data['ai_insight_context'] = full_drill_context
+
+            # Render Snapshot Button
+            utils.render_snapshot_button(
+                title=f"Saturn V: Drilldown - {st.session_state.drill_base_label}",
+                description=f"Detailed analysis of cluster: {st.session_state.drill_base_label}",
+                fig=fig_drill, # Kept fig_drill as it was in the original code
+                data_summary=snap_data,
+                key="saturn_drill_snap"
+            )
+
+            st.markdown("---")
+            
+            # AI Insight Button
+            drill_prompt = utils_ai.generate_ai_insight_prompt(
+                insight_role, drill_insight_context, snap_data, drill_insight_instruction, 
+                extra_content=f"\n# 空間配置情報 (Spatial Context)\n{drill_spatial_info}"
+            )
+            utils_ai.render_ai_insight_button(drill_prompt, "saturn_drill_insight")
+
             st.subheader("サブクラスタ・ラベル編集")
             utils.render_ai_label_assistant(df_drill, 'drill_cluster', "drill_labels_map", col_map, tfidf_matrix, feature_names, widget_key_prefix="drill_label")
 
@@ -1066,6 +1248,43 @@ with tab_main:
                             fig_net.update_xaxes(visible=False)
                             fig_net.update_yaxes(visible=False)
                             st.plotly_chart(fig_net, use_container_width=True)
+                            
+                            # AI Insight (Co-occurrence Network)
+                            net_nodes_list = [f"{n} ({G.nodes[n]['count']})" for n in G.nodes()]
+                            net_edges_list = [f"{u} - {v} (J={d['weight']:.2f})" for u, v, d in G.edges(data=True)]
+                            
+                            # Extract Keyword-Centric Representatives for Insight
+                            net_reps = utils.get_keyword_centric_representatives(df_drill, top_words, n_reps=10)
+                            rep_lines_net = []
+                            for i, r in enumerate(net_reps):
+                                rep_lines_net.append(f"{i+1}. 【{r['title']}】 ({r['applicant']}) - {r['abstract'][:80]}...")
+
+                            net_data_summary = {
+                                "Total Nodes": G.number_of_nodes(),
+                                "Total Edges": G.number_of_edges(),
+                                "Top Words (Nodes)": ", ".join(net_nodes_list[:30]),
+                                "Strongest Connections (Edges)": ", ".join(sorted(net_edges_list, key=lambda x: float(x.split('J=')[1][:-1]), reverse=True)[:20]),
+                                "Representative Patents (Keyword-Centric)": "\n".join(rep_lines_net)
+                            }
+                            
+                            net_insight_context = f"""
+                            **チャートタイプ**: 共起ネットワーク (テキストマイニング)
+                            **対象データ**: クラスタ「{st.session_state.drill_base_label}」内の文書。
+                            **手法**: 複合名詞のJaccard係数による共起分析。
+                            **視覚的エンコーディング**:
+                            - **ノード**: キーワード。サイズは出現頻度。
+                            - **エッジ**: 共起関係。太さ/有無はJaccard係数 > {cooc_threshold} で定義。
+                            **目的**: 技術用語同士の意味的なつながりや、複合技術の構造を理解すること。
+                            """
+                            net_role = "あなたはテキストマイニングの専門家です。キーワードの共起関係から技術的な文脈を読み解きます。"
+                            net_instruction = """
+                            共起ネットワークの構造を分析してください：
+                            1. **中核的な概念**: 中心にある、または最もつながりの多いキーワードは何ですか？
+                            2. **技術の組み合わせ**: 強く結びついている単語のペア（エッジ）から、どのような技術要素が組み合わされているか推測してください。
+                            3. **文脈**: このクラスタは具体的に何をする技術（What/How）に関するものだと考えられますか？
+                            """
+                            net_prompt = utils_ai.generate_ai_insight_prompt(net_role, net_insight_context, net_data_summary, net_instruction)
+                            utils_ai.render_ai_insight_button(net_prompt, "saturn_net_insight")
 
     # --- C. 特許マップ (統計分析) ---
     with tab_stats:

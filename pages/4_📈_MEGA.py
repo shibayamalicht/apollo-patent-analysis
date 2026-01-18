@@ -53,6 +53,8 @@ st.set_page_config(
     layout="wide"
 )
 
+st.session_state['current_page'] = 'MEGA'
+
 # ==================================================================
 # --- 3. テキスト処理・ストップワード ---
 # ==================================================================
@@ -624,11 +626,11 @@ with tab_c:
                         fig.add_trace(go.Scatter(x=h_pts[:,0], y=h_pts[:,1], mode='lines', fill='toself', fillcolor=col, opacity=0.1, line=dict(color=col, width=2), showlegend=False, hoverinfo='skip'))
                     except: pass
 
-        # Ghost
+        # Ghost (非表示/背景)
         if not df_out.empty:
             fig.add_trace(go.Scattergl(x=df_out['x'], y=df_out['y'], mode='markers', marker=dict(color='#cccccc', size=3, opacity=0.5), name='期間外', hoverinfo='skip'))
 
-        # Focus Scatter
+        # フォーカス (散布図)
         m_line = dict(width=1, color='white') if map_mode == "密度マップ (Density)" else dict(width=0)
         colorscale = theme_config["color_sequence"] if isinstance(theme_config["color_sequence"], str) else 'turbo'
         
@@ -638,7 +640,7 @@ with tab_c:
             hovertext=df_in['label'] + "<br>" + df_in[col_map['title']], name='期間内'
         ))
 
-        # Labels
+        # ラベル
         if show_label:
             u_cls = sorted(df_in['cluster_id'].unique())
             colors = theme_config["color_sequence"]

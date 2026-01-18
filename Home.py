@@ -9,6 +9,7 @@ os.environ['OMP_NUM_THREADS'] = '1'
 # --- ライブラリ ---
 # ==================================================================
 import streamlit as st
+import textwrap
 import pandas as pd
 import numpy as np
 import warnings
@@ -42,9 +43,6 @@ st.set_page_config(
 import io
 
 import utils
-
-
-
 
 @st.cache_resource
 def load_sbert_model():
@@ -169,14 +167,16 @@ st.markdown("ここは、全分析モジュールで共通のデータ準備を�
 def initialize_session_state():
     defaults = {
         "df_main": None,
+        "df_npl": None,  # Non-Patent Literature
         "shared_df": None,
         "filename": "No File",
+        "npl_filename": "No File",
         "sbert_model": None,
         "sbert_embeddings": None,
         "tfidf_matrix": None,
         "feature_names": None,
         "col_map": {},
-        "delimiters": {'applicant': ';', 'inventor': ';', 'ipc': ';', 'fterm': ';'},
+        "delimiters": {'applicant': ';', 'inventor': ';', 'ipc': ';', 'fterm': ';', 'npl_category': ';'},
         "preprocess_done": False
     }
     for key, value in defaults.items():
@@ -230,8 +230,316 @@ with container:
                 st.session_state.df_main = None
                 st.session_state.shared_df = None
                 
-    # A-2. カラム紐付け
+        st.markdown("---")
+        st.markdown("##### (オプション) 非特許情報 (NPL) のインポート")
+        with st.expander("論文・ニュース・政策文書などを取り込む (NPL)", expanded=False):
+            
+            # AIプロンプトヘルプ
+            with st.expander("🤖 AIで政策データを作成する方法 (Deep Research)"):
+                st.markdown("""
+                ChatGPT (o1/Pro) や Gemini Advanced, Perplexity Pro などの **Deep Research (推論・検索)** 機能を持つAIに、以下のプロンプトを入力してCSVを作成させてください。
+                そのCSVをそのままApolloに読み込むことができます。
+                """)
+                st.code("""
+                【命令】
+                あなたは世界最高のリサーチャーです。
+                以下のテーマに関する主要な「法規制」「政策」「補助金」「ガイドライン」を、日米欧中を中心に徹底的に調査してください。
+                結果を以下のカラムを持つCSV形式で出力してください。コードブロック内にCSVのみを記述すること。
+
+                【調査テーマ】
+                [ここにテーマを入力: 例: リチウムイオン電池のリサイクル規制, 生成AIの著作権法規制]
+
+                【出力フォーマット(CSV schema)】
+                Title, Abstract, Date, Region, Status, Source
+                
+                - Title: 政策・規制の名称 (具体的かつ簡潔に)
+                - Abstract: その規制が何を禁止/促進しているかの要約 (日本語で100〜200文字程度。ここが分析の肝になります)
+                - Date: 施行日または発表日 (YYYY-MM-DD または YYYY)
+                - Region: 対象国・地域 (EU, US, JP, CN, Global)
+                - Status: [検討中, 施行済み, 改正案] のいずれか
+                - Source: 情報源の組織名またはURL
+                """, language="text")
+
+            # --- NPL蓄積ロジック ---
+            if 'df_npl_accumulated' not in st.session_state:
+                st.session_state.df_npl_accumulated = pd.DataFrame()
+
+            st.write("データソースの種類を選択してアップロードしてください:")
+            
+            npl_tabs = st.tabs(['📚 Academic (論文)', '📰 Business News (ニュース)', '⚖️ Policy/Regulation (政策)', '📊 Market Report (市場)'])
+            
+            # ファイル読み込みの共通関数
+            def read_uploaded_file(f):
+                if f.name.lower().endswith('.csv'):
+                    try:
+                        return pd.read_csv(f, dtype=str)
+                    except UnicodeDecodeError:
+                        return pd.read_csv(f, dtype=str, encoding='shift_jis')
+                else:
+                    return pd.read_excel(f, dtype=str)
+
+            # --- タブ 1: Academic (論文) ---
+            with npl_tabs[0]:
+                st.markdown("###### 📚 Academic (論文データ)")
+                f_aca = st.file_uploader("論文データ (LENSなど) をアップロード", type=["csv", "xlsx"], key="up_aca", accept_multiple_files=False)
+                
+                if f_aca:
+                    df = read_uploaded_file(f_aca)
+                    st.caption(f"Preview: {f_aca.name}")
+                    st.dataframe(df.head(3))
+                    
+                    cols = [None] + list(df.columns)
+                    c1, c2 = st.columns(2)
+                    idx_t = smart_map_index(None, cols, ['Title', 'Article Title', 'タイトル', 'inventionTitle'])
+                    idx_d = smart_map_index(None, cols, ['Date', 'Publication Date', '発行日', 'publicationDate'])
+                    idx_c = smart_map_index(None, cols, ['Abstract', 'Summary', '要約', 'abstract'])
+                    idx_s = smart_map_index(None, cols, ['Source', 'Journal', 'Publisher', '情報源', 'publisher'])
+                    
+                    with c1:
+                        m_title = st.selectbox("Title (必須):", cols, index=idx_t, key="map_aca_title")
+                        m_date = st.selectbox("Date (必須):", cols, index=idx_d, key="map_aca_date")
+                    with c2:
+                        m_content = st.selectbox("Abstract (必須):", cols, index=idx_c, key="map_aca_content")
+                        m_source = st.selectbox("Source (任意):", cols, index=idx_s, key="map_aca_source")
+                        
+                    if st.button("➕ データセットに追加 (Academic)", key="add_aca"):
+                        if m_title and m_date and m_content:
+                            df_new = pd.DataFrame()
+                            df_new['unified_title'] = df[m_title]
+                            df_new['unified_date'] = df[m_date]
+                            df_new['unified_content'] = df[m_content]
+                            df_new['unified_source'] = df[m_source] if m_source else "Academic Source"
+                            df_new['unified_region'] = 'Global'
+                            df_new['unified_status'] = '-'
+                            df_new['data_sub_type'] = 'Academic'
+                            df_new['source_filename'] = f_aca.name
+                            
+                            st.session_state.df_npl_accumulated = pd.concat([st.session_state.df_npl_accumulated, df_new], ignore_index=True)
+                            st.success("追加しました。")
+                            st.rerun()
+                        else:
+                            st.error("必須カラム(Title, Date, Abstract)を選択してください。")
+
+            # --- タブ 2: News (ニュース) ---
+            with npl_tabs[1]:
+                st.markdown("###### 📰 Business News (ニュース)")
+                f_news = st.file_uploader("ニュースデータをアップロード", type=["csv", "xlsx"], key="up_news", accept_multiple_files=False)
+                
+                if f_news:
+                    df = read_uploaded_file(f_news)
+                    st.caption(f"Preview: {f_news.name}")
+                    st.dataframe(df.head(3))
+                    
+                    cols = [None] + list(df.columns)
+                    c1, c2 = st.columns(2)
+                    idx_t = smart_map_index(None, cols, ['Title', 'Headline', 'タイトル', '見出し'])
+                    idx_d = smart_map_index(None, cols, ['Date', 'Published', '日付'])
+                    idx_c = smart_map_index(None, cols, ['Content', 'Body', '本文', 'Project Description'])
+                    idx_s = smart_map_index(None, cols, ['Source', 'Media', '媒体'])
+                    
+                    with c1:
+                        m_title = st.selectbox("Headline (必須):", cols, index=idx_t, key="map_news_title")
+                        m_date = st.selectbox("Date (必須):", cols, index=idx_d, key="map_news_date")
+                    with c2:
+
+                        m_content = st.selectbox("Content (任意):", cols, index=smart_map_index(None, cols, ['Content', 'Body', '本文', 'Project Description']), key="map_news_content")
+                        m_source = st.selectbox("Source (任意):", cols, index=smart_map_index(None, cols, ['Source', 'Media', '媒体']), key="map_news_source")
+                        
+                    if st.button("➕ データセットに追加 (News)", key="add_news"):
+                        if m_title and m_date:
+                            df_new = pd.DataFrame()
+                            df_new['unified_title'] = df[m_title]
+                            df_new['unified_date'] = df[m_date]
+                            df_new['unified_content'] = df[m_content] if m_content else "" # Optional
+                            df_new['unified_source'] = df[m_source] if m_source else "News Source"
+                            df_new['unified_region'] = 'Global'
+                            df_new['unified_status'] = '-'
+                            df_new['data_sub_type'] = 'Business'
+                            df_new['source_filename'] = f_news.name
+                            
+                            st.session_state.df_npl_accumulated = pd.concat([st.session_state.df_npl_accumulated, df_new], ignore_index=True)
+                            st.success("追加しました。")
+                            st.rerun()
+                        else:
+                            st.error("必須カラム(Headline, Date)を選択してください。")
+
+            # --- タブ 3: Policy (政策) ---
+            with npl_tabs[2]:
+                st.markdown("###### ⚖️ Policy & Regulation (政策)")
+                
+                # AIプロンプト
+                with st.expander("🤖 AIデータ作成プロンプト (Policy)", expanded=False):
+                    theme_pol = st.text_input("調査テーマ (例: 生成AIの著作権規制, ドローンの飛行禁止区域)", key="theme_pol")
+                    
+                    if not theme_pol:
+                        st.caption("※ 上記にテーマを入力すると、プロンプトに反映されます。")
+                        theme_pol = "[ここに調査テーマを入力してください]"
+
+                    prompt_policy = textwrap.dedent(f"""
+                        # Role (役割)
+                        あなたは専門的な「戦略的政策アナリスト」です。以下の【調査テーマ】に関連する主要な規制・政策・政府ガイドラインを網羅的に調査し、抽出してください。
+
+                        # Theme (調査テーマ)
+                        {theme_pol}
+
+                        # Objective (目的)
+                        業界に影響を与える最も重要な規制イベントの構造化CSVデータセットを作成してください。促進的な政策（補助金、規制緩和）と、制限的な規制（禁止事項、コンプライアンス要件）の両方に焦点を当ててください。
+
+                        # Formatting Rules (出力ルール)
+                        - **CSVコードブロックのみ** を出力してください。挨拶や説明文は不要です。
+                        - **Date**: YYYY (西暦4桁の年のみ)。正確な日付が不明な場合は施行年または発表年を使用してください。
+                        - **Abstract**: 日本語で100〜200文字程度の簡潔な要約。何が「禁止」されているか、または「促進」されているかを具体的に明記してください。
+
+                        # CSV Schema
+                        Title, Abstract, Date, Region, Status, Source
+
+                        - Title: 政策・規制の名称 (具体的かつ正式名称で)
+                        - Abstract: 影響の要約 (規制/促進の内容)
+                        - Date: YYYY (例: 2024, 2023)
+                        - Region: 地域コード (EU, US, JP, CN, Global, UK 等)
+                        - Status: [Draft, Enacted, Proposed, Under Review] (ステータス)
+                        - Source: 発行機関またはURL
+                    """)
+                    st.code(prompt_policy, language="markdown")
+                
+                f_pol = st.file_uploader("政策データをアップロード", type=["csv", "xlsx"], key="up_pol", accept_multiple_files=False)
+                
+                if f_pol:
+                    df = read_uploaded_file(f_pol)
+                    st.caption(f"Preview: {f_pol.name}")
+                    st.dataframe(df.head(3))
+                    
+                    cols = [None] + list(df.columns)
+                    c1, c2 = st.columns(2)
+                    
+                    with c1:
+                        m_title = st.selectbox("Policy Name (必須):", cols, index=smart_map_index(None, cols, ['Title', 'Name', '名称']), key="map_pol_title")
+                        m_date = st.selectbox("Date (必須):", cols, index=smart_map_index(None, cols, ['Date', 'Effective', '日付']), key="map_pol_date")
+                        m_region = st.selectbox("Region (任意):", cols, index=smart_map_index(None, cols, ['Region', 'Country', '国']), key="map_pol_reg")
+                    with c2:
+                        m_content = st.selectbox("Summary (必須):", cols, index=smart_map_index(None, cols, ['Abstract', 'Summary', 'Description', '要約']), key="map_pol_cont")
+                        m_source = st.selectbox("Source (任意):", cols, index=smart_map_index(None, cols, ['Source', 'Ministry', '情報源']), key="map_pol_src")
+                        m_status = st.selectbox("Status (任意):", cols, index=smart_map_index(None, cols, ['Status', 'State', '状態']), key="map_pol_stat")
+
+                    if st.button("➕ データセットに追加 (Policy)", key="add_pol"):
+                        if m_title and m_date and m_content:
+                            df_new = pd.DataFrame()
+                            df_new['unified_title'] = df[m_title]
+                            df_new['unified_date'] = df[m_date]
+                            df_new['unified_content'] = df[m_content]
+                            df_new['unified_source'] = df[m_source] if m_source else "Policy Source"
+                            df_new['unified_region'] = df[m_region] if m_region else 'Global'
+                            df_new['unified_status'] = df[m_status] if m_status else '-'
+                            df_new['data_sub_type'] = 'Policy'
+                            df_new['source_filename'] = f_pol.name
+                            
+                            st.session_state.df_npl_accumulated = pd.concat([st.session_state.df_npl_accumulated, df_new], ignore_index=True)
+                            st.success("追加しました。")
+                            st.rerun()
+                        else:
+                            st.error("必須カラムを選択してください。")
+
+            # --- タブ 4: Market Report (市場) ---
+            with npl_tabs[3]:
+                st.markdown("###### 📊 Market Report (市場レポート)")
+                
+                # AIプロンプト
+                with st.expander("🤖 AIデータ作成プロンプト (Market)", expanded=False):
+                    theme_mkt = st.text_input("調査テーマ (例: 全固体電池の市場規模, 空飛ぶクルマの市場予測)", key="theme_mkt")
+                    
+                    if not theme_mkt:
+                        st.caption("※ 上記にテーマを入力すると、プロンプトに反映されます。")
+                        theme_mkt = "[ここに調査テーマを入力してください]"
+
+                    prompt_market = textwrap.dedent(f"""
+                        # Role (役割)
+                        あなたは「シニア市場インテリジェンスアナリスト」です。以下の【調査テーマ】に関する市場規模データ、成長予測、および主要な競合動向を抽出してください。
+
+                        # Theme (調査テーマ)
+                        {theme_mkt}
+
+                        # Objective (目的)
+                        市場環境を表す構造化CSVデータセットを作成してください。定量的データ（米ドル換算の市場規模、CAGR/年平均成長率）および主要なM&Aや戦略的シフトを優先して抽出してください。
+
+                        # Formatting Rules (出力ルール)
+                        - **CSVコードブロックのみ** を出力してください。
+                        - **Date**: YYYY-MM-DD (推奨) または YYYY。
+                        - **Abstract**: **必ず具体的な数値を含めてください** (例: "市場規模500億ドル", "CAGR 15%")。主要なドライバーやトレンドを日本語で要約してください。
+
+                        # CSV Schema
+                        Title, Abstract, Date, Region, Status, Source
+
+                        - Title: レポートタイトルまたは市場セグメント名
+                        - Abstract: 市場データとトレンド (数値を必ず含むこと！)
+                        - Date: YYYY-MM-DD または YYYY
+                        - Region: 対象市場 (Global, North America, APAC, etc.)
+                        - Status: [Growth, Mature, Emerging, Declining] (市場ステージ)
+                        - Source: 調査会社またはメディア名
+                    """)
+                    st.code(prompt_market, language="markdown")
+                
+                f_mkt = st.file_uploader("市場データをアップロード", type=["csv", "xlsx"], key="up_mkt", accept_multiple_files=False)
+                
+                if f_mkt:
+                    df = read_uploaded_file(f_mkt)
+                    st.caption(f"Preview: {f_mkt.name}")
+                    st.dataframe(df.head(3))
+                    
+                    cols = [None] + list(df.columns)
+                    c1, c2 = st.columns(2)
+                    
+                    with c1:
+                        m_title = st.selectbox("Report Title (必須):", cols, index=smart_map_index(None, cols, ['Title', 'Segment', 'タイトル']), key="map_mkt_title")
+                        m_date = st.selectbox("Date (必須):", cols, index=smart_map_index(None, cols, ['Date', 'Published', '日付']), key="map_mkt_date")
+                    with c2:
+                        m_content = st.selectbox("Market Summary (必須):", cols, index=smart_map_index(None, cols, ['Abstract', 'Summary', 'Description', '要約']), key="map_mkt_cont")
+                        m_source = st.selectbox("Source (任意):", cols, index=smart_map_index(None, cols, ['Source', 'Firm', '出典']), key="map_mkt_src")
+
+                    if st.button("➕ データセットに追加 (Market)", key="add_mkt"):
+                        if m_title and m_date and m_content:
+                            df_new = pd.DataFrame()
+                            df_new['unified_title'] = df[m_title]
+                            df_new['unified_date'] = df[m_date]
+                            df_new['unified_content'] = df[m_content]
+                            df_new['unified_source'] = df[m_source] if m_source else "Market Report"
+                            df_new['unified_region'] = 'Global'
+                            df_new['unified_status'] = '-'
+                            df_new['data_sub_type'] = 'Market'
+                            df_new['source_filename'] = f_mkt.name
+                            
+                            st.session_state.df_npl_accumulated = pd.concat([st.session_state.df_npl_accumulated, df_new], ignore_index=True)
+                            st.success("追加しました。")
+                            st.rerun()
+                        else:
+                            st.error("必須カラムを選択してください。")
+
+            # --- 現在のデータセットの状態 ---
+            st.markdown("---")
+            if not st.session_state.df_npl_accumulated.empty:
+                df_acc = st.session_state.df_npl_accumulated
+                st.markdown(f"##### 📚 現在のNPLデータセット: 合計 {len(df_acc)} 件")
+                
+                # 内訳を表示
+                stats = df_acc['data_sub_type'].value_counts()
+                st.dataframe(pd.DataFrame({"Count": stats}).T)
+                
+                st.dataframe(df_acc.head(3))
+                
+                # リセットボタン
+                if st.button("🗑️ データをクリア (Reset NPL)", type="secondary"):
+                    st.session_state.df_npl_accumulated = pd.DataFrame()
+                    if 'df_npl' in st.session_state: del st.session_state.df_npl
+                    st.rerun()
+            else:
+                st.markdown("現在NPLデータは読み込まれていません。")
+                
+
+        if st.session_state.df_main is not None:
+            # タブ2に移動
+            pass
+            
     with tab2:
+        st.markdown("##### patent_dfのカラムを分析用フィールドにマッピングします。")
         if st.session_state.df_main is not None:
             df = st.session_state.df_main
             columns_with_none = [None] + list(df.columns)
@@ -260,24 +568,24 @@ with container:
                 col_map['applicant'] = st.selectbox("出願人:", columns_with_none, index=smart_map_index(st.session_state.col_map.get('applicant'), columns_with_none, kw_applicant), key="col_applicant")
                 applicant_delimiter = st.text_input("出願人区切り文字:", value=st.session_state.delimiters.get('applicant', ';'), key="del_applicant")
 
-                # IPC (Required)
+                # IPC (必須)
                 col_map['ipc'] = st.selectbox("国際特許分類 (IPC):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('ipc'), columns_with_none, kw_ipc), key="col_ipc")
                 ipc_delimiter = st.text_input("IPC区切り文字:", value=st.session_state.delimiters.get('ipc', ';'), key="del_ipc")
                 
             with col3:
                 st.markdown("##### 任意メタデータ項目")
                 
-                # Inventor
+                # 発明者
                 col_map['inventor'] = st.selectbox("発明者 (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('inventor'), columns_with_none, kw_inventor), key="col_inventor")
                 inventor_delimiter = st.text_input("発明者区切り文字:", value=st.session_state.delimiters.get('inventor', ';'), key="del_inventor")
                 
 
                 
-                # F-term
+                # Fターム
                 col_map['fterm'] = st.selectbox("Fターム (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('fterm'), columns_with_none, kw_fterm), key="col_fterm")
                 fterm_delimiter = st.text_input("Fターム区切り文字:", value=st.session_state.delimiters.get('fterm', ';'), key="del_fterm") 
                 
-                # Status
+                # ステータス
                 col_map['status'] = st.selectbox("ステータス (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('status'), columns_with_none, ['ステータス', 'Status', 'Legal Status', '法的状態']), key="col_status") 
                 
             st.session_state.col_map = col_map
@@ -396,6 +704,10 @@ with container:
                 st.error(f"エラー: フェーズ2の必須カラムが選択されていません: {missing}")
             else:
                 try:
+                    # 分析用NPLデータの同期（存在する場合）
+                    if 'df_npl_accumulated' in st.session_state and not st.session_state.df_npl_accumulated.empty:
+                        st.session_state.df_npl = st.session_state.df_npl_accumulated.copy()
+                    
                     progress_bar = st.progress(0.0)
                     status_text = st.empty()
                     
@@ -434,10 +746,10 @@ with container:
                         progress_bar.progress(total_progress)
                         return elapsed_str, eta_str
 
-                    # 1. モデルロード (Init)
+                    # 1. モデル読み込み (初期化)
                     status_text.markdown("🔄 **Phase 1/6: モデルロード中...**")
                     update_progress('init', 0.5)
-                    
+
                     df = st.session_state.df_main.copy() 
                     col_map = st.session_state.col_map
                     delimiters = st.session_state.delimiters
@@ -445,17 +757,78 @@ with container:
                     sbert_model = load_sbert_model()
                     st.session_state.sbert_model = sbert_model
                     update_progress('init', 1.0)
-
-                    # 2. テキスト結合 (Text)
-                    status_text.markdown("🔄 **Phase 2/6: テキストデータを結合中...**")
+                    # 2. 特許データの前処理
+                    status_text.markdown("🔄 **Phase 2/6: 特許データの前処理中...**")
+                    df['data_type'] = 'Patent'
                     df['text_for_sbert'] = (
                         df[col_map['title']].fillna('') + ' ' +
                         df[col_map['abstract']].fillna('') + ' ' +
                         df[col_map['claim']].fillna('')
                     )
+                    # 3. NPLデータ処理 (NPL個別処理)
+                    status_text.markdown("🔄 **Phase 3/6: 非特許情報(NPL)の個別処理中...**")
+                    if 'df_npl' in st.session_state and st.session_state.df_npl is not None:
+                        df_n = st.session_state.df_npl.copy()
+                        df_n['data_type'] = 'NPL'
+                        
+                        # 統合カラムマッピング適用
+                        n_title = df_n['unified_title'].fillna('')
+                        n_content = df_n['unified_content'].fillna('')
+                        
+                        df_n[col_map['title']] = n_title
+                        df_n[col_map['date']] = df_n['unified_date']
+                        df_n[col_map['applicant']] = df_n['unified_source'].fillna('N/A')
+                        df_n['region'] = df_n['unified_region'].fillna('Global')
+                        df_n['status'] = df_n['unified_status'].fillna('Unknown')
+                        df_n[col_map['abstract']] = n_content
+                        # 特許固有項目はダミーまたは空
+                        df_n[col_map['app_num']] = 'NPL-' + df_n.index.astype(str)
+                        
+                        # 日付パース (ロバスト - NPL用直接処理)
+                        raw_dates_n = df_n[col_map['date']].astype(str)
+                        # 強制変換、エラーはNaTに
+                        df_n['parsed_date'] = pd.to_datetime(raw_dates_n, errors='coerce')
+                        
+                        # 全て失敗した場合の"YYYY"形式のフォールバック
+                        if df_n['parsed_date'].isna().all():
+                             # 可能であれば年整数としてパース
+                             df_n['parsed_date'] = pd.to_datetime(raw_dates_n, format='%Y', errors='coerce')
+
+                        df_n['year'] = df_n['parsed_date'].dt.year
+                        
+                        # 'year'のNaN処理 (Nebulaはフィルタリングするため現状はNaNのまま)
+                        # NaTの場合は正規表現で年を抽出
+                        mask_nat = df_n['parsed_date'].isna()
+                        if mask_nat.any():
+                            # 4桁数字の正規表現抽出
+                            extracted_years = raw_dates_n[mask_nat].str.extract(r'(\d{4})')[0]
+                            # 該当行の'year'カラムを直接更新
+                            df_n.loc[mask_nat, 'year'] = pd.to_numeric(extracted_years, errors='coerce')
+
+                        # Academic/Newsのみキーワード抽出
+                        npl_text_series = n_title + ' ' + n_content
+                        sw_list = utils.get_npl_stopwords()
+                        
+                        def process_npl_keywords(row):
+                            sub_type = str(row.get('data_sub_type', ''))
+                            if sub_type in ['Academic', 'Business', 'Academic Source', 'News Source']:
+                                t_val = str(row['unified_title']) if pd.notna(row['unified_title']) else ""
+                                c_val = str(row['unified_content']) if pd.notna(row['unified_content']) else ""
+                                txt = t_val + " " + c_val
+                                return utils.extract_keywords(txt, t, sw_list)
+                            else:
+                                return []
+                        
+                        # Apply
+                        df_n['explorer_keywords'] = df_n.apply(process_npl_keywords, axis=1)
+                        
+                        # セッション状態に保存
+                        st.session_state.df_npl = df_n
+                    
                     update_progress('text', 1.0)
 
-                    # 3. SBERTエンコード (SBERT)
+                    # 4. SBERTエンコード (Patent ONLY)
+                    status_text.markdown("🔄 **Phase 4/6: AIベクトル化 (SBERT - 特許のみ)...**")
                     texts_for_sbert_list = df['text_for_sbert'].tolist()
                     batch_size = 128
                     total_batches = (len(texts_for_sbert_list) + batch_size - 1) // batch_size
@@ -468,22 +841,27 @@ with container:
                         
                         phase_prog = (i + 1) / total_batches
                         el_str, et_str = update_progress('sbert', phase_prog)
-                        status_text.markdown(f"🔄 **Phase 3/6: AIベクトル化 (SBERT) 実行中...** (Batch {i+1}/{total_batches})\n\n⏱️ 経過: {el_str} | ⏳ 残り: {et_str} (目安)")
+                        status_text.markdown(f"🔄 **Phase 4/6: AIベクトル化 (SBERT) 実行中...** (Batch {i+1}/{total_batches})\n\n⏱️ 経過: {el_str} | ⏳ 残り: {et_str} (目安)")
                     
                     sbert_embeddings = np.vstack(embeddings_list)
                     sbert_embeddings = normalize(sbert_embeddings, norm='l2')
                     st.session_state.sbert_embeddings = sbert_embeddings
 
-                    # 4. TF-IDF (TF-IDF)
-                    status_text.markdown("🔄 **Phase 4/6: キーワード抽出 (TF-IDF) 計算中...**")
+                    # 5. TF-IDF & Keyword (Patent ONLY)
+                    status_text.markdown("🔄 **Phase 5/6: キーワード抽出 (TF-IDF - 特許のみ)...**")
+                    # Explorer用 (キーワードリスト)
+                    sw_list = utils.get_stopwords()
+                    df['explorer_keywords'] = df['text_for_sbert'].apply(lambda x: utils.extract_keywords(x, t, sw_list))
+                    
+                    # 検索用 (TF-IDF行列)
                     df['text_for_tfidf'] = df['text_for_sbert'].apply(advanced_tokenize)
                     vectorizer = TfidfVectorizer(max_features=None, min_df=5, max_df=0.80)
                     st.session_state.tfidf_matrix = vectorizer.fit_transform(df['text_for_tfidf'])
                     st.session_state.feature_names = np.array(vectorizer.get_feature_names_out())
                     update_progress('tfidf', 1.0)
 
-                    # 5. 正規化 (Norm)
-                    status_text.markdown("🔄 **Phase 5/6: メタデータ (日付・IPC・出願人) 正規化中...**")
+                    # 6. 正規化 (Patent Norm)
+                    status_text.markdown("🔄 **Phase 6/6: メタデータ (日付・IPC・出願人) 正規化中...**")
                     raw_dates = df[col_map['date']].astype(str)
                     df['parsed_date'] = robust_parse_date(raw_dates)
                     df['year'] = df['parsed_date'].dt.year

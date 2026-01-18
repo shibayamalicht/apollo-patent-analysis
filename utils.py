@@ -9,6 +9,7 @@ import json
 import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import euclidean_distances
+from janome.tokenizer import Tokenizer
 
 # ==================================================================
 # --- 1. フォント設定 (共通) ---
@@ -144,29 +145,104 @@ _sw_misc = [
     "以上", "以下"
 ]
 
-# 統合リストの作成
-_stopwords_original_list = (
-    _sw_general + 
-    _sw_patent_terms + 
-    _sw_structure + 
-    _sw_it_control + 
-    _sw_chemistry + 
-    _sw_misc
-)
-
-
-def get_stopwords():
-    """全角半角を正規化したストップワードセットを返す"""
-    def expand_to_full_width(words):
-        expanded = set(words)
-        hankaku = string.ascii_letters + string.digits
-        zenkaku = "ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ０１２３４５６７８９"
-        trans = str.maketrans(hankaku, zenkaku)
-        for w in words:
-            if any(c in hankaku for c in w): expanded.add(w.translate(trans))
-        return sorted(list(expanded))
+# 7. 非特許文献 (NPL: Academic, News)
+_sw_npl = [
+    "論文","研究","報告","学会","発表","大学","研究所","教授","博士","著者","Abstract","Introduction","Conclusion","Fig","Table","et al",
+    "ニュース","報道","市場","企業","会社","本日","現地時間","増","減","前年比","見通し","予測","アナリスト","価格","円","ドル",
+    "発売","開始","終了","買収","提携","合意","設立","方針","戦略","計画","事業","売上","利益","業績","決算",
+    "株価","株式","投資","ファンド","調達","資金","規模","シェア","拡大","縮小","成長","減少","推移","動向", "概況", "見込み", "予想", "分析", "調査",
     
-    return set(expand_to_full_width(_stopwords_original_list))
+    # 英単語ストップワード (一般)
+    "the", "of", "and", "a", "an", "to", "in", "is", "you", "that", "it", "he", "was", "for", "on", "are", "as", "with", "his", "they", "i", "at", 
+    "be", "this", "have", "from", "or", "one", "had", "by", "word", "but", "not", "what", "all", "were", "we", "when", "your", "can", "said", 
+    "there", "use", "each", "which", "she", "do", "how", "their", "if", "will", "up", "other", "about", "out", "many", "then", "them", 
+    "these", "so", "some", "her", "would", "make", "like", "him", "into", "time", "has", "look", "two", "more", "write", "go", "see", "number", 
+    "no", "way", "could", "people", "my", "than", "first", "water", "been", "call", "who", "oil", "its", "now", "find", "day", "did", "get",
+    "come", "made", "may", "part", "over", "new", "sound", "take", "only", "little", "work", "know", "place", "year", "live", "me", "back",
+    "give", "most", "very", "after", "thing", "our", "just", "name", "good", "sentence", "man", "think", "say", "great", "where", "help",
+    "through", "much", "before", "line", "right", "too", "mean", "old", "any", "same", "tell", "boy", "follow", "came", "want", "show",
+    "also", "around", "form", "three", "small", "set", "put", "end", "does", "another", "well", "large", "must", "big", "even", "such",
+    "because", "turn", "here", "why", "ask", "went", "men", "read", "need", "land", "different", "home", "us", "move", "try", "kind",
+    "hand", "picture", "again", "change", "off", "play", "spell", "air", "away", "animal", "house", "point", "page", "letter", "mother",
+    "answer", "found", "should", "america", "world", "high",
+    
+    # 前置詞・接続詞
+    "above", "across", "against", "along", "among", "behind", "below", "beneath", "beside", "between", "down",
+    "during", "except", "inside", "near", "onto", "outside", "past",
+    "since", "throughout", "toward", "under", "underneath", "until", "upon", "within", "without",
+    "although", "unless", "while", "whenever", "wherever", "whether", "though", "even though",
+
+    # 代名詞
+    "mine", "myself", "yours", "yourself", "himself", "hers", "herself",
+    "itself", "ours", "ourselves", "theirs", "themselves",
+    "whom", "whose", "those",
+
+    # 学術・研究用語
+    "abstract", "introduction", "method", "methodology", "results", "discussion", "conclusion", "references", "appendix", "figure", "table",
+    "study", "research", "analysis", "investigation", "examination", "experiment", "survey", "review",
+    "data", "dataset", "information", "evidence", "findings", "outcome", "performance", "evaluation",
+    "proposed", "presented", "developed", "designed", "implemented", "demonstrated", "shown", "observed", "measured",
+    "significant", "important", "major", "key", "main", "primary", "secondary", "novel", "existing", "previous", "prior", "related",
+    "approach", "technique", "algorithm", "system", "model", "framework", "architecture", "mechanism", "process", "procedure",
+    "based on", "using", "via", "utilizing", "employing", "applying",
+    "however", "furthermore", "moreover", "therefore", "thus", "hence", "consequently", "accordingly", "additionally",
+    "in addition", "in contrast", "on the other hand", "for example", "for instance", "such as",
+    "et al", "et al.", "ibid", "op cit", "vs", "versus"
+]
+
+# 一般名詞 / ノイズ単語 (日本語) - NPLノイズ削減用
+_sw_npl_noise = [
+    "新た", "新規", "よう", "ため", "もの", "こと", "とき", "場合", "際", "点", "ほう", "どこ", "その他", "それら", "これら",
+    "一覧", "概要", "詳細", "解説", "説明", "紹介", "ページ", "サイト", "記事", "関連", "リンク"
+]
+_sw_npl.extend(_sw_npl_noise)
+
+# 統合リストの作成
+# 統合リストの定義 (分離のため構成を変更)
+def _get_expanded_set(word_list):
+    """全角半角展開したセットを返すヘルパー"""
+    expanded = set(word_list)
+    hankaku = string.ascii_letters + string.digits
+    zenkaku = "ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ０１２３４５６７８９"
+    trans = str.maketrans(hankaku, zenkaku)
+    for w in word_list:
+        if any(c in hankaku for c in w): expanded.add(w.translate(trans))
+    return expanded
+
+def get_patent_stopwords():
+    """特許分析用のストップワード (NPL用語を含まない)"""
+    base_list = (
+        _sw_general + 
+        _sw_patent_terms + 
+        _sw_structure + 
+        _sw_it_control + 
+        _sw_chemistry + 
+        _sw_misc
+    )
+    return sorted(list(_get_expanded_set(base_list)))
+
+def get_npl_stopwords():
+    """NPL分析用のストップワード (特許用 + NPL用語)"""
+    base_list = (
+        _sw_general + 
+        _sw_patent_terms + 
+        _sw_structure + 
+        _sw_it_control + 
+        _sw_chemistry + 
+        _sw_misc + 
+        _sw_npl
+    )
+    return sorted(list(_get_expanded_set(base_list)))
+
+def get_stopwords(mode="patent"):
+    """
+    互換性のためのラッパー
+    mode: "patent" (Default) or "npl"
+    """
+    if mode == "npl":
+        return get_npl_stopwords()
+    else:
+        return get_patent_stopwords()
 
 # ==================================================================
 # --- 3. サイドバー設定 (共通) ---
@@ -212,7 +288,7 @@ def render_sidebar():
     with st.sidebar:
         st.title("APOLLO") 
         st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
-        st.markdown("**v5.2.0**")
+        st.markdown("**v6.0.0**")
         st.markdown("---")
         st.subheader("Home"); st.page_link("Home.py", label="Mission Control", icon="🛰️")
         st.subheader("Modules")
@@ -223,6 +299,7 @@ def render_sidebar():
         st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
         st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
         st.page_link("pages/6_🔗_CREW.py", label="CREW", icon="🔗")
+        st.page_link("pages/9_🌌_NEBULA.py", label="NEBULA", icon="🌌")
         st.page_link("pages/8_📝_VOYAGER.py", label="VOYAGER", icon="📝")
         st.markdown("---")
         st.caption("ナビゲーション:\n1. Mission Control でデータをアップロードし、前処理を実行します。\n2. 上のリストから分析モジュールを選択します。")
@@ -246,7 +323,7 @@ def get_theme_config(theme_name):
             "accent_color": "#003366",
             "density_scale": "Blues",
             "css": """
-                html, body { background-color: #ffffff; color: #333333; }
+                html, body { background-color: #ffffff; color: #333333; overflow-y: scroll !important; }
                 [data-testid="stSidebar"] { background-color: #f8f9fa; }
                 [data-testid="stHeader"] { background-color: #ffffff; }
                 h1, h2, h3 { color: #003366; }
@@ -261,7 +338,7 @@ def get_theme_config(theme_name):
             "accent_color": "#264653",
             "density_scale": "Teal",
             "css": """
-                html, body { background-color: #fdfdfd; color: #2c3e50; font-family: "Helvetica Neue", Arial, sans-serif; }
+                html, body { background-color: #fdfdfd; color: #2c3e50; font-family: "Helvetica Neue", Arial, sans-serif; overflow-y: scroll !important; }
                 [data-testid="stSidebar"] { background-color: #eaeaea; }
                 [data-testid="stHeader"] { background-color: #fdfdfd; }
                 h1, h2, h3 { color: #264653; font-family: "Georgia", serif; }
@@ -413,11 +490,19 @@ def generate_rich_summary(df_target, title_col='title', abstract_col='abstract',
                         if len(app_val) > 30: app_val = app_val[:30] + "..."
                         
                         reps.append(f"- 【{title}】 (出願: {y_val}, {app_val}) {abstract}")
+                        
+                        summary.setdefault('representatives_raw', []).append({
+                            'title': title,
+                            'abstract': abstract,
+                            'year': y_val,
+                            'applicant': app_val
+                        })
                     except: pass
                 
                 # If mostly invalid, don't show
                 if len(reps) > 0 and (invalid_count / len(reps)) > 0.5:
                      summary['representatives'] = [] # Suppress
+                     summary['representatives_raw'] = []
                 else:
                      summary['representatives'] = reps
 
@@ -426,21 +511,175 @@ def generate_rich_summary(df_target, title_col='title', abstract_col='abstract',
 
     return summary
 
-def render_snapshot_button(title, description, key, fig=None, data_summary=None):
+def get_cluster_representatives(df_subset, cluster_col='cluster', n_reps=3):
+    """
+    データフレーム内の各クラスタについて、重心に近い代表特許を抽出する。
+    Returns:
+        dict: {cluster_id: ["- 【Title】(Applicant): Abstract...", ...]}
+    """
+    reps_dict = {}
+    
+    unique_clusters = sorted(df_subset[cluster_col].unique())
+    embeddings = st.session_state.get('sbert_embeddings')
+    
+    col_map = st.session_state.get('col_map', {})
+    title_col = col_map.get('title', 'title')
+    abs_col = col_map.get('abstract', 'abstract')
+    app_col = col_map.get('applicant', 'applicant')
+
+    for cid in unique_clusters:
+        if cid == -1: continue # Skip noise
+        
+        # Cluster subset
+        df_c = df_subset[df_subset[cluster_col] == cid]
+        if df_c.empty: continue
+        
+        try:
+            target_indices = []
+            # Plan A: Centroid-based (if embeddings exist)
+            if embeddings is not None and len(embeddings) >= df_subset.index.max():
+                 valid_indices = [i for i in df_c.index if i < len(embeddings)]
+                 if valid_indices:
+                     vectors = embeddings[valid_indices]
+                     centroid = np.mean(vectors, axis=0)
+                     dots = np.dot(vectors, centroid)
+                     top_indices_local = np.argsort(dots)[::-1][:n_reps]
+                     target_indices = [valid_indices[i] for i in top_indices_local]
+
+            # Plan B: Random/Head (Fallback)
+            if not target_indices:
+                 # Shuffle and take top N to avoid bias of file order, or just take head for stability
+                 # Let's take head for stability, or user specified sort?
+                 # Actually, usually there is no sort. Random might be better for "Variety"?
+                 # But head is safer.
+                 target_indices = df_c.index[:n_reps].tolist()
+
+            cluster_reps = []
+            for idx in target_indices:
+                row = st.session_state.df_main.loc[idx]
+                
+                # Title
+                t_val = str(row.get(title_col, 'No Title')).replace('\n', ' ')
+                # Abstract
+                a_val = str(row.get(abs_col, 'No Abstract')).replace('\n', ' ')[:80] + "..."
+                # Applicant
+                app_val = "N/A"
+                if app_col in row:
+                    val = row[app_col]
+                    if isinstance(val, list):
+                         app_val = ",".join([str(x) for x in val if x])[:20]
+                    else:
+                         app_val = str(val)[:20]
+                
+                cluster_reps.append(f"  * 【{t_val}】({app_val}): {a_val}")
+            
+            reps_dict[cid] = cluster_reps
+            
+        except Exception as e:
+            print(f"Error in getting reps for cluster {cid}: {e}")
+            continue
+            
+    return reps_dict
+
+def get_keyword_centric_representatives(df_target, top_keywords, n_reps=10):
+    """
+    ネットワークの主要キーワードを多く含む特許を抽出する (Keyword-Centric)。
+    Args:
+        df_target: 対象DataFrame
+        top_keywords: ネットワークの中心性/頻度が高いキーワードリスト (list of str)
+        n_reps: 抽出件数 (User request: significantly increase)
+    Returns:
+        list of dict: [{'title':..., 'applicant':..., 'abstract':..., 'score':...}]
+    """
+    if df_target.empty or not top_keywords:
+        return []
+
+    try:
+        # Avoid side effects
+        df = df_target.copy()
+        
+        col_map = st.session_state.get('col_map', {})
+        t_col = col_map.get('title', 'title')
+        a_col = col_map.get('abstract', 'abstract')
+        app_col = col_map.get('applicant', 'applicant')
+        y_col = 'year'
+
+        # 1. Scoring Logic: Count occurrences of top keywords in Title, Abstract, Claims(if any)
+        # 正規表現の最適化: 高速化のため上位キーワードの「OR」全体一致パターンを構築
+        # パフォーマンスのため上位30キーワードに制限
+        target_kws = top_keywords[:30]
+        # 念のためキーワードをエスケープ
+        import re
+        safe_kws = [re.escape(k) for k in target_kws if k and isinstance(k, str)]
+        if not safe_kws: return []
+        
+        pattern = "|".join(safe_kws)
+        
+        # スコア計算
+        # タイトル重み: x2, 要約: x1
+        score_series = pd.Series(0, index=df.index)
+        
+        if t_col in df.columns:
+            score_series += df[t_col].astype(str).str.count(pattern) * 2
+        if a_col in df.columns:
+            score_series += df[a_col].astype(str).str.count(pattern)
+            
+        df['_kw_score'] = score_series
+        
+        # 2. Sort and Extract
+        # 抽出要件: スコア > 0
+        df_sorted = df[df['_kw_score'] > 0].sort_values(by='_kw_score', ascending=False).head(n_reps)
+        
+        reps = []
+        for _, row in df_sorted.iterrows():
+            title = str(row.get(t_col, 'No Title')).replace('\n', ' ')
+            abstract = str(row.get(a_col, 'No Abstract')).replace('\n', ' ')[:100] + "..."
+            year = str(row.get(y_col, '-'))
+            
+            app_val = "N/A"
+            if app_col in row:
+                val = row[app_col]
+                if isinstance(val, list): app_val = ",".join([str(x) for x in val if x])
+                else: app_val = str(val)
+            if len(app_val) > 20: app_val = app_val[:20] + "..."
+            
+            reps.append({
+                'title': title,
+                'abstract': abstract,
+                'year': year,
+                'applicant': app_val,
+                'score': row['_kw_score'],
+                'matched_keywords_count': row['_kw_score'] # Simplified
+            })
+            
+        return reps
+
+    except Exception as e:
+        print(f"Error in keyword-centric extraction: {e}")
+        return []
+
+def render_snapshot_button(title, description, key, fig=None, data_summary=None, figs=None):
     """
     グラフやデータをVOYAGER用に保存するボタンを表示する
+    Args:
+        title (str): スナップショットのタイトル
+        description (str): スナップショットの説明
+        key (str): 一意の識別キー
+        fig (Figure): 単一のFigure (レガシーサポート)
+        data_summary (dict): 分析データのサマリー
+        figs (list): Figureのリスト (複数画像スナップショット用)
     """
     if 'snapshots' not in st.session_state:
         st.session_state['snapshots'] = []
 
-    # Check if already saved
+    # 保存済みかチェック
     is_saved = any(s['id'] == key for s in st.session_state['snapshots'])
     
     btn_label = "📸 Snapshot Saved" if is_saved else "📸 Save Snapshot"
     btn_type = "primary" if not is_saved else "secondary"
     
     if st.button(btn_label, key=f"snap_btn_{key}", type=btn_type, disabled=is_saved):
-        # Determine Module Name (Prioritize data_summary['module'] if available)
+        # モジュール名の決定 (data_summary['module']があれば優先)
         module_name = st.session_state.get('current_page', 'Unknown')
         if data_summary and isinstance(data_summary, dict) and 'module' in data_summary:
             module_name = data_summary['module']
@@ -451,77 +690,93 @@ def render_snapshot_button(title, description, key, fig=None, data_summary=None)
             'description': description,
             'data_summary': data_summary,
             'module': module_name,
-            'timestamp': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
+            'timestamp': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'images': [] # 新機能: 画像リストを保存
         }
         
-        # Image conversion (Best effort)
+        # 対象フィギュアの統合
+        target_figs = []
+        if figs:
+            target_figs = figs
+        elif fig:
+            target_figs = [fig]
+            
         import io
-        img_bytes = None
         
-        try:
-            if fig:
+        # --- ヘルパー: 1つのfigをバイト列に変換 ---
+        def convert_fig_to_bytes(target_fig):
+            if target_fig is None: return None, None
+            img_bytes = None
+            error_msg = None
+            
+            try:
                 # Plotly
-                if hasattr(fig, 'to_image'):
+                if hasattr(target_fig, 'to_image'):
                     try:
-                        # --- Smart Resolution & Aspect Ratio ---
-                        # Base Width for High-Res
+                        # --- スマート解像度 & アスペクト比 ---
                         base_width = 1600
                         use_width = base_width
-                        use_height = 1000 # Default fallback
-                        
-                        # 1. Map Mode (Saturn V): Match Data Aspect Ratio (1:1)
-                        # 2. Chart Mode (ATLAS): Enforce Wide Format (16:9)
+                        use_height = 1000 # デフォルトフォールバック
                         
                         is_saturn_v = module_name == 'Saturn V'
                         
                         try:
                             if is_saturn_v:
-                                # SATURN V: Calculate aspect ratio from axis ranges
-                                xaxis = fig.layout.xaxis
-                                yaxis = fig.layout.yaxis
+                                # SATURN V: アスペクト比を計算
+                                xaxis = target_fig.layout.xaxis
+                                yaxis = target_fig.layout.yaxis
                                 if xaxis.range and yaxis.range:
                                     x_range = xaxis.range[1] - xaxis.range[0]
                                     y_range = yaxis.range[1] - yaxis.range[0]
                                     if x_range > 0 and y_range > 0:
-                                        # Calculate height to match data aspect ratio
                                         ratio = x_range / y_range
                                         calc_height = base_width / ratio
-                                        # Clamp height slightly less aggressively for maps
                                         calc_height = max(600, min(calc_height, 2400))
                                         use_height = int(calc_height)
                                     else:
                                         use_height = int(base_width * 0.618)
                                 else:
-                                    # Fallback if no ranges
                                     use_height = 1000
                             else:
-                                # ATLAS / Charts: Standard Wide Format (16:9)
+                                # 標準ワイドフォーマット (16:9)
                                 use_height = int(base_width * 9 / 16)
-                                
                         except:
                             use_height = 1000
 
-                        # Increase scale to 3.0 for Ultra High Res
-                        img_bytes = fig.to_image(format="png", width=use_width, height=use_height, scale=3.0)
+                        img_bytes = target_fig.to_image(format="png", width=use_width, height=use_height, scale=3.0)
                     except Exception as e:
-                        snapshot_data['image_error'] = f"Plotly Image Error (Kaleido): {str(e)}"
-                        st.warning(f"画像化に失敗しました (Kaleido Check): {e}")
+                        error_msg = f"Plotly Image Error (Kaleido): {str(e)}"
                 
                 # Matplotlib
-                elif hasattr(fig, 'savefig'):
+                elif hasattr(target_fig, 'savefig'):
                     try:
                         buf = io.BytesIO()
-                        fig.savefig(buf, format='png', bbox_inches='tight')
+                        target_fig.savefig(buf, format='png', bbox_inches='tight')
                         buf.seek(0)
                         img_bytes = buf.getvalue()
                     except Exception as e:
-                        snapshot_data['image_error'] = f"Matplotlib Image Error: {str(e)}"
-                        st.warning(f"画像化に失敗しました: {e}")
+                        error_msg = f"Matplotlib Image Error: {str(e)}"
                         
-        except Exception as e:
-            snapshot_data['image_error'] = f"General Image Error: {str(e)}"
-            
-        snapshot_data['image'] = img_bytes
+            except Exception as e:
+                error_msg = f"General Image Error: {str(e)}"
+                
+            return img_bytes, error_msg
+
+        # Process all figures
+        for f in target_figs:
+            ib, err = convert_fig_to_bytes(f)
+            if ib:
+                snapshot_data['images'].append(ib)
+            if err:
+                snapshot_data.setdefault('image_errors', []).append(err)
+                st.warning(f"Image conversion warning: {err}")
+
+        # レガシー互換性: メインの'image'を最初の有効な画像に設定
+        if snapshot_data['images']:
+            snapshot_data['image'] = snapshot_data['images'][0]
+        else:
+            snapshot_data['image'] = None
+
         st.session_state['snapshots'].append(snapshot_data)
         st.rerun()
 
@@ -759,3 +1014,128 @@ def update_fig_layout(fig, title, height=1000, width=800, theme_config=None, sho
 
     fig.update_layout(**layout_params)
     return fig
+
+# ==================================================================
+# --- 5. 高度なテキスト処理 (Explorer logic port) ---
+# ==================================================================
+import unicodedata
+
+# 正規表現フィルター定義 (Explorerと同等)
+_ngram_rows = [
+    ("参照符号付き要素", r"[一-龥ぁ-んァ-ンA-Za-z0-9／\-＋・]+?(?:部|層|面|体|板|孔|溝|片|部材|要素|機構|装置|手段|電極|端子|領域|基板|回路|材料|工程)\s*[（(]\s*[0-9０-９A-Za-z]+[A-Za-z]?\s*[）)]", "regex", 1),
+    ("参照符号付き要素", r"(?:上記|前記)?[一-龥ぁ-んァ-ンA-Za-z0-9／\-＋・]+?(?:部|層|面|体|板|孔|溝|片|部材|要素|機構|装置|手段|電極|端子|領域|基板|回路|材料|工程)\s*[0-9０-９A-Za-z]+[A-Za-z]?", "regex", 1),
+    ("参照符号付き要素", r"[A-Z]+[0-9]+", "regex", 1),
+    ("見出し・章句","一実施形態において","literal",1), ("見出し・章句","他の実施形態において","literal",1), ("見出し・章句","別の実施形態において","literal",1),
+    ("見出し・章句","本明細書において","literal",1), ("見出し・章句","本明細書では","literal",1), ("見出し・章句","本発明の一側面","literal",1),
+    ("見出し・章句","一実施例において","literal",1), ("見出し・章句","他の実施例において","literal",1), ("見出し・章句","好ましい態様として","literal",2),
+    ("見出し・章句","好適には","literal",2), ("見出し・章句","用語の定義","literal",2), ("見出し・章句","図示しない","literal",2),
+    ("図表参照", r"図[ 　]*[０-９0-9]+に示す", "regex", 1), ("図表参照", r"表[ 　]*[０-９0-9]+に示す", "regex", 1),
+    ("図表参照", r"式[ 　]*[０-９0-9]+に示す", "regex", 1), ("図表参照", r"請求項[ 　]*[０-９0-9]+", "regex", 1),
+    ("図表参照", r"(?:【|\[)\s*[０-９0-9]{4,5}\s*(?:】|\])", "regex", 1), ("図表参照", r"[（(][０-９0-9]+[）)]", "regex", 2),
+    ("図表参照", r"第\s*[０-９0-9]+の?実施形態", "regex", 2), ("図表参照", r"段落\s*[０-９0-9]+", "regex", 2),
+    ("図表参照", r"図[ 　]*[０-９0-9]+[A-Za-z]?", "regex", 2), ("定義導入", r"以下、[^、。]+を[^、。]+と称する", "regex", 1),
+    ("定義導入", r"以下、[^、。]+を[^、。]+という", "regex", 1), ("機能句","してもよい","literal",1), ("機能句","であってもよい","literal",1),
+    ("機能句","することができる","literal",1), ("機能句","行うことができる","literal",1), ("機能句","に限定されない","literal",1),
+    ("機能句","に限られない","literal",1), ("機能句","一例として","literal",2), ("機能句","例示的には","literal",2),
+    ("参照句","前述のとおり","literal",2), ("参照句","前述の通り","literal",2), ("参照句","後述するように","literal",2),
+    ("参照句","後述のとおり","literal",2), ("範囲表現", r"少なくとも(?:一|１)つ", "regex", 2), ("範囲表現", "少なくとも一部", "literal", 2),
+    ("範囲表現", r"複数の(?:実施形態|構成|要素)", "regex", 3), ("課題句", r"(?:上記|前記)の?課題", "regex", 1),
+    ("接続・論理","一方で","literal",3), ("接続・論理","他方で","literal",3), ("接続・論理","すなわち","literal",3)
+]
+_ngram_compiled = []
+for cat, pat, ptype, pri in _ngram_rows:
+    if ptype == "regex":
+        _ngram_compiled.append((cat, re.compile(pat), ptype, pri))
+    else:
+        _ngram_compiled.append((cat, pat, ptype, pri))
+
+def normalize_text(text):
+    if not isinstance(text, str): text = "" if pd.isna(text) else str(text)
+    text = unicodedata.normalize("NFKC", text)
+    text = text.replace("µ", "μ")
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+def apply_ngram_filters(text):
+    for cat, pat, ptype, pri in _ngram_compiled:
+        if ptype == "literal":
+            if pat in text: text = text.replace(pat, "")
+        else:
+            text = pat.sub("", text)
+    return text
+
+@st.cache_resource
+def load_tokenizer():
+    return Tokenizer()
+
+def extract_keywords(text, tokenizer=None, stopwords=None, top_n=None, clean_html=False):
+    """
+    テキストから特徴語（名詞・複合名詞）を抽出する実用版関数 (Explorerロジック準拠)
+    Args:
+        text (str): 対象テキスト
+        tokenizer: Janome Tokenizerインスタンス (Noneの場合は内部でキャッシュされたものを使用)
+        stopwords (list/set): ストップワードのリスト
+        top_n: 未使用 (互換性のため維持)
+        clean_html (bool): Trueの場合、HTML/XMLタグを除去する (NPL推奨)
+    Returns:
+        list: 抽出されたキーワードのリスト
+    """
+    if not text: return []
+    if stopwords is None: stopwords = get_patent_stopwords() # Default to patent
+    if tokenizer is None: tokenizer = load_tokenizer() # Use cached tokenizer
+    
+    # Pre-processing
+    if clean_html:
+        text = re.sub(r'<[^>]+>', ' ', text) # Strip HTML tags
+
+    text = normalize_text(text)
+    text = apply_ngram_filters(text)
+    text = re.sub(r'【.*?】', '', text)
+    text = re.sub(r'[!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~]', ' ', text)
+
+    words = []
+    
+    # 1. Japanese Morphological Analysis (Compound Nouns)
+    if tokenizer:
+        tokens = tokenizer.tokenize(text)
+        compound_word = ''
+        
+        for token in tokens:
+            pos = token.part_of_speech.split(',')[0]
+            if pos == '名詞':
+                compound_word += token.surface
+            else:
+                if (len(compound_word) > 1 and
+                    compound_word not in stopwords and
+                    not re.fullmatch(r'[\d０-９]+', compound_word) and
+                    not re.fullmatch(r'(図|表|式|第)[\d０-９]+.*', compound_word) and
+                    not re.match(r'^(上記|前記|本開示|当該|該)', compound_word) and
+                    not re.search(r'[0-9０-９]+[)）]?$', compound_word) and
+                    not re.match(r'[0-9０-９]+[a-zA-Zａ-ｚＡ-Ｚ]', compound_word) and
+                    # ひらがな1文字+記号のようなゴミを除去
+                    not re.fullmatch(r'[ぁ-ん]', compound_word)):
+                    words.append(compound_word)
+                compound_word = ''
+        
+        # Last word
+        if (len(compound_word) > 1 and
+            compound_word not in stopwords and
+            not re.fullmatch(r'[\d０-９]+', compound_word) and
+            not re.fullmatch(r'(図|表|式|第)[\d０-９]+.*', compound_word) and
+            not re.match(r'^(上記|前記|本開示|当該|該)', compound_word) and
+            not re.search(r'[0-9０-９]+[)）]?$', compound_word) and
+            not re.match(r'[0-9０-９]+[a-zA-Zａ-ｚＡ-Ｚ]', compound_word)):
+            words.append(compound_word)
+
+    # 2. English Fallback (Regex based) - Only if no Japanese keywords found or text is English-heavy
+    # 日本語特許でも英単語（"AI", "IoT"）は上記ロジックで名詞として拾われるケースが多いが、
+    # 念のため、キーワードがゼロの場合や、明らかに英語テキストの場合の補完
+    if not words and re.search(r'[a-zA-Z]', text):
+         # Extract 3+ letter words, ensure lowercase check against stopwords
+         skips = set([w.lower() for w in stopwords])
+         candidates = re.findall(r'\b[a-zA-Z]{3,}\b', text)
+         for w in candidates:
+             if w.lower() not in skips:
+                 words.append(w)
+
+    return words

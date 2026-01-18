@@ -15,6 +15,8 @@ from scipy.ndimage import label as nd_label
 from scipy.spatial import ConvexHull
 from sklearn.feature_extraction.text import TfidfVectorizer
 import utils
+import utils_ai
+import utils_spatial
 from umap import UMAP
 import hdbscan
 from wordcloud import WordCloud
@@ -25,10 +27,12 @@ import matplotlib.font_manager as fm
 # 警告を非表示
 warnings.filterwarnings('ignore')
 
-#Page Config
+# ページ設定
 st.set_page_config(page_title="APOLLO | EAGLE", page_icon="🦅", layout="wide")
 
-# Font Setup
+st.session_state['current_page'] = 'EAGLE'
+
+# フォント設定
 FONT_PATH = utils.get_japanese_font_path()
 if FONT_PATH:
     try:
@@ -36,10 +40,10 @@ if FONT_PATH:
         plt.rcParams['font.family'] = prop.get_name()
     except: pass
 
-# Sidebar
+# サイドバー
 utils.render_sidebar()
 
-# Theme
+# テーマ設定
 theme_config = utils.get_theme_config("APOLLO Standard")
 st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
 
@@ -47,7 +51,7 @@ st.title("🦅 EAGLE")
 st.markdown("**Explorer of Aggregated Global Landscapes & Elevations**：SBERT（文脈・意味）に基づいた、インタラクティブな技術マップ分析モジュールです。")
 
 # ==================================================================
-# --- Text Processing Globals & Helpers ---
+# --- テキスト処理設定 ---
 # ==================================================================
 @st.cache_resource
 def load_tokenizer_eagle():
@@ -187,7 +191,7 @@ def get_top_tfidf_words(row_vector, feature_names, top_n=5):
     top_words = [feature_names[i] for i in top_indices]
     return ", ".join(top_words)
 
-# Helper: Update Hover Text (Adapted for EAGLE)
+# ヘルパー: ホバーテキスト更新 (EAGLE用)
 def update_hover_text_eagle(df, col_map, labels_map=None, cluster_col='eagle_cluster'):
     hover_texts = []
     for index, row in df.iterrows():
@@ -199,7 +203,7 @@ def update_hover_text_eagle(df, col_map, labels_map=None, cluster_col='eagle_clu
         hover_texts.append(text)
     return hover_texts
 
-# Data Loading
+# データ読み込み
 if not st.session_state.get("preprocess_done", False):
     st.error("分析データがありません。Mission Controlでデータをロードしてください。")
     st.stop()
@@ -211,7 +215,7 @@ feature_names = st.session_state.feature_names
 col_map = st.session_state.col_map
 delimiters = {'applicant': ';', 'inventor': ';', 'ipc': ';', 'fi': ';', 'f_term': ';'}
 
-# Ensure UMAP coordinates exist (Share with Saturn V)
+# UMAP座標の存在確認 (Saturn Vと共有)
 if 'umap_x' not in df_main.columns or 'umap_y' not in df_main.columns:
     with st.spinner("UMAP座標を算出中 (Saturn Vと共有)..."):
         reducer = UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=42)
@@ -221,7 +225,7 @@ if 'umap_x' not in df_main.columns or 'umap_y' not in df_main.columns:
         st.session_state.saturnv_sbert_umap_done = True
         df_main = st.session_state.df_main
 
-# Init Session State for EAGLE
+# EAGLE用セッション状態初期化
 if "eagle_cluster_map" not in st.session_state: st.session_state.eagle_cluster_map = {}
 if "eagle_labels_map" not in st.session_state: st.session_state.eagle_labels_map = {}
 if "df_eagle" not in st.session_state: 
@@ -231,24 +235,24 @@ if "df_eagle" not in st.session_state:
     if 'eagle_cluster' in st.session_state.df_eagle.columns:
          st.session_state.df_eagle['eagle_cluster'] = st.session_state.df_eagle['eagle_cluster'].fillna(-1).astype(int)
 
-# Init/Verify characteristic_words
+# 特徴語の初期化/検証
 if 'characteristic_words' not in st.session_state.df_eagle.columns:
     with st.spinner("特徴語を抽出中..."):
         # df_eagleはdf_mainのコピーであり、インデックスがTF-IDF行列と整合していることを前提とする
         kw_list = []
-        # Check if df_main already has it to optimize
+        # 最適化のためdf_mainに既に存在するか確認
         if 'characteristic_words' in df_main.columns:
              st.session_state.df_eagle['characteristic_words'] = df_main['characteristic_words']
         else:
-             # Calculate for df_main first to reuse
+             # 再利用のため先にdf_mainで計算
              st.session_state.df_main['characteristic_words'] = [get_top_tfidf_words(tfidf_matrix[i], feature_names) for i in range(tfidf_matrix.shape[0])]
              st.session_state.df_eagle['characteristic_words'] = st.session_state.df_main['characteristic_words']
 
-# Verify hover_text exists in df_eagle, if not create it (or recreate if kw added)
+# hover_textの存在確認
 if 'hover_text' not in st.session_state.df_eagle.columns or 'characteristic_words' not in st.session_state.df_eagle['hover_text'].iloc[0]:
     st.session_state.df_eagle['hover_text'] = update_hover_text_eagle(st.session_state.df_eagle, col_map)
 
-# Helper: Label Generator
+# ヘルパー: ラベル生成
 def generate_label_for_cluster(df_sub, tfidf_mat, feat_names, top_n=3):
     if df_sub.empty: return "Empty"
     indices = df_sub.index
@@ -257,7 +261,7 @@ def generate_label_for_cluster(df_sub, tfidf_mat, feat_names, top_n=3):
     top_indices = np.argsort(mean_vec)[::-1][:top_n]
     return ", ".join([feat_names[i] for i in top_indices])
 
-# Helper: Update Layout using Utils
+# ヘルパー: Utilsを使用してレイアウト更新
 def update_fig_eagle(fig, title, show_legend=False):
     utils.update_fig_layout(fig, title, height=1000, theme_config=theme_config, show_axes=False, show_legend=show_legend)
     fig.update_xaxes(visible=False)
@@ -266,7 +270,7 @@ def update_fig_eagle(fig, title, show_legend=False):
         fig.update_layout(showlegend=False) # Hide legend box if not requested
     return fig
 
-# Helper: Get Density Trace
+# ヘルパー: 密度トレース取得
 def get_density_trace(x, y, mesh_size):
     custom_density_colorscale = [
         [0.0, "rgba(255, 255, 255, 0)"], 
@@ -284,34 +288,34 @@ def get_density_trace(x, y, mesh_size):
         hoverinfo='skip'
     )
 
-# --- Shared Settings ---
+# --- 共通設定 ---
 col_common, _ = st.columns([1, 2])
 with col_common:
     resolution = st.number_input("メッシュサイズ (Grid)", min_value=10, max_value=200, value=30, step=5, key="eagle_resolution_common")
 
 st.markdown("---")
 
-# --- Filtering & Data Layering (Saturn V Architecture) ---
+# --- フィルタリングとデータレイヤリング (Saturn Vアーキテクチャ) ---
 st.subheader("フィルタリング設定")
 
 # 1. Universe (全体)
 df_universe = st.session_state.df_eagle.copy()
 
-# Global ZMax Calculation for Absolute Density Scale
-# Calculate mesh density on Universe to get global max density
+# 絶対密度スケール用の全体ZMax計算
+# ユニバース上のメッシュ密度を計算し、全体最大密度を取得
 try:
     _H, _x, _y = np.histogram2d(df_universe['umap_x'], df_universe['umap_y'], bins=resolution)
     eagle_global_zmax = _H.max()
 except:
     eagle_global_zmax = None
 
-# Filter UI
+# フィルタUI
 col_f1, col_f2 = st.columns(2)
 def on_eagle_interval_change():
     if "eagle_main_date_filter" in st.session_state: del st.session_state.eagle_main_date_filter
 
 with col_f1:
-    # Date Binning
+    # 日付ビニング
     if 'year' in df_universe.columns and df_universe['year'].notna().any():
         bin_interval_val = st.selectbox("期間の粒度:", [5, 3, 2, 1], index=0, key="eagle_main_bin_interval", on_change=on_eagle_interval_change)
         date_bin_opts = get_date_bin_options(df_universe, int(bin_interval_val), 'year')
@@ -330,7 +334,7 @@ if not date_filter_val.startswith("(全期間)"):
     except: pass
 
 with col_f2:
-    # Applicant Filter (Applied to Trend to create Focus)
+    # 出願人フィルタ (フォーカス作成のためにトレンドに適用)
     if 'applicant_main' in df_trend.columns:
         apps = df_trend['applicant_main'].explode().dropna()
     elif col_map['applicant'] and col_map['applicant'] in df_trend.columns:
@@ -371,10 +375,10 @@ except:
 st.markdown(f"**表示データ数: {len(df_focus)} / {len(df_universe)}**")
 st.markdown("---")
 
-# --- Main Analysis: Lasso Clustering ---
+# --- メイン分析: Lassoクラスタリング ---
 st.subheader("手動選択クラスタリング")
 
-# Cluster Management UI
+# クラスタ管理UI
 c_mgmt1, c_mgmt2 = st.columns([1, 1])
 with c_mgmt1:
     edit_mode = st.radio("モード:", ["編集中 (Edit)", "閲覧中 (FIX)"], horizontal=True, key="eagle_edit_mode")
@@ -386,25 +390,25 @@ if is_editing:
 else:
     st.markdown("クラスタリングはロックされています。修正する場合は「編集中」に切り替えてください。", unsafe_allow_html=True)
 
-# Controls (Labels & Density Fix)
+# コントロール (ラベル & 密度固定)
 col_ctrl1, col_ctrl2 = st.columns([1, 2])
 with col_ctrl1:
     show_labels_chk = st.checkbox("マップにラベルを表示する", value=True, key="eagle_main_show_labels")
 with col_ctrl2:
     fix_density_chk = st.checkbox("密度マップを固定 (全体基準)", value=True, key="eagle_fix_density")
 
-# Show current clusters
+# 現在のクラスタを表示
 fig_lasso = go.Figure()
 
-# 1. Density Background (Based on Trend)
-# If fix_density_chk is ON, utilize global zmax for absolute scale comparison
+# 1. 密度背景 (トレンドに基づく)
+# fix_density_chkがONの場合、絶対スケール比較にglobal zmaxを利用
 if not df_trend.empty:
     density_trace = get_density_trace(df_trend['umap_x'], df_trend['umap_y'], resolution)
     if fix_density_chk and eagle_global_zmax is not None:
         density_trace.update(zauto=False, zmin=0, zmax=eagle_global_zmax)
     fig_lasso.add_trace(density_trace)
 
-# 2. Ghost Points (Filtered out data)
+# 2. ゴーストポイント (除外データ)
 if not df_ghost.empty:
     fig_lasso.add_trace(go.Scattergl(
         x=df_ghost['umap_x'], y=df_ghost['umap_y'], mode='markers',
@@ -413,27 +417,27 @@ if not df_ghost.empty:
         hoverinfo='skip'
     ))
 
-# 3. Focus Points (Target for Clustering)
+# 3. フォーカスポイント (クラスタリング対象)
 uniq = sorted(df_focus['eagle_cluster'].unique())
 color_seq = theme_config["color_sequence"]
 
 is_applicant_filtered = "ALL" not in selected_apps
 
-# Marker Border for Edit Mode
+# 編集モード用マーカー枠線
 marker_border = dict(width=1, color='#333333') if is_editing else dict(width=0)
 
 if is_applicant_filtered:
-    # Applicant Coloring Mode (Saturn V Style)
+    # 出願人着色モード (Saturn Vスタイル)
     palette = px.colors.qualitative.Bold
     
     for i, app_name in enumerate(selected_apps):
-        # Filter for this applicant
+        # この出願人でフィルタ
         mask = df_focus[col_map['applicant']].fillna('').str.contains(re.escape(app_name))
         d_app = df_focus[mask]
         
         if not d_app.empty:
-                # Construct dynamic hover text with current cluster info
-                # Need to map internal cluster ID to label for each point
+                # 動的ホバーテキスト構築
+                # 内部クラスタIDをラベルにマッピング
                 current_labels = d_app['eagle_cluster'].map(lambda x: st.session_state.eagle_labels_map.get(x, str(x)) if x != -1 else "")
                 dynamic_hover = d_app['hover_text'] + d_app['eagle_cluster'].apply(lambda x: f"<b>クラスタ:</b> {st.session_state.eagle_labels_map.get(x, str(x))}" if x != -1 else "")
                 
@@ -447,7 +451,7 @@ if is_applicant_filtered:
                     showlegend=True
                 ))
 else:
-    # Cluster Coloring Mode (Original)
+    # クラスタ着色モード (オリジナル)
     for i, c in enumerate(uniq):
         d = df_focus[df_focus['eagle_cluster'] == c]
         if d.empty: continue
@@ -455,7 +459,7 @@ else:
         color = '#dddddd' if c == -1 else color_seq[i % len(color_seq)]
         opacity = 0.3 if c == -1 else 0.8
         
-        # For cluster mode, all points in 'd' belong to cluster 'c' (name)
+        # クラスタモードの場合、d内の全点はクラスタc(name)に属する
         dynamic_hover_c = d['hover_text'] + (f"<b>クラスタ:</b> {name}" if c != -1 else "")
 
         fig_lasso.add_trace(go.Scattergl(
@@ -468,7 +472,7 @@ else:
             showlegend=False
         ))
 
-# 3. Annotations
+# 3. アノテーション
 annotations_main = []
 if show_labels_chk:
     for c in uniq:
@@ -498,7 +502,7 @@ if show_labels_chk:
 fig_lasso.update_layout(annotations=annotations_main)
 update_fig_eagle(fig_lasso, "Current Clusters", show_legend=is_applicant_filtered)
 
-# Interactive Logic
+# インタラクティブロジック
 if is_editing:
     fig_lasso.update_layout(dragmode='lasso', clickmode='event+select')
     selection = st.plotly_chart(fig_lasso, use_container_width=True, on_select="rerun", config={
@@ -521,7 +525,7 @@ if is_editing:
     
     st.write(f"選択中: {len(selected_indices)} 件")
     
-    # New Cluster Creation
+    # 新規クラスタ作成
     if selected_indices:
         col_l1, col_l2 = st.columns(2)
         with col_l1:
@@ -539,7 +543,7 @@ if is_editing:
                 st.success(f"ID {new_id} を作成しました！")
                 st.rerun()
 
-    # Delete Cluster UI
+    # クラスタ削除UI
     st.markdown("#### クラスタ削除")
     del_ids = [c for c in sorted(st.session_state.df_eagle['eagle_cluster'].unique()) if c != -1]
     if del_ids:
@@ -556,8 +560,8 @@ if is_editing:
                 st.rerun()
 
 else:
-    # Fixed Mode
-    fig_lasso.update_layout(dragmode='pan') # Lock selection
+    # 固定モード
+    fig_lasso.update_layout(dragmode='pan') # 選択ロック
     st.plotly_chart(fig_lasso, use_container_width=True, config={
         'editable': True,
         'edits': {
@@ -571,7 +575,81 @@ else:
         }
     })
 
-# --- Label Editor ---
+    # エクスポート & インサイトボタン
+    snap_data = utils.generate_rich_summary(df_focus, title_col=col_map['title'], abstract_col=col_map['abstract'])
+    snap_data['module'] = 'EAGLE'
+    
+    # 統計情報の追加
+    try:
+         cluster_counts_snap = df_focus['eagle_cluster'].value_counts()
+         cluster_summary_lines = []
+         
+         # クラスタごとの代表を抽出
+         cluster_reps = utils.get_cluster_representatives(df_focus, cluster_col='eagle_cluster', n_reps=3)
+
+         for cid in sorted(df_focus['eagle_cluster'].unique()):
+             if cid == -1: continue
+             label = st.session_state.eagle_labels_map.get(cid, f"Cluster {cid}")
+             count = cluster_counts_snap.get(cid, 0)
+             cluster_summary_lines.append(f"- {label} ({count}件)")
+             
+             # 代表を追加
+             if cid in cluster_reps:
+                 for rep in cluster_reps[cid]:
+                     cluster_summary_lines.append(rep)
+
+         snap_data['cluster_summary'] = "設定クラスタ構成 (Lasso):\n" + "\n".join(cluster_summary_lines)
+    except: pass
+
+    # AIインサイト (メイン)
+
+    # AIインサイトコンテキスト準備
+    insight_context = f"""
+    **マップタイプ**: 技術ランドスケープ (EAGLE - Telescope)
+    **分析対象**: 全体俯瞰マップ。
+    **手法**: SBERT (文章ベクトル化) + UMAP (次元圧縮) + Lasso (手動クラスタ探索)。
+    **視覚的エンコーディング**:
+    - **点**: 個々の特許/文献。距離が近いほど意味的に類似しています。
+    - **クラスタ**: 色分けされたグループは、自動検出された技術領域を表します。
+    - **配置**: マップ全体の「形状」が技術空間の広がりを表します。
+    """
+    insight_role = "あなたはシニア特許アナリストです。技術俯瞰図から戦略的な示唆を導きます。"
+    insight_instruction = """
+    ランドスケープの構造を分析してください：
+    1. **主要テーマ**: どのような技術クラスタが形成されていますか？
+    2. **技術の関係性**: どのクラスタとどのクラスタが近接していますか？そこから読み取れる技術的シナジーは？
+    3. **注目領域**: フィルタリングされた領域の特徴は何ですか？
+    **重要**: 回答は箇条書きで、技術的な洞察を深掘りしてください。
+    """
+    
+    # 空間情報
+    spatial_info = utils_spatial.generate_spatial_cluster_summary(
+        df_focus, 'eagle_cluster', 'umap_x', 'umap_y', label_map=st.session_state.eagle_labels_map
+    )
+
+    # スナップショット用に統合
+    full_ai_context = f"""
+### AI Insight Context (Auto-Generated)
+{insight_context}
+
+### Spatial Context
+{spatial_info}
+
+### Analyst Instructions
+{insight_instruction}
+"""
+    snap_data['ai_insight_context'] = full_ai_context
+
+
+
+    main_prompt = utils_ai.generate_ai_insight_prompt(
+        insight_role, insight_context, snap_data, insight_instruction,
+        extra_content=f"\n# 空間配置情報 (Spatial Context)\n{spatial_info}"
+    )
+    utils_ai.render_ai_insight_button(main_prompt, "eagle_main_insight")
+
+
+# --- ラベルエディタ ---
 st.markdown("---")
 st.subheader("クラスタ・ラベル編集")
 
@@ -620,12 +698,12 @@ with st.expander("CSVダウンロードオプション", expanded=True):
         )
 
 # ==================================================================
-# --- Dril-Down Analysis (Adapted from Saturn V) ---
+# --- ドリルダウン分析 (Saturn Vより) ---
 # ==================================================================
 st.markdown("---")
 st.subheader("ドリルダウン分析 / 詳細分析")
 
-# Select Cluster with Counts
+# カウント付きクラスタ選択
 c_counts = st.session_state.df_eagle['eagle_cluster'].value_counts()
 sorted_cids = sorted(st.session_state.df_eagle['eagle_cluster'].unique())
 cluster_opts = [(f"(未選択)", "NONE")] + \
@@ -685,12 +763,12 @@ if drilldown_target_id != "NONE":
     if st.button("選択クラスタで詳細マップ作成", type="primary", key="eagle_drill_run_button"):
         with st.spinner(f"クラスタ {drilldown_target_id} の詳細分析を実行中..."):
             try:
-                # Use eagle_drilldown_result for separate state
+                # 独立した状態としてeagle_drilldown_resultを使用
                 df_subset = st.session_state.df_eagle[st.session_state.df_eagle['eagle_cluster'] == drilldown_target_id].copy()
-                # Label might be customized
+                # ラベルはカスタマイズされている可性あり
                 base_label = st.session_state.eagle_labels_map.get(drilldown_target_id, str(drilldown_target_id))
                 
-                # Filters
+                # フィルタ
                 if not drill_date_bin_filter_w.startswith("(全期間)"):
                     try:
                         date_bin_label = drill_date_bin_filter_w.split(' (')[0].strip() 
@@ -703,7 +781,7 @@ if drilldown_target_id != "NONE":
                     mask_list_drill = [df_subset[col_map['applicant']].fillna('').str.contains(re.escape(app)) for app in drill_app_values]
                     df_subset = df_subset[pd.concat(mask_list_drill, axis=1).any(axis=1)]
                 
-                if len(df_subset) < 3: # Lowered limit
+                if len(df_subset) < 3: # 制限緩和
                     st.warning(f"データが少なすぎます ({len(df_subset)}件)。再分割できません。")
                 else:
                     subset_indices = df_subset.index
@@ -870,6 +948,72 @@ if drilldown_target_id != "NONE":
             
             selection_drill = st.plotly_chart(fig_drill, use_container_width=True, on_select="rerun", config={'editable': False})
             
+            # Export & Insight (Drill-down)
+            snap_data_d = utils.generate_rich_summary(df_drill, title_col=col_map['title'], abstract_col=col_map['abstract'])
+            snap_data_d['module'] = 'EAGLE Drill-down'
+            
+            # Sub-cluster summary for Voyager
+            try:
+                 cluster_counts_snap_d = df_drill['drill_cluster'].value_counts()
+                 cluster_summary_lines_d = []
+                 
+                 # Extract representatives
+                 cluster_reps_d = utils.get_cluster_representatives(df_drill, cluster_col='drill_cluster', n_reps=3)
+
+                 for cid in sorted(df_drill['drill_cluster'].unique()):
+                     if cid == -1: continue
+                     label = drill_labels_map.get(cid, f"Sub-Cluster {cid}")
+                     count = cluster_counts_snap_d.get(cid, 0)
+                     cluster_summary_lines_d.append(f"- {label} ({count}件)")
+                     
+                     if cid in cluster_reps_d:
+                         for rep in cluster_reps_d[cid]:
+                             cluster_summary_lines_d.append(rep)
+
+                 snap_data_d['cluster_summary'] = f"サブクラスタ構成 ({st.session_state.eagle_drill_base_label}):\n" + "\n".join(cluster_summary_lines_d)
+            except: pass
+
+
+            # Prepare AI Insight Context (Drill)
+            drill_insight_context = f"""
+            **マップタイプ**: 局所ドリルダウンマップ (EAGLE)
+            **分析対象**: クラスタ「{st.session_state.eagle_drill_base_label}」
+            **手法**: 再計算されたUMAP。サブクラスタは自動(HDBSCAN)または手動で識別されます。
+            **目的**: 選択された上位クラスタ（親分類）の内部にある、詳細なサブ構造を分析すること。
+            """
+            drill_insight_role = "あなたは高度なIPランドスケープアナリストです。技術動向と競合状況を深く読み解く専門家です。"
+            drill_insight_instruction = """
+            この特定技術領域（クラスタ）の内部構造を分析してください：
+            1. **サブテーマの構成**: この領域はどのような細かいサブテーマ（サブクラスタ）に分かれていますか？
+            2. **詳細な内容**: 代表的な特許/文献から、具体的にどのような技術課題や解決策が議論されているか要約してください。
+            """
+            
+            d_spatial_info = utils_spatial.generate_spatial_cluster_summary(
+                df_drill, 'drill_cluster', 'drill_x', 'drill_y', label_map=drill_labels_map
+            )
+
+            # Combine for Snapshot
+            full_drill_context = f"""
+### AI Insight Context (Auto-Generated)
+{drill_insight_context}
+
+### Spatial Context
+{d_spatial_info}
+
+### Analyst Instructions
+{drill_insight_instruction}
+"""
+            snap_data_d['ai_insight_context'] = full_drill_context
+
+
+
+            drill_prompt = utils_ai.generate_ai_insight_prompt(
+                drill_insight_role, drill_insight_context, snap_data_d, drill_insight_instruction,
+                extra_content=f"\n# 空間配置情報 (Spatial Context)\n{d_spatial_info}"
+            )
+            utils_ai.render_ai_insight_button(drill_prompt, "eagle_drill_insight")
+
+            
             # --- Manual Lasso Logic for Drill-down ---
             s_indices_d = []
             if selection_drill and "selection" in selection_drill:
@@ -986,6 +1130,43 @@ if drilldown_target_id != "NONE":
                             utils.update_fig_layout(fig_net, '共起ネットワーク', theme_config=theme_config, show_axes=False)
                             fig_net.update_xaxes(visible=False); fig_net.update_yaxes(visible=False)
                             st.plotly_chart(fig_net, use_container_width=True)
+                            
+                            # AI Insight (Network)
+                            net_nodes_list = [f"{n} ({G.nodes[n]['count']})" for n in G.nodes()]
+                            net_edges_list = [f"{u} - {v} (J={d['weight']:.2f})" for u, v, d in G.edges(data=True)]
+                            
+                            # Extract Keyword-Centric Representatives for Insight
+                            net_reps = utils.get_keyword_centric_representatives(df_drill, top_words, n_reps=10)
+                            rep_lines_net = []
+                            for i, r in enumerate(net_reps):
+                                rep_lines_net.append(f"{i+1}. 【{r['title']}】 ({r['applicant']}) - {r['abstract'][:80]}...")
+
+                            net_data_summary = {
+                                "Total Nodes": G.number_of_nodes(),
+                                "Total Edges": G.number_of_edges(),
+                                "Top Words": ", ".join(net_nodes_list[:30]),
+                                "Strongest Edges": ", ".join(sorted(net_edges_list, key=lambda x: float(x.split('J=')[1][:-1]), reverse=True)[:20]),
+                                "Representative Patents (Keyword-Centric)": "\n".join(rep_lines_net)
+                            }
+                            net_context = f"""
+                            **チャートタイプ**: 共起ネットワーク (テキストマイニング)
+                            **対象データ**: クラスタ「{st.session_state.eagle_drill_base_label}」内の文書。
+                            **手法**: 複合名詞のJaccard係数による共起分析。
+                            **視覚的エンコーディング**:
+                            - **ノード**: キーワード。サイズは出現頻度。
+                            - **エッジ**: 共起関係。太さ/有無はJaccard係数 > {cooc_threshold} で定義。
+                            **目的**: 技術用語同士の意味的なつながりや、複合技術の構造を理解すること。
+                            """
+                            net_role = "あなたはテキストマイニングの専門家です。キーワードの共起関係から技術的な文脈を読み解きます。"
+                            net_inst = """
+                            共起ネットワークの構造を分析してください：
+                            1. **中核的な概念**: 中心にある、または最もつながりの多いキーワードは何ですか？
+                            2. **技術の組み合わせ**: 強く結びついている単語のペア（エッジ）から、どのような技術要素が組み合わされているか推測してください。
+                            3. **文脈**: このクラスタは具体的に何をする技術（What/How）に関するものだと考えられますか？
+                            """
+                            net_prompt = utils_ai.generate_ai_insight_prompt(net_role, net_context, net_data_summary, net_inst)
+                            utils_ai.render_ai_insight_button(net_prompt, "eagle_net_insight")
+
 
         with tab_drill_stats:
             st.subheader("特許マップ（統計分析）")

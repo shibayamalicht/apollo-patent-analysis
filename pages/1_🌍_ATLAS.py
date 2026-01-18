@@ -58,7 +58,7 @@ def update_fig_layout(fig, title, height=600, theme_config=None, show_legend=Tru
     if theme_config is None:
         return fig
     
-    # Sanitize title to remove implicit/explicit HTML tags
+    # タイトルから暗黙的/明示的なHTMLタグを除去してサニタイズ
     if isinstance(title, str):
         title = re.sub(r'<[^>]+>', '', title)
 
@@ -85,6 +85,8 @@ st.set_page_config(
     page_icon="🌍",
     layout="wide"
 )
+
+st.session_state['current_page'] = 'ATLAS'
 
 utils.render_sidebar()
 
@@ -198,7 +200,7 @@ with tab1:
                 # Use color_discrete_map for consistency
                 fig = px.bar(plot_data, x='year', y='count', color=status_col, labels={'year': '出願年', 'count': '出願件数', status_col: 'ステータス'}, 
                              color_discrete_map=status_color_map,
-                             category_orders={status_col: sorted(status_color_map.keys())} # Ensure consistent legend order
+                             category_orders={status_col: sorted(status_color_map.keys())} # 凡例の順序を統一
                             )
             else:
                 # Standard Bar Chart
@@ -211,15 +213,14 @@ with tab1:
             st.session_state['atlas_fig_trend'] = fig
             st.session_state['atlas_data_trend'] = plot_data
 
-    # Persistent Display
+    # 永続表示
     if 'atlas_fig_trend' in st.session_state:
         fig = st.session_state['atlas_fig_trend']
         plot_data = st.session_state['atlas_data_trend']
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
-        # Snapshot Button
-        # Snapshot Button
+        # スナップショットボタン
         snap_data = utils.generate_rich_summary(df_filtered, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=0)
         snap_data['module'] = 'ATLAS'
         
@@ -256,11 +257,11 @@ with tab1_line:
     col_line_1, col_line_2 = st.columns([2, 1])
     
     with col_line_1:
-        # Mode Selection
+        # モード選択
         line_mode = st.radio("表示モード:", ["全体推移", "出願人比較"], horizontal=True, key="atlas_line_mode")
     
     with col_line_2:
-        # Status Breakdown Option (Only for Overall mode for clarity)
+        # ステータス内訳オプション (全体推移モードのみ)
         use_status_breakdown_line = False
         if line_mode == "全体推移" and status_col:
             st.write("") # Spacer
@@ -303,7 +304,7 @@ with tab1_line:
             
             if line_mode == "全体推移":
                 if use_status_breakdown_line and status_col:
-                     # Stacked Area Chart (Breakdown)
+                     # 積み上げ面グラフ (内訳)
                     plot_data = df_filtered.groupby(['year', status_col]).size().reset_index(name='count')
                     
                     fig = px.area(plot_data, x='year', y='count', color=status_col, markers=True,
@@ -314,7 +315,7 @@ with tab1_line:
                     fig.update_layout(title=dict(text=f'全体件数推移・内訳 ({int(stats_start_year)}年～{int(stats_end_year)}年)', font=dict(size=18)), yaxis=dict(rangemode='tozero'))
                     
                 else:
-                    # Overall Trend (Standard Line)
+                    # 全体推移 (標準折れ線)
                     yearly_counts = df_filtered['year'].value_counts().sort_index()
                     plot_data = yearly_counts.reindex(range(int(stats_start_year), int(stats_end_year) + 1), fill_value=0).reset_index()
                     plot_data.columns = ['year', 'count']
@@ -325,7 +326,7 @@ with tab1_line:
                     
                     fig.update_layout(title=dict(text=f'全体件数推移 ({int(stats_start_year)}年～{int(stats_end_year)}年)', font=dict(size=18)), yaxis=dict(rangemode='tozero'))
 
-            else: # Applicant Comparison
+            else: # 出願人比較
                 if not target_applicants:
                     st.warning("出願人を選択してください。")
                 else:
@@ -416,7 +417,7 @@ with tab2:
         if df_filtered.empty:
             st.warning("データがありません。")
         else:
-            # 1. Identify Top Applicants first (based on total count)
+            # 1. 上位出願人の特定 (合計件数に基づく)
             assignee_counts = df_filtered['applicant_main'].explode().str.strip().value_counts().head(int(num_to_display_map2)).sort_values(ascending=True)
             top_applicants = assignee_counts.index.tolist()
 
@@ -442,15 +443,14 @@ with tab2:
             st.session_state['atlas_fig_ranking'] = fig
             st.session_state['atlas_data_ranking'] = assignee_counts
 
-    # Persistent Display
+    # 永続表示
     if 'atlas_fig_ranking' in st.session_state:
         fig = st.session_state['atlas_fig_ranking']
         assignee_counts = st.session_state['atlas_data_ranking']
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
-        # Snapshot Button
-        # Snapshot Button
+        # スナップショットボタン
         snap_data = utils.generate_rich_summary(df_filtered, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=0)
         snap_data['module'] = 'ATLAS'
         
@@ -485,16 +485,14 @@ with tab3:
             st.session_state['atlas_fig_ipc'] = fig
             st.session_state['atlas_data_ipc'] = ipc_counts
 
-    # Persistent Display
+    # 永続表示
     if 'atlas_fig_ipc' in st.session_state:
         fig = st.session_state['atlas_fig_ipc']
         data = st.session_state['atlas_data_ipc']
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         
-        # Snapshot Button
-        # Snapshot Button
-        # Snapshot Button
+        # スナップショットボタン
         snap_data = utils.generate_rich_summary(df_filtered, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=0)
         snap_data['module'] = 'ATLAS'
         

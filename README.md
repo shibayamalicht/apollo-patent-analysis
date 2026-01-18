@@ -1,4 +1,5 @@
-title: APOLLO v.5 Patent Analysis
+---
+title: APOLLO v6 Patent Analysis
 emoji: 🚀
 colorFrom: blue
 colorTo: indigo
@@ -10,7 +11,7 @@ short_description: AI-Powered Patent Analysis Platform (JP/EN)
 license: mit
 ---
 
-# 🚀 APOLLO v.5: Patent Analysis Platform
+# 🚀 APOLLO v6: Patent Analysis Platform
 
 **APOLLO (Advanced Patent & Overall Landscape-analytics Logic Orbiter)** is an advanced, AI-powered patent analysis platform designed to visualize technology trends, competitor strategies, and inventor networks using state-of-the-art NLP techniques (SBERT, UMAP, HDBSCAN).
 
@@ -88,13 +89,17 @@ Saturn Vをベースにした、手動クラスタリング可能な探索的分
 * **Visual Editing**: Edit clusters and labels interactively. (視覚的なクラスタ編集)
 
 ### 8. 📝 VOYAGER (Strategic Reporting / 戦略レポート)
-**v.5 Update: The Curator Mode**
 Compiles snapshots from all modules into a cohesive strategic narrative.
 全モジュールから収集したスナップショット（証拠）を統合し、戦略的なストーリーを構築します。
 * **Snapshot Curator**: Collect important charts as "Evidence" across ATLAS, Saturn V, and Explorer. (モジュール横断的な証拠収集・スナップショット機能)
 * **Strategic Deep Dive**: Generates CSO-level strategic reports with Scenario Planning (Probable/Best/Risk). (CSO視点の詳細戦略レポート・シナリオプランニング機能)
 * **Evidence Download**: Download gathered evidence as images consistent with report references (`Evidence X.png`). (証拠画像のダウンロード)
 * **AI-Powered Insight**: Context-aware generation using Gemini 2.5 Flash. (Gemini 2.5 Flashによる文脈認識型インサイト生成)
+
+### 9. 🌌 NEBULA (Environmental Analysis / 環境分析)
+Environmental Analysis module that integrates non-patent literature (papers, news, policy documents) with patent data. Visualize gaps and synergies between social trends and technological development.
+
+特許情報だけでなく、論文・ニュース・政策文書までを含めた「環境分析」を行うモジュールです。社会トレンドや市場の期待を統合し、特許データとのギャップやシナジーを可視化します。
 
 ---
 

@@ -25,6 +25,8 @@ st.set_page_config(
     layout="wide"
 )
 
+st.session_state['current_page'] = 'CORE'
+
 pio.templates.default = "plotly_white"
 warnings.filterwarnings('ignore')
 
@@ -775,20 +777,15 @@ elif current_phase.startswith("フェーズ 4"):
                         
                         # Explicitly FORCE Range to show all categories, even empty ones
                         x_range = [-0.5, len(x_ord_global) - 0.5]
-                        # For Y, Plotly usually plots bottom-up for Scatter, but we want Matrix style (Top-down)?
-                        # `autorange='reversed'` does Top-down.
-                        # If reversed, range should be [len-0.5, -0.5]? Or just rely on autorange='reversed' with fixed categoryarray.
-                        # Let's try specifying range explicitly with reversed effect if needed, but 'reversed' + categoryarray works best usually.
-                        # The issue "missing parts" implies missing ticks.
-                        # We will force tickvals to be 0..N-1 to ensure all labels appear?
-                        # Or simply setting the range is robust.
+                        # Y軸: Plotlyの散布図は通常下から上だが、行列形式（上から下）にするために調整
+                        # 反転させるために範囲を明示的に指定
                         
                         fig.update_yaxes(
                             categoryorder='array', 
                             categoryarray=y_ord_global, 
                             title=y_ax, 
                             type='category',
-                            range=[len(y_ord_global) - 0.5, -0.5] # Top-down Matrix Style
+                            range=[len(y_ord_global) - 0.5, -0.5] # 上から下の行列形式
                         )
                         fig.update_xaxes(
                             categoryorder='array', 

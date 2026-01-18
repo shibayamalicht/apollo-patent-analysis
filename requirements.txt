@@ -1,7 +1,8 @@
-streamlit
+streamlit>=1.42.0
 pandas
 numpy<2.0.0
 scikit-learn
+scipy
 plotly
 matplotlib
 japanize-matplotlib
