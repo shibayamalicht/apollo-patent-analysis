@@ -235,7 +235,7 @@ with container:
         with st.expander("論文・ニュース・政策文書などを取り込む (NPL)", expanded=False):
             
             # AIプロンプトヘルプ
-            with st.expander("🤖 AIで政策データを作成する方法 (Deep Research)"):
+            if st.toggle("🤖 AIで政策データを作成する方法 (Deep Research)"):
                 st.markdown("""
                 ChatGPT (o1/Pro) や Gemini Advanced, Perplexity Pro などの **Deep Research (推論・検索)** 機能を持つAIに、以下のプロンプトを入力してCSVを作成させてください。
                 そのCSVをそのままApolloに読み込むことができます。
@@ -368,7 +368,7 @@ with container:
                 st.markdown("###### ⚖️ Policy & Regulation (政策)")
                 
                 # AIプロンプト
-                with st.expander("🤖 AIデータ作成プロンプト (Policy)", expanded=False):
+                if st.toggle("🤖 AIデータ作成プロンプト (Policy)"):
                     theme_pol = st.text_input("調査テーマ (例: 生成AIの著作権規制, ドローンの飛行禁止区域)", key="theme_pol")
                     
                     if not theme_pol:
@@ -444,7 +444,7 @@ with container:
                 st.markdown("###### 📊 Market Report (市場レポート)")
                 
                 # AIプロンプト
-                with st.expander("🤖 AIデータ作成プロンプト (Market)", expanded=False):
+                if st.toggle("🤖 AIデータ作成プロンプト (Market)"):
                     theme_mkt = st.text_input("調査テーマ (例: 全固体電池の市場規模, 空飛ぶクルマの市場予測)", key="theme_mkt")
                     
                     if not theme_mkt:

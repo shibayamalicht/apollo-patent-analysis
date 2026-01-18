@@ -229,6 +229,10 @@ if 'explorer_keywords_fixed' not in df_main.columns:
         )
         st.session_state.df_main = df_main
 
+# explorer_textが無い場合の自己修復 (セッション保持などでキーワードのみ残り、テキストがない場合への対処)
+if 'explorer_text' not in df_main.columns:
+    df_main['explorer_text'] = df_main[col_map['title']].fillna('') + ' ' + df_main[col_map['abstract']].fillna('')
+
 # モード選択
 selected_tab = st.radio(
     "分析モードを選択:",

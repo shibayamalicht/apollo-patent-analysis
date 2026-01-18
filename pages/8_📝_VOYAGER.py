@@ -127,8 +127,10 @@ with st.expander("⚙️ AIエンジン設定 (API Key)", expanded=True):
     
     # st.secretsから取得を試行
     try:
-        api_key_env = st.secrets[env_key_name]
-    except:
+        if env_key_name in st.secrets:
+            api_key_env = st.secrets[env_key_name]
+    except (FileNotFoundError, Exception):
+        # secrets.tomlが存在しない、またはキーがない場合は無視
         pass
     
     # os.environから取得を試行
