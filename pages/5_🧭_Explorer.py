@@ -225,7 +225,7 @@ if 'explorer_keywords_fixed' not in df_main.columns:
         # キャッシュ活用のためtokenizerを明示的に渡すことも検討可能だが、現在はutils内で解決
         # current_swを確実に使用するために引数で渡す
         df_main['explorer_keywords_fixed'] = df_main['explorer_text'].apply(
-            lambda x: utils.extract_keywords(x, tokenizer=None, stopwords=current_sw)
+            lambda x: utils.extract_keywords(x, tokenizer=None, stopwords=stopwords)
         )
         st.session_state.df_main = df_main
 
