@@ -125,17 +125,21 @@ with st.expander("⚙️ AIエンジン設定 (API Key)", expanded=True):
     api_key_env = None
     env_key_name = "GOOGLE_API_KEY"
     
-    # st.secretsから取得を試行
-    try:
-        if env_key_name in st.secrets:
-            api_key_env = st.secrets[env_key_name]
-    except (FileNotFoundError, Exception):
-        # secrets.tomlが存在しない、またはキーがない場合は無視
-        pass
-    
-    # os.environから取得を試行
-    if not api_key_env:
-        api_key_env = os.environ.get(env_key_name)
+    # 1. OS環境変数から取得 (Hugging Face Spaces / Docker等でクラッシュしないよう優先)
+    api_key_env = os.environ.get(env_key_name)
+
+    # 2. st.secretsから取得 (Local Streamlit等、ファイルがある場合)
+    # Hugging Face Spaces (SPACE_IDがある環境) では secrets.toml は通常作成されないため、
+    # 明示的にスキップして不要なエラーログ (No secrets found) を回避する
+    is_hf_space = os.environ.get("SPACE_ID") is not None
+
+    if not api_key_env and not is_hf_space:
+        try:
+            # st.secretsへのアクセス自体がエラーになる場合があるため、getを使用し、全例外をキャッチ
+            api_key_env = st.secrets.get(env_key_name)
+        except BaseException:
+            # secrets.tomlが存在しない、またはアクセスできない場合は無視
+            pass
     
     # セキュアキー処理ロジック
     key_status_msg = ""
@@ -703,7 +707,8 @@ with col_act:
             del st.session_state['voyager_prompt_preview_data']
             st.rerun()
             
-        with st.expander("📜 プロンプト確認ウィンドウ (手動分析用)", expanded=True):
+        with st.container(border=True):
+            st.markdown("### 📜 プロンプト確認ウィンドウ (手動分析用)")
             st.info("APIキーがない場合や、ChatGPT/Claudeで手動分析したい場合に利用してください。")
             
             tab1, tab2 = st.tabs(["Phase 1: Analyst (Individual)", "Phase 2: Strategist (Synthesis)"])
