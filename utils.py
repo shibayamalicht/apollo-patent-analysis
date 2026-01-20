@@ -255,6 +255,7 @@ def render_sidebar():
     st.markdown("""
     <style>
         html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        html { overflow-y: scroll !important; }
         
         /* H1 Title Spacing */
         [data-testid="stSidebar"] h1 { 
