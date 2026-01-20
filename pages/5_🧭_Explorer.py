@@ -124,39 +124,7 @@ def apply_ngram_filters(text):
             text = pat.sub("", text)
     return text
 
-@st.cache_data
-def extract_compound_nouns(text):
-    text = normalize_text(text)
-    text = apply_ngram_filters(text) 
-    text = re.sub(r'【.*?】', '', text)
-    text = re.sub(r'[!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~]', ' ', text)
 
-    tokens = t.tokenize(text)
-    words, compound_word = [], ''
-    for token in tokens:
-        pos = token.part_of_speech.split(',')[0]
-        if pos == '名詞':
-            compound_word += token.surface
-        else:
-            if (len(compound_word) > 1 and
-                compound_word not in stopwords and
-                not re.fullmatch(r'[\d０-９]+', compound_word) and
-                not re.fullmatch(r'(図|表|式|第)[\d０-９]+.*', compound_word) and
-                not re.match(r'^(上記|前記|本開示|当該|該)', compound_word) and
-                not re.search(r'[0-9０-９]+[)）]?$', compound_word) and
-                not re.match(r'[0-9０-９]+[a-zA-Zａ-ｚＡ-Ｚ]', compound_word)):
-                words.append(compound_word)
-            compound_word = ''
-            
-    if (len(compound_word) > 1 and
-        compound_word not in stopwords and
-        not re.fullmatch(r'[\d０-９]+', compound_word) and
-        not re.fullmatch(r'(図|表|式|第)[\d０-９]+.*', compound_word) and
-        not re.match(r'^(上記|前記|本開示|当該|該)', compound_word) and
-        not re.search(r'[0-9０-９]+[)）]?$', compound_word) and
-        not re.match(r'[0-9０-９]+[a-zA-Zａ-ｚＡ-Ｚ]', compound_word)):
-        words.append(compound_word)
-    return words
 
 def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
     if not words: return None
@@ -215,21 +183,17 @@ if col_map['applicant'] in df_main.columns:
 sorted_applicants = app_counts.index.tolist()
 app_count_dict = app_counts.to_dict()
 
-# 前処理 ("explorer_keywords_fixed"カラムがない場合のみ実行)
-if 'explorer_keywords_fixed' not in df_main.columns:
+# 前処理 (Home.pyで作成された 'explorer_keywords' を使用。存在しない場合のみ計算)
+target_col_keywords = 'explorer_keywords'
+if target_col_keywords not in df_main.columns:
     with st.spinner("Explorer: テキスト解析とキーワード抽出を実行中..."):
         df_main['explorer_text'] = df_main[col_map['title']].fillna('') + ' ' + df_main[col_map['abstract']].fillna('')
-        
-        # 最新のストップワードを使用して抽出
-        # 共通ロジック (utils.extract_keywords) を使用
-        # キャッシュ活用のためtokenizerを明示的に渡すことも検討可能だが、現在はutils内で解決
-        # current_swを確実に使用するために引数で渡す
-        df_main['explorer_keywords_fixed'] = df_main['explorer_text'].apply(
+        df_main[target_col_keywords] = df_main['explorer_text'].apply(
             lambda x: utils.extract_keywords(x, tokenizer=None, stopwords=stopwords)
         )
         st.session_state.df_main = df_main
 
-# explorer_textが無い場合の自己修復 (セッション保持などでキーワードのみ残り、テキストがない場合への対処)
+# explorer_textが無い場合の自己修復
 if 'explorer_text' not in df_main.columns:
     df_main['explorer_text'] = df_main[col_map['title']].fillna('') + ' ' + df_main[col_map['abstract']].fillna('')
 
@@ -249,7 +213,7 @@ if selected_tab == "全体俯瞰 (Global Overview)":
     st.subheader("Global Overview")
     
     top_n_cloud = st.number_input("ワードクラウド単語数", 10, 100, 50, key="go_cloud_n")
-    all_keywords = [w for sublist in df_main['explorer_keywords_fixed'] for w in sublist]
+    all_keywords = [w for sublist in df_main['explorer_keywords'] for w in sublist]
     word_counts = Counter(all_keywords)
     
     if not word_counts:
@@ -269,7 +233,7 @@ if selected_tab == "全体俯瞰 (Global Overview)":
             pair_counts_global = Counter()
             top_nodes_global = [w for w, c in c_all.most_common(global_net_top_n)]
             pair_counts_global = Counter()
-            for kws in df_main['explorer_keywords_fixed']:
+            for kws in df_main['explorer_keywords']:
                 valid_w = [w for w in set(kws) if w in top_nodes_global]
                 if len(valid_w) >= 2:
                     for pair in combinations(sorted(valid_w), 2): pair_counts_global[pair] += 1
@@ -457,8 +421,8 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
             df_recent = df_target[(df_target['year'] >= periods[0][0]) & (df_target['year'] <= periods[0][1])]
             df_past = df_target[(df_target['year'] >= periods[1][0]) & (df_target['year'] <= periods[1][1])]
             
-            c_recent = Counter([w for sublist in df_recent['explorer_keywords_fixed'] for w in sublist])
-            c_past = Counter([w for sublist in df_past['explorer_keywords_fixed'] for w in sublist])
+            c_recent = Counter([w for sublist in df_recent['explorer_keywords'] for w in sublist])
+            c_past = Counter([w for sublist in df_past['explorer_keywords'] for w in sublist])
             
             growth_data = []
             min_freq = max(2, len(df_recent) * 0.01)
@@ -491,7 +455,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
         for i, (start, end) in enumerate(periods):
             with cols[i % 3]:
                 df_p = df_target[(df_target['year'] >= start) & (df_target['year'] <= end)]
-                kws_p = [w for sublist in df_p['explorer_keywords_fixed'] for w in sublist]
+                kws_p = [w for sublist in df_p['explorer_keywords'] for w in sublist]
                 st.markdown(f"**{start} - {end}** ({len(df_p)}件)")
                 if kws_p: generate_wordcloud_and_list(kws_p, f"{start}-{end}", 30, FONT_PATH)
             
@@ -501,12 +465,12 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
         with col_net1: ta_net_n = st.slider("抽出単語数", 30, 100, 60, key="ta_net_n")
         with col_net2: ta_net_th = st.slider("共起閾値", 0.01, 0.3, 0.05, 0.01, key="ta_net_th")
         
-        all_target_kw = [w for sublist in df_target['explorer_keywords_fixed'] for w in sublist]
+        all_target_kw = [w for sublist in df_target['explorer_keywords'] for w in sublist]
         c_all = Counter(all_target_kw)
         top_nodes = [w for w, c in c_all.most_common(ta_net_n)]
         
         pair_counts = Counter()
-        for kws in df_target['explorer_keywords_fixed']:
+        for kws in df_target['explorer_keywords']:
             valid_w = [w for w in set(kws) if w in top_nodes]
             if len(valid_w) >= 2:
                 for pair in combinations(sorted(valid_w), 2): pair_counts[pair] += 1
@@ -522,9 +486,9 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
             pos = nx.spring_layout(G, k=0.8, seed=42)
             node_colors, node_texts = [], []
             
-            c_rec_net = Counter([w for sublist in df_target[df_target['year'] >= periods[0][0]]['explorer_keywords_fixed'] for w in sublist])
+            c_rec_net = Counter([w for sublist in df_target[df_target['year'] >= periods[0][0]]['explorer_keywords'] for w in sublist])
             if len(periods) > 1:
-                c_pst_net = Counter([w for sublist in df_target[(df_target['year'] >= periods[1][0]) & (df_target['year'] <= periods[1][1])]['explorer_keywords_fixed'] for w in sublist])
+                c_pst_net = Counter([w for sublist in df_target[(df_target['year'] >= periods[1][0]) & (df_target['year'] <= periods[1][1])]['explorer_keywords'] for w in sublist])
             else:
                 c_pst_net = Counter()
 
@@ -672,7 +636,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
                 mask = df_main['applicant_main'].apply(lambda x: isinstance(x, list) and app_name in x)
             else:
                 mask = df_main[col_map['applicant']].fillna('').str.contains(re.escape(app_name))
-            return [w for sublist in df_main[mask]['explorer_keywords_fixed'] for w in sublist]
+            return [w for sublist in df_main[mask]['explorer_keywords'] for w in sublist]
 
         words_my = get_keywords_for_app(my_comp)
         words_target = get_keywords_for_app(target_comp)
@@ -755,7 +719,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
         df_2 = df_main[mask_2]
         
         pair_counts = Counter()
-        for kws in df_2['explorer_keywords_fixed']:
+        for kws in df_2['explorer_keywords']:
             valid_w = [w for w in set(kws) if w in top_nodes]
             if len(valid_w) >= 2:
                 for pair in combinations(sorted(valid_w), 2): pair_counts[pair] += 1

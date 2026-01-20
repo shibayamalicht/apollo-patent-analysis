@@ -138,7 +138,7 @@ def apply_ngram_filters(text):
     return text
 
 @st.cache_data
-def extract_compound_nouns(text):
+def extract_compound_nouns(text, stopwords_list):
     text = normalize_text(text)
     text = apply_ngram_filters(text) 
     text = re.sub(r'【.*?】', '', text)
@@ -152,7 +152,7 @@ def extract_compound_nouns(text):
             compound_word += token.surface
         else:
             if (len(compound_word) > 1 and
-                compound_word not in stopwords and
+                compound_word not in stopwords_list and
                 not re.fullmatch(r'[\d０-９]+', compound_word) and
                 not re.fullmatch(r'(図|表|式|第)[\d０-９]+.*', compound_word) and
                 not re.match(r'^(上記|前記|本開示|当該|該)', compound_word) and
@@ -162,7 +162,7 @@ def extract_compound_nouns(text):
             compound_word = ''
             
     if (len(compound_word) > 1 and
-        compound_word not in stopwords and
+        compound_word not in stopwords_list and
         not re.fullmatch(r'[\d０-９]+', compound_word) and
         not re.fullmatch(r'(図|表|式|第)[\d０-９]+.*', compound_word) and
         not re.match(r'^(上記|前記|本開示|当該|該)', compound_word) and
@@ -1196,7 +1196,7 @@ with tab_main:
                     for _, row in df_drill.iterrows():
                         if col_map['title'] and pd.notna(row[col_map['title']]): all_text += row[col_map['title']] + " "
                         if col_map['abstract'] and pd.notna(row[col_map['abstract']]): all_text += row[col_map['abstract']] + " "
-                    words = extract_compound_nouns(all_text)
+                    words = extract_compound_nouns(all_text, stopwords)
                     
                     if not words: st.warning("有効なキーワードなし")
                     else:
@@ -1211,7 +1211,7 @@ with tab_main:
                             dt = ""
                             if col_map['title']: dt += str(row[col_map['title']]) + " "
                             if col_map['abstract']: dt += str(row[col_map['abstract']]) + " "
-                            dw = set(extract_compound_nouns(dt))
+                            dw = set(extract_compound_nouns(dt, stopwords))
                             dw = {w for w in dw if w in top_words}
                             if len(dw) >= 2:
                                 for pair in combinations(sorted(list(dw)), 2): pair_counts[pair] += 1

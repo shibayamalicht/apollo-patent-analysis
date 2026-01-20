@@ -610,10 +610,17 @@ with tab_pat:
                  df_main_filtered['text_for_sbert'] = df_main_filtered.astype(str).agg(' '.join, axis=1)
 
         # 特許ネットワーク用に特許ストップワードを使用
-        sw_patent = utils.get_patent_stopwords()
-        df_main_filtered['explorer_keywords_fixed'] = df_main_filtered['text_for_sbert'].apply(
-            lambda x: utils.extract_keywords(x, stopwords=sw_patent)
-        )
+        sw_base = set(utils.get_patent_stopwords())
+        if 'stopwords' in st.session_state and st.session_state['stopwords']:
+             sw_base = sw_base | set(st.session_state['stopwords'])
+        sw_patent = list(sw_base)
+
+        if 'explorer_keywords' in df_main_filtered.columns:
+             df_main_filtered['explorer_keywords_fixed'] = df_main_filtered['explorer_keywords']
+        else:
+             df_main_filtered['explorer_keywords_fixed'] = df_main_filtered['text_for_sbert'].apply(
+                 lambda x: utils.extract_keywords(x, stopwords=sw_patent)
+             )
 
     # 1. ランキングマップ
     fig_growth_p, stats_growth_p = render_growth_ranking(
@@ -714,7 +721,11 @@ with tab_aca:
         else:
             # キーワード確保
             if 'explorer_keywords_fixed' not in df_aca.columns:
-                sw_npl = utils.get_npl_stopwords()
+                sw_base = set(utils.get_npl_stopwords())
+                if 'stopwords' in st.session_state and st.session_state['stopwords']:
+                     sw_base = sw_base | set(st.session_state['stopwords'])
+                sw_npl = list(sw_base)
+
                 df_aca['temp_text'] = df_aca['unified_title'].fillna('') + ' ' + df_aca['unified_content'].fillna('')
                 df_aca['explorer_keywords_fixed'] = df_aca['temp_text'].apply(
                     lambda x: utils.extract_keywords(x, stopwords=sw_npl, clean_html=True)
@@ -809,7 +820,11 @@ with tab_news:
         else:
             # キーワードの存在確認
             if 'explorer_keywords_fixed' not in df_news.columns:
-                sw_npl = utils.get_npl_stopwords()
+                sw_base = set(utils.get_npl_stopwords())
+                if 'stopwords' in st.session_state and st.session_state['stopwords']:
+                     sw_base = sw_base | set(st.session_state['stopwords'])
+                sw_npl = list(sw_base)
+
                 df_news['temp_text'] = df_news['unified_title'].fillna('') + ' ' + df_news['unified_content'].fillna('')
                 df_news['explorer_keywords_fixed'] = df_news['temp_text'].apply(
                     lambda x: utils.extract_keywords(x, stopwords=sw_npl, clean_html=True)

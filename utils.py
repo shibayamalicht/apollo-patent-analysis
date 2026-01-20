@@ -288,7 +288,7 @@ def render_sidebar():
     with st.sidebar:
         st.title("APOLLO") 
         st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
-        st.markdown("**v6.0.0**")
+        st.markdown("**v6.0.1**")
         st.markdown("---")
         st.subheader("Home"); st.page_link("Home.py", label="Mission Control", icon="🛰️")
         st.subheader("Modules")
@@ -323,7 +323,7 @@ def get_theme_config(theme_name):
             "accent_color": "#003366",
             "density_scale": "Blues",
             "css": """
-                html, body { background-color: #ffffff; color: #333333; overflow-y: scroll !important; }
+                html, body { background-color: #ffffff; color: #333333; }
                 [data-testid="stSidebar"] { background-color: #f8f9fa; }
                 [data-testid="stHeader"] { background-color: #ffffff; }
                 h1, h2, h3 { color: #003366; }
@@ -338,7 +338,7 @@ def get_theme_config(theme_name):
             "accent_color": "#264653",
             "density_scale": "Teal",
             "css": """
-                html, body { background-color: #fdfdfd; color: #2c3e50; font-family: "Helvetica Neue", Arial, sans-serif; overflow-y: scroll !important; }
+                html, body { background-color: #fdfdfd; color: #2c3e50; font-family: "Helvetica Neue", Arial, sans-serif; }
                 [data-testid="stSidebar"] { background-color: #eaeaea; }
                 [data-testid="stHeader"] { background-color: #fdfdfd; }
                 h1, h2, h3 { color: #264653; font-family: "Georgia", serif; }

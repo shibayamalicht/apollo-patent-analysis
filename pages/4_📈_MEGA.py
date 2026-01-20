@@ -114,7 +114,7 @@ def apply_ngram_filters(text):
     return text
 
 @st.cache_data
-def extract_compound_nouns(text):
+def extract_compound_nouns(text, stopwords_list):
     text = normalize_text(text)
     text = apply_ngram_filters(text)
     text = re.sub(r'【.*?】', '', text)
@@ -128,7 +128,7 @@ def extract_compound_nouns(text):
             compound_word += token.surface
         else:
             if (len(compound_word) > 1 and
-                compound_word not in stopwords and
+                compound_word not in stopwords_list and
                 not re.fullmatch(r'[\d０-９]+', compound_word) and
                 not re.fullmatch(r'(図|表|式|第)[\d０-９]+.*', compound_word) and
                 not re.match(r'^(上記|前記|本開示|当該|該)', compound_word) and
@@ -138,7 +138,7 @@ def extract_compound_nouns(text):
             compound_word = ''
             
     if (len(compound_word) > 1 and
-        compound_word not in stopwords and
+        compound_word not in stopwords_list and
         not re.fullmatch(r'[\d０-９]+', compound_word) and
         not re.fullmatch(r'(図|表|式|第)[\d０-９]+.*', compound_word) and
         not re.match(r'^(上記|前記|本開示|当該|該)', compound_word) and
@@ -198,13 +198,13 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
 # ==================================================================
 
 @st.cache_data
-def _get_top_words_filtered(dense_vector, feature_names, top_n=5):
+def _get_top_words_filtered(dense_vector, feature_names, stopwords_list, top_n=5):
     """TF-IDFベクトルから上位語を抽出（ストップワード除外）"""
     indices = np.argsort(dense_vector)[::-1]
     top_words = []
     for i in indices:
         word = feature_names[i]
-        if word not in stopwords and not re.fullmatch(r'[\d０-９]+', word) and len(word) > 1:
+        if word not in stopwords_list and not re.fullmatch(r'[\d０-９]+', word) and len(word) > 1:
             top_words.append(word)
         if len(top_words) >= top_n:
             break
@@ -548,7 +548,7 @@ with tab_c:
                         else:
                             vecs = tfidf[(df_plot['cluster_id'] == cid).values]
                             mean_vector = np.asarray(vecs.mean(axis=0)).flatten()
-                            top_words = _get_top_words_filtered(mean_vector, feature_names, top_n=int(drill_label_top_n))
+                            top_words = _get_top_words_filtered(mean_vector, feature_names, stopwords, top_n=int(drill_label_top_n))
                             label_map[cid] = f"[{cid}] {top_words}"
                     
                     df_plot['label'] = df_plot['cluster_id'].map(label_map)
@@ -712,7 +712,7 @@ with tab_c:
                     if col_map.get('abstract') and col_map['abstract'] in row and pd.notna(row[col_map['abstract']]): 
                         all_text += str(row[col_map['abstract']]) + " "
                 
-                words = extract_compound_nouns(all_text)
+                words = extract_compound_nouns(all_text, stopwords)
                 
                 if not words: st.warning("有効なキーワードなし")
                 else:
@@ -729,7 +729,7 @@ with tab_c:
                         if col_map['title']: dt += str(row[col_map['title']]) + " "
                         if col_map.get('abstract') and col_map['abstract'] in row: 
                             dt += str(row[col_map['abstract']]) + " "
-                        dw = set(extract_compound_nouns(dt))
+                        dw = set(extract_compound_nouns(dt, stopwords))
                         dw = {w for w in dw if w in top_words}
                         if len(dw) >= 2:
                             for pair in combinations(sorted(list(dw)), 2): pair_counts[pair] += 1

@@ -579,20 +579,26 @@ with container:
         st.markdown("##### 分析から除外するストップワードを管理します。")
         
         # 初期化
-        if 'stopwords' not in st.session_state or not st.session_state['stopwords']:
+        if 'stopwords' not in st.session_state:
             st.session_state['stopwords'] = utils.get_stopwords()
+            
+        if 'sw_version' not in st.session_state:
+            st.session_state.sw_version = 0
         
         # 検索機能
         search_query = st.text_input("リスト内検索 (正規表現も可)", placeholder="検索したい単語を入力...", key="sw_search")
         
+        # フィルタリング or 全量
+        # 確実にリスト(set)として扱う
+        if isinstance(st.session_state['stopwords'], list):
+             st.session_state['stopwords'] = set(st.session_state['stopwords'])
+             
         full_stopwords = sorted(list(st.session_state['stopwords']))
         
         if search_query:
             try:
-                # 正規表現検索を試みる
                 filtered_stopwords = [w for w in full_stopwords if re.search(search_query, w)]
             except re.error:
-                # 正規表現エラー時は単純な部分一致
                 filtered_stopwords = [w for w in full_stopwords if search_query in w]
             is_filtered = True
         else:
@@ -607,32 +613,27 @@ with container:
             if is_filtered:
                 st.warning("⚠️ フィルタリング中: ここでの編集（追加・削除）は、表示されている単語に対して適用され、メインリストにマージされます。")
             
-
-            editor_key = f"stopwords_editor_{hash(search_query)}" 
+            # Keyにバージョンを含めて強制リフレッシュ
+            editor_key = f"stopwords_editor_{hash(search_query)}_{st.session_state.sw_version}" 
             new_stopwords_text = st.text_area(f"ストップワードリスト{label_suffix}", value=stopwords_text, height=300, key=editor_key)
             
             if st.button("変更を適用", key="apply_stopwords"):
                 edited_lines = set([line.strip() for line in new_stopwords_text.split('\n') if line.strip()])
                 
                 if is_filtered:
-                    # フィルタリング時のスマートマージ
-                    # 1. 検索ヒットしていたはずの元の単語群 (変更前)
                     original_matches = set(filtered_stopwords)
-                    # 2. 削除された単語 = (元ヒット) - (編集後)
                     removed_words = original_matches - edited_lines
-                    # 3. 追加された単語 = (編集後) - (元ヒット)
                     added_words = edited_lines - original_matches
                     
-                    # 4. メインリストから削除対象を除き、追加分を足す
                     current_set = st.session_state['stopwords']
                     new_set = (current_set - removed_words) | added_words
                     st.session_state['stopwords'] = new_set
                     msg = f"更新完了: {len(added_words)} 語を追加, {len(removed_words)} 語を削除しました。"
                 else:
-                    # 全量置換
                     st.session_state['stopwords'] = edited_lines
                     msg = f"リストを全量更新しました (計 {len(edited_lines)} 語)。"
                 
+                st.session_state.sw_version += 1
                 st.success(msg)
                 st.rerun()
 
@@ -645,9 +646,11 @@ with container:
                 try:
                     stringio = io.StringIO(sw_file.getvalue().decode("utf-8"))
                     imported_lines = [line.strip() for line in stringio.read().split('\n') if line.strip()]
-                    if st.button(f"追加インポート ({len(imported_lines)}語)", key="import_sw"):
-                        st.session_state['stopwords'].update(imported_lines)
-                        st.success("インポートしました。")
+                    if st.button(f"リストを置換してインポート ({len(imported_lines)}語)", key="import_sw"):
+
+                        st.session_state['stopwords'] = set(imported_lines)
+                        st.session_state.sw_version += 1
+                        st.success("リストを置換しました。")
                         st.rerun()
                 except Exception as e:
                     st.error(f"読み込みエラー: {e}")
@@ -663,6 +666,7 @@ with container:
             st.markdown("---")
             if st.button("デフォルトに戻す", key="reset_stopwords"):
                 st.session_state['stopwords'] = utils.get_stopwords()
+                st.session_state.sw_version += 1
                 st.rerun()
 
     # A-4. 前処理実行
@@ -826,7 +830,11 @@ with container:
                     # 5. TF-IDF & Keyword (Patent ONLY)
                     status_text.markdown("🔄 **Phase 5/6: キーワード抽出 (TF-IDF - 特許のみ)...**")
                     # Explorer用 (キーワードリスト)
-                    sw_list = utils.get_stopwords()
+                    if 'stopwords' in st.session_state and st.session_state['stopwords']:
+                         sw_list = st.session_state['stopwords']
+                    else:
+                         sw_list = utils.get_stopwords()
+                    
                     df['explorer_keywords'] = df['text_for_sbert'].apply(lambda x: utils.extract_keywords(x, t, sw_list))
                     
                     # 検索用 (TF-IDF行列)
