@@ -19,10 +19,7 @@ import re
 import time
 import datetime
 
-from sentence_transformers import SentenceTransformer
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.preprocessing import normalize
-from janome.tokenizer import Tokenizer
+import patiroha
 
 warnings.filterwarnings('ignore')
 
@@ -30,8 +27,8 @@ warnings.filterwarnings('ignore')
 # --- ページ設定 ---
 # ==================================================================
 st.set_page_config(
-    page_title="APOLLO | Mission Control", 
-    page_icon="🛰️", 
+    page_title="APOLLO v7 | Mission Control",
+    page_icon="🛰️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -43,115 +40,49 @@ st.set_page_config(
 import io
 
 import utils
+import capcom
+
+# ==================================================================
+# --- patiroha統合: SBERTモデル・ストップワード ---
+# ==================================================================
 
 @st.cache_resource
-def load_sbert_model():
-    return SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+def load_sbert_embedder():
+    """patiroha.SBERTEmbedderをキャッシュして1回だけロードする"""
+    return patiroha.SBERTEmbedder()
 
-@st.cache_resource
-def load_tokenizer():
-    return Tokenizer()
 
-t = load_tokenizer()
+def _get_current_stopwords():
+    """session_stateのストップワードを取得（未設定ならpatirohaデフォルト）"""
+    if 'stopwords' in st.session_state and st.session_state['stopwords']:
+        sw = st.session_state['stopwords']
+        return frozenset(sw) if not isinstance(sw, frozenset) else sw
+    return patiroha.get_stopwords()
+
 
 def advanced_tokenize(text):
-    # ストップワードを動的に取得
-    if 'stopwords' in st.session_state and st.session_state['stopwords']:
-        current_stopwords = st.session_state['stopwords']
-    else:
-        current_stopwords = utils.get_stopwords()
+    """TF-IDF用トークナイズ — patiroha.tokenize_for_tfidfに委譲"""
+    current_stopwords = _get_current_stopwords()
+    return patiroha.tokenize_for_tfidf(text, stopwords=current_stopwords)
 
-    if not isinstance(text, str): return ""
-    text = unicodedata.normalize('NFKC', text).lower()
-    text = re.sub(r'[\(（][\w\s]+[\)）]', ' ', text)
-    text = re.sub(r'\b(図|fig|step|s)\s?\d+\b', ' ', text)
-    text = re.sub(r'[!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~]', ' ', text)
-    
-    tokens = list(t.tokenize(text))
-    processed_tokens = []
-    i = 0
-    while i < len(tokens):
-        token1 = tokens[i]
-        base_form = token1.base_form if token1.base_form != '*' else token1.surface
-        
-        if base_form in current_stopwords or len(base_form) < 2:
-            i += 1
-            continue
-        
-        if (i + 1) < len(tokens):
-            token2 = tokens[i+1]
-            base_form2 = token2.base_form if token2.base_form != '*' else token2.surface
-            pos1 = token1.part_of_speech.split(',')[0]
-            pos2 = token2.part_of_speech.split(',')[0]
-            if pos1 == '名詞' and pos2 == '名詞' and base_form2 not in current_stopwords:
-                compound_word = base_form + base_form2
-                processed_tokens.append(compound_word)
-                i += 2
-                continue
-        
-        pos = token1.part_of_speech.split(',')[0]
-        if pos == '名詞':
-            processed_tokens.append(base_form)
-        i += 1
-    return " ".join(processed_tokens)
-
-def robust_parse_date(series):
-    parsed = pd.to_datetime(series, errors='coerce')
-    if parsed.notna().mean() > 0.5: return parsed
-    
-    parsed = pd.to_datetime(series, format='%Y%m%d', errors='coerce')
-    if parsed.notna().mean() > 0.5: return parsed
-    
-    parsed = pd.to_datetime(series, format='%Y', errors='coerce')
-    if parsed.notna().mean() > 0.5: return parsed
-    
-    try:
-        numeric_series = pd.to_numeric(series, errors='coerce')
-        if numeric_series.notna().sum() > 0 and numeric_series.mean() > 30000:
-            parsed = pd.to_datetime(numeric_series, unit='D', origin='1899-12-30', errors='coerce')
-            return parsed
-    except:
-        pass
-    return parsed
-
-def extract_ipc(text, delimiter=';'):
-    if not isinstance(text, str): return [] 
-    text = unicodedata.normalize('NFKC', text).lower()
-    text = re.sub(r'[\(（][^)]*[\)）]', ' ', text)
-    ipc_codes = []
-    parts = text.split(delimiter)
-    for part in parts:
-        part = part.strip()
-        if not part: continue
-        match = re.search(r'([a-z]\d{2}[a-z])\s*(\d{1,4}/\d{2,})', part)
-        if match:
-            ipc_code = match.group(1) + match.group(2)
-            ipc_codes.append(ipc_code)
-        else:
-            match_main = re.search(r'\b([a-z]\d{2}[a-z])\b', part)
-            if match_main:
-                ipc_codes.append(match_main.group(1))
-    return ipc_codes 
 
 def smart_map_index(current_value, options, keywords):
-    """
-    カラム紐付けの自動化ロジック
-    """
+    """カラム紐付けの自動化ロジック（UIのselectbox用）"""
     if current_value is not None and current_value in options:
         return options.index(current_value)
-    
+
     valid_cols = options[1:]
-    
+
     for kw in keywords:
         for col in valid_cols:
             if kw == str(col):
                 return options.index(col)
-                
+
     for kw in keywords:
         for col in valid_cols:
             if kw in str(col):
                 return options.index(col)
-                
+
     return 0
 
 # ==================================================================
@@ -177,7 +108,11 @@ def initialize_session_state():
         "feature_names": None,
         "col_map": {},
         "delimiters": {'applicant': ';', 'inventor': ';', 'ipc': ';', 'fterm': ';', 'npl_category': ';'},
-        "preprocess_done": False
+        "preprocess_done": False,
+        # CAPCOM (In-Memory版: session_state['capcom_store'] にデータ全保持)
+        "capcom_session_id": None,
+        # CAPCOM 専用 Mission Objective (VOYAGER とは独立に保持)
+        "capcom_mission_objective": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -202,36 +137,44 @@ with container:
     with tab1:
         st.markdown("##### 分析対象の特許リストをインポートしてください。")
         uploaded_file = st.file_uploader(
-            "分析ファイルをアップロード (CSV または Excel)", 
+            "分析ファイルをアップロード (CSV または Excel)",
             type=["csv", "xlsx", "xls"],
-            label_visibility="collapsed"
+            label_visibility="collapsed",
+            key="main_file_uploader"
         )
-        
-        if uploaded_file is not None:
-            try:
-                if uploaded_file.name.lower().endswith('.csv'):
-                    try:
-                        df = pd.read_csv(uploaded_file, dtype=str)
-                    except UnicodeDecodeError:
-                        df = pd.read_csv(uploaded_file, dtype=str, encoding='shift_jis')
-                else:
-                    df = pd.read_excel(uploaded_file, dtype=str)
-                
-                st.session_state.df_main = df
-                st.session_state.preprocess_done = False 
-                st.session_state['shared_df'] = df  
-                st.session_state['filename'] = uploaded_file.name
 
-                st.success(f"ファイル '{uploaded_file.name}' のインポート完了 ({len(df)}行)。")
-                st.dataframe(df.head())
-                
-            except Exception as e:
-                st.error(f"ファイルインポートエラー: {e}")
-                st.session_state.df_main = None
-                st.session_state.shared_df = None
+        if uploaded_file is not None:
+            # 前処理完了後のrerunでは再読み込みをスキップ（新ファイルの場合のみ実行）
+            is_new_file = (uploaded_file.name != st.session_state.get('filename', ''))
+            if is_new_file or not st.session_state.get('preprocess_done', False):
+                try:
+                    if uploaded_file.name.lower().endswith('.csv'):
+                        try:
+                            df = pd.read_csv(uploaded_file, dtype=str)
+                        except UnicodeDecodeError:
+                            df = pd.read_csv(uploaded_file, dtype=str, encoding='shift_jis')
+                    else:
+                        df = pd.read_excel(uploaded_file, dtype=str)
+
+                    st.session_state.df_main = df
+                    st.session_state.preprocess_done = False
+                    st.session_state['shared_df'] = df
+                    st.session_state['filename'] = uploaded_file.name
+
+                    st.success(f"ファイル '{uploaded_file.name}' のインポート完了 ({len(df)}行)。")
+                    st.dataframe(df.head())
+
+                except Exception as e:
+                    st.error(f"ファイルインポートエラー: {e}")
+                    st.session_state.df_main = None
+                    st.session_state.shared_df = None
+            else:
+                # 前処理済みデータが存在する場合はスキップし、既存データ情報を表示
+                st.success(f"ファイル '{uploaded_file.name}' はインポート・前処理済みです ({len(st.session_state.df_main)}行)。")
+                st.dataframe(st.session_state.df_main.head())
                 
         st.markdown("---")
-        st.markdown("##### (オプション) 非特許情報 (NPL) のインポート")
+        st.markdown("##### (オプション) 特許以外の情報 (NPL) のインポート")
         with st.expander("論文・ニュース・政策文書などを取り込む (NPL)", expanded=False):
             
 
@@ -243,7 +186,7 @@ with container:
             st.write("データソースの種類を選択してアップロードしてください:")
             
             npl_tabs = st.tabs(['📚 Academic (論文)', '📰 Business News (ニュース)', '⚖️ Policy/Regulation (政策)', '📊 Market Report (市場)'])
-            
+
             # ファイル読み込みの共通関数
             def read_uploaded_file(f):
                 if f.name.lower().endswith('.csv'):
@@ -254,47 +197,144 @@ with container:
                 else:
                     return pd.read_excel(f, dtype=str)
 
-            # --- タブ 1: Academic (論文) ---
+            # --- タブ 1: Academic (論文) — CSVアップロード + OpenALEX検索 ---
             with npl_tabs[0]:
                 st.markdown("###### 📚 Academic (論文データ)")
-                f_aca = st.file_uploader("論文データ (LENSなど) をアップロード", type=["csv", "xlsx"], key="up_aca", accept_multiple_files=False)
-                
-                if f_aca:
-                    df = read_uploaded_file(f_aca)
-                    st.caption(f"Preview: {f_aca.name}")
-                    st.dataframe(df.head(3))
-                    
-                    cols = [None] + list(df.columns)
-                    c1, c2 = st.columns(2)
-                    idx_t = smart_map_index(None, cols, ['Title', 'Article Title', 'タイトル', 'inventionTitle'])
-                    idx_d = smart_map_index(None, cols, ['Date', 'Publication Date', '発行日', 'publicationDate'])
-                    idx_c = smart_map_index(None, cols, ['Abstract', 'Summary', '要約', 'abstract'])
-                    idx_s = smart_map_index(None, cols, ['Source', 'Journal', 'Publisher', '情報源', 'publisher'])
-                    
+                aca_mode = st.radio(
+                    "取得方法を選択:",
+                    ["📄 CSVアップロード", "🔍 OpenALEX検索"],
+                    horizontal=True, key="aca_mode"
+                )
+
+                if aca_mode == "📄 CSVアップロード":
+                    f_aca = st.file_uploader("論文データ (LENS等) をアップロード", type=["csv", "xlsx"], key="up_aca", accept_multiple_files=False)
+
+                    if f_aca:
+                        df = read_uploaded_file(f_aca)
+                        st.caption(f"Preview: {f_aca.name}")
+                        st.dataframe(df.head(3))
+
+                        cols = [None] + list(df.columns)
+                        c1, c2 = st.columns(2)
+                        idx_t = smart_map_index(None, cols, ['Title', 'Article Title', 'タイトル', 'inventionTitle'])
+                        idx_d = smart_map_index(None, cols, ['Date', 'Publication Date', '発行日', 'publicationDate'])
+                        idx_c = smart_map_index(None, cols, ['Abstract', 'Summary', '要約', 'abstract'])
+                        idx_s = smart_map_index(None, cols, ['Source', 'Journal', 'Publisher', '情報源', 'publisher'])
+
+                        with c1:
+                            m_title = st.selectbox("Title (必須):", cols, index=idx_t, key="map_aca_title")
+                            m_date = st.selectbox("Date (必須):", cols, index=idx_d, key="map_aca_date")
+                        with c2:
+                            m_content = st.selectbox("Abstract (必須):", cols, index=idx_c, key="map_aca_content")
+                            m_source = st.selectbox("Source (任意):", cols, index=idx_s, key="map_aca_source")
+
+                        if st.button("➕ データセットに追加 (Academic)", key="add_aca"):
+                            if m_title and m_date and m_content:
+                                df_new = pd.DataFrame()
+                                df_new['unified_title'] = df[m_title]
+                                df_new['unified_date'] = df[m_date]
+                                df_new['unified_content'] = df[m_content]
+                                df_new['unified_source'] = df[m_source] if m_source else "Academic Source"
+                                df_new['unified_region'] = 'Global'
+                                df_new['unified_status'] = '-'
+                                df_new['data_sub_type'] = 'Academic'
+                                df_new['source_filename'] = f_aca.name
+
+                                st.session_state.df_npl_accumulated = pd.concat([st.session_state.df_npl_accumulated, df_new], ignore_index=True)
+                                st.success("追加しました。")
+                                st.rerun()
+                            else:
+                                st.error("必須カラム(Title, Date, Abstract)を選択してください。")
+
+                else:
+                    # --- OpenALEX検索 ---
+                    st.markdown("OpenAlex APIで学術論文を直接検索してデータセットに追加します。")
+
+                    oalex_query = st.text_area(
+                        "検索キーワード（1行1クエリ、複数行でOR検索）",
+                        placeholder='"cellulose nanofiber"\n"nanocellulose"',
+                        height=80,
+                        key="oalex_query"
+                    )
+
+                    oalex_inst = st.text_input(
+                        "所属機関フィルタ（セミコロン区切りでOR）",
+                        placeholder="例: Toyota; MIT",
+                        key="oalex_inst"
+                    )
+
+                    c1, c2, c3 = st.columns(3)
                     with c1:
-                        m_title = st.selectbox("Title (必須):", cols, index=idx_t, key="map_aca_title")
-                        m_date = st.selectbox("Date (必須):", cols, index=idx_d, key="map_aca_date")
+                        oalex_year_from = st.number_input("開始年", min_value=1900, max_value=2026, value=2020, key="oalex_year_from")
                     with c2:
-                        m_content = st.selectbox("Abstract (必須):", cols, index=idx_c, key="map_aca_content")
-                        m_source = st.selectbox("Source (任意):", cols, index=idx_s, key="map_aca_source")
-                        
-                    if st.button("➕ データセットに追加 (Academic)", key="add_aca"):
-                        if m_title and m_date and m_content:
-                            df_new = pd.DataFrame()
-                            df_new['unified_title'] = df[m_title]
-                            df_new['unified_date'] = df[m_date]
-                            df_new['unified_content'] = df[m_content]
-                            df_new['unified_source'] = df[m_source] if m_source else "Academic Source"
-                            df_new['unified_region'] = 'Global'
-                            df_new['unified_status'] = '-'
-                            df_new['data_sub_type'] = 'Academic'
-                            df_new['source_filename'] = f_aca.name
-                            
-                            st.session_state.df_npl_accumulated = pd.concat([st.session_state.df_npl_accumulated, df_new], ignore_index=True)
-                            st.success("追加しました。")
-                            st.rerun()
+                        oalex_year_to = st.number_input("終了年", min_value=1900, max_value=2026, value=2026, key="oalex_year_to")
+                    with c3:
+                        oalex_max = st.number_input("取得上限", min_value=50, max_value=10000, value=200, step=50, key="oalex_max")
+
+                    if st.button("🔍 OpenALEX検索実行", key="oalex_search_btn"):
+                        if not oalex_query.strip():
+                            st.error("検索キーワードを入力してください。")
                         else:
-                            st.error("必須カラム(Title, Date, Abstract)を選択してください。")
+                            try:
+                                from openalex import OpenAlexCollector
+                                collector = OpenAlexCollector()
+
+                                queries = [q.strip() for q in oalex_query.strip().split('\n') if q.strip()]
+
+                                progress_bar = st.progress(0.0)
+                                status_text = st.empty()
+
+                                # 機関解決
+                                inst_ids = []
+                                if oalex_inst.strip():
+                                    inst_names = [s.strip() for s in oalex_inst.split(';') if s.strip()]
+                                    for name in inst_names:
+                                        resolved = collector.resolve_institution(name)
+                                        if resolved:
+                                            inst_ids.append(resolved['id'])
+                                            status_text.info(f"機関解決: {name} → {resolved['display_name']}")
+
+                                def on_progress(current, total):
+                                    if total > 0:
+                                        progress_bar.progress(min(current / total, 1.0))
+                                    status_text.markdown(f"取得中: {current} 件...")
+
+                                # 検索実行
+                                if len(queries) == 1:
+                                    raw_papers = collector.search(
+                                        queries[0],
+                                        year_from=oalex_year_from, year_to=oalex_year_to,
+                                        max_results=oalex_max,
+                                        institution_ids=inst_ids if inst_ids else None,
+                                        on_progress=on_progress,
+                                    )
+                                else:
+                                    raw_papers = collector.search_multi_query(
+                                        queries,
+                                        year_from=oalex_year_from, year_to=oalex_year_to,
+                                        max_results=oalex_max,
+                                        institution_ids=inst_ids if inst_ids else None,
+                                    )
+
+                                if raw_papers:
+                                    papers = [collector.transform_paper(p) for p in raw_papers]
+                                    df_oalex = collector.to_npl_dataframe(papers)
+
+                                    progress_bar.progress(1.0)
+                                    status_text.success(f"✅ {len(df_oalex)}件の論文を取得しました。")
+
+                                    st.dataframe(df_oalex[['unified_title', 'unified_date', 'unified_source', 'citation_count']].head(10))
+
+                                    if st.button("➕ データセットに追加 (OpenALEX)", key="oalex_add_btn"):
+                                        st.session_state.df_npl_accumulated = pd.concat(
+                                            [st.session_state.df_npl_accumulated, df_oalex], ignore_index=True)
+                                        st.success(f"{len(df_oalex)}件を追加しました。")
+                                        st.rerun()
+                                else:
+                                    status_text.warning("該当する論文が見つかりませんでした。")
+
+                            except Exception as e:
+                                st.error(f"OpenALEX検索エラー: {e}")
 
             # --- タブ 2: News (ニュース) ---
             with npl_tabs[1]:
@@ -511,11 +551,10 @@ with container:
                 
 
         if st.session_state.df_main is not None:
-            # タブ2に移動
             pass
-            
+
     with tab2:
-        st.markdown("##### patent_dfのカラムを分析用フィールドにマッピングします。")
+        st.markdown("##### 特許データのカラムを分析用フィールドに割り当てます。")
         if st.session_state.df_main is not None:
             df = st.session_state.df_main
             columns_with_none = [None] + list(df.columns)
@@ -550,19 +589,21 @@ with container:
                 
             with col3:
                 st.markdown("##### 任意メタデータ項目")
-                
+
+                # 公開番号 (CAPCOM用)
+                kw_pub_num = ['公開番号', '公報番号', 'Publication Number', 'Pub No', 'Document Number']
+                col_map['pub_number'] = st.selectbox("公開番号 (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('pub_number'), columns_with_none, kw_pub_num), key="col_pub_number")
+
                 # 発明者
                 col_map['inventor'] = st.selectbox("発明者 (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('inventor'), columns_with_none, kw_inventor), key="col_inventor")
                 inventor_delimiter = st.text_input("発明者区切り文字:", value=st.session_state.delimiters.get('inventor', ';'), key="del_inventor")
-                
 
-                
                 # Fターム
                 col_map['fterm'] = st.selectbox("Fターム (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('fterm'), columns_with_none, kw_fterm), key="col_fterm")
-                fterm_delimiter = st.text_input("Fターム区切り文字:", value=st.session_state.delimiters.get('fterm', ';'), key="del_fterm") 
-                
+                fterm_delimiter = st.text_input("Fターム区切り文字:", value=st.session_state.delimiters.get('fterm', ';'), key="del_fterm")
+
                 # ステータス
-                col_map['status'] = st.selectbox("ステータス (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('status'), columns_with_none, ['ステータス', 'Status', 'Legal Status', '法的状態']), key="col_status") 
+                col_map['status'] = st.selectbox("ステータス (任意):", columns_with_none, index=smart_map_index(st.session_state.col_map.get('status'), columns_with_none, ['ステータス', 'Status', 'Legal Status', '法的状態']), key="col_status")
                 
             st.session_state.col_map = col_map
             st.session_state.delimiters = {
@@ -726,16 +767,16 @@ with container:
                         progress_bar.progress(total_progress)
                         return elapsed_str, eta_str
 
-                    # 1. モデル読み込み (初期化)
+                    # 1. モデル読み込み (初期化) — patiroha.SBERTEmbedder
                     status_text.markdown("🔄 **Phase 1/6: モデルロード中...**")
                     update_progress('init', 0.5)
 
-                    df = st.session_state.df_main.copy() 
+                    df = st.session_state.df_main.copy()
                     col_map = st.session_state.col_map
                     delimiters = st.session_state.delimiters
-                    
-                    sbert_model = load_sbert_model()
-                    st.session_state.sbert_model = sbert_model
+
+                    _embedder = load_sbert_embedder()  # patiroha経由でキャッシュ
+                    st.session_state.sbert_model = _embedder  # 後方互換
                     update_progress('init', 1.0)
                     # 2. 特許データの前処理
                     status_text.markdown("🔄 **Phase 2/6: 特許データの前処理中...**")
@@ -746,127 +787,120 @@ with container:
                         df[col_map['claim']].fillna('')
                     )
                     # 3. NPLデータ処理 (NPL個別処理)
-                    status_text.markdown("🔄 **Phase 3/6: 非特許情報(NPL)の個別処理中...**")
+                    status_text.markdown("🔄 **Phase 3/6: 特許以外の情報(NPL)の個別処理中...**")
                     if 'df_npl' in st.session_state and st.session_state.df_npl is not None:
                         df_n = st.session_state.df_npl.copy()
                         df_n['data_type'] = 'NPL'
-                        
+
                         # 統合カラムマッピング適用
                         n_title = df_n['unified_title'].fillna('')
                         n_content = df_n['unified_content'].fillna('')
-                        
+
                         df_n[col_map['title']] = n_title
                         df_n[col_map['date']] = df_n['unified_date']
                         df_n[col_map['applicant']] = df_n['unified_source'].fillna('N/A')
                         df_n['region'] = df_n['unified_region'].fillna('Global')
                         df_n['status'] = df_n['unified_status'].fillna('Unknown')
                         df_n[col_map['abstract']] = n_content
-                        # 特許固有項目はダミーまたは空
                         df_n[col_map['app_num']] = 'NPL-' + df_n.index.astype(str)
-                        
-                        # 日付パース (ロバスト - NPL用直接処理)
-                        raw_dates_n = df_n[col_map['date']].astype(str)
-                        # 強制変換、エラーはNaTに
-                        df_n['parsed_date'] = pd.to_datetime(raw_dates_n, errors='coerce')
-                        
-                        # 全て失敗した場合の"YYYY"形式のフォールバック
-                        if df_n['parsed_date'].isna().all():
-                             # 可能であれば年整数としてパース
-                             df_n['parsed_date'] = pd.to_datetime(raw_dates_n, format='%Y', errors='coerce')
 
+                        # 日付パース — patiroha.parse_date
+                        df_n['parsed_date'] = patiroha.parse_date(df_n[col_map['date']])
                         df_n['year'] = df_n['parsed_date'].dt.year
-                        
-                        # 'year'のNaN処理 (Nebulaはフィルタリングするため現状はNaNのまま)
+
                         # NaTの場合は正規表現で年を抽出
                         mask_nat = df_n['parsed_date'].isna()
                         if mask_nat.any():
-                            # 4桁数字の正規表現抽出
+                            raw_dates_n = df_n[col_map['date']].astype(str)
                             extracted_years = raw_dates_n[mask_nat].str.extract(r'(\d{4})')[0]
-                            # 該当行の'year'カラムを直接更新
                             df_n.loc[mask_nat, 'year'] = pd.to_numeric(extracted_years, errors='coerce')
 
-                        # Academic/Newsのみキーワード抽出
-                        npl_text_series = n_title + ' ' + n_content
-                        sw_list = utils.get_npl_stopwords()
-                        
+                        # Academic/Newsのみキーワード抽出 — patiroha.extract_keywords
+                        npl_sw = patiroha.get_stopwords("npl")
+
                         def process_npl_keywords(row):
                             sub_type = str(row.get('data_sub_type', ''))
                             if sub_type in ['Academic', 'Business', 'Academic Source', 'News Source']:
                                 t_val = str(row['unified_title']) if pd.notna(row['unified_title']) else ""
                                 c_val = str(row['unified_content']) if pd.notna(row['unified_content']) else ""
                                 txt = t_val + " " + c_val
-                                return utils.extract_keywords(txt, t, sw_list)
+                                return patiroha.extract_keywords(txt, stopwords=npl_sw)
                             else:
                                 return []
-                        
-                        # Apply
+
                         df_n['explorer_keywords'] = df_n.apply(process_npl_keywords, axis=1)
-                        
-                        # セッション状態に保存
                         st.session_state.df_npl = df_n
-                    
+
                     update_progress('text', 1.0)
 
-                    # 4. SBERTエンコード (Patent ONLY)
+                    # 4. SBERTエンコード (Patent ONLY) — patiroha.SBERTEmbedder
                     status_text.markdown("🔄 **Phase 4/6: AIベクトル化 (SBERT - 特許のみ)...**")
-                    texts_for_sbert_list = df['text_for_sbert'].tolist()
-                    batch_size = 128
-                    total_batches = (len(texts_for_sbert_list) + batch_size - 1) // batch_size
-                    embeddings_list = []
-                    
-                    for i in range(total_batches):
-                        batch_texts = texts_for_sbert_list[i*batch_size : (i+1)*batch_size]
-                        batch_embeddings = sbert_model.encode(batch_texts, show_progress_bar=False)
-                        embeddings_list.append(batch_embeddings)
-                        
-                        phase_prog = (i + 1) / total_batches
-                        el_str, et_str = update_progress('sbert', phase_prog)
-                        status_text.markdown(f"🔄 **Phase 4/6: AIベクトル化 (SBERT) 実行中...** (Batch {i+1}/{total_batches})\n\n⏱️ 経過: {el_str} | ⏳ 残り: {et_str} (目安)")
-                    
-                    sbert_embeddings = np.vstack(embeddings_list)
-                    sbert_embeddings = normalize(sbert_embeddings, norm='l2')
+                    embedder = load_sbert_embedder()
+
+                    def sbert_progress(frac):
+                        el_str, et_str = update_progress('sbert', frac)
+                        pct = int(frac * 100)
+                        status_text.markdown(
+                            f"🔄 **Phase 4/6: AIベクトル化 (SBERT) 実行中...** ({pct}%)\n\n"
+                            f"⏱️ 経過: {el_str} | ⏳ 残り: {et_str} (目安)")
+
+                    sbert_embeddings = embedder.encode(
+                        df,
+                        text_columns=[col_map['title'], col_map['abstract'], col_map['claim']],
+                        batch_size=128,
+                        normalize_embeddings=True,
+                        progress_callback=sbert_progress,
+                    )
                     st.session_state.sbert_embeddings = sbert_embeddings
 
-                    # 5. TF-IDF & Keyword (Patent ONLY)
+                    # 5. TF-IDF & Keyword (Patent ONLY) — patiroha
                     status_text.markdown("🔄 **Phase 5/6: キーワード抽出 (TF-IDF - 特許のみ)...**")
-                    # Explorer用 (キーワードリスト)
-                    if 'stopwords' in st.session_state and st.session_state['stopwords']:
-                         sw_list = st.session_state['stopwords']
-                    else:
-                         sw_list = utils.get_stopwords()
-                    
-                    df['explorer_keywords'] = df['text_for_sbert'].apply(lambda x: utils.extract_keywords(x, t, sw_list))
-                    
-                    # 検索用 (TF-IDF行列)
-                    df['text_for_tfidf'] = df['text_for_sbert'].apply(advanced_tokenize)
-                    vectorizer = TfidfVectorizer(max_features=None, min_df=5, max_df=0.80)
-                    st.session_state.tfidf_matrix = vectorizer.fit_transform(df['text_for_tfidf'])
-                    st.session_state.feature_names = np.array(vectorizer.get_feature_names_out())
+                    current_sw = _get_current_stopwords()
+
+                    # Explorer用キーワードリスト
+                    df['explorer_keywords'] = df['text_for_sbert'].apply(
+                        lambda x: patiroha.extract_keywords(x, stopwords=current_sw))
+
+                    # TF-IDF行列 — patiroha.build_tfidf
+                    tfidf_matrix, feature_names = patiroha.build_tfidf(
+                        df['text_for_sbert'].tolist(),
+                        stopwords=current_sw,
+                        min_df=5, max_df=0.80)
+                    st.session_state.tfidf_matrix = tfidf_matrix
+                    st.session_state.feature_names = feature_names
                     update_progress('tfidf', 1.0)
 
-                    # 6. 正規化 (Patent Norm)
+                    # 6. メタデータ正規化 — patiroha
                     status_text.markdown("🔄 **Phase 6/6: メタデータ (日付・IPC・出願人) 正規化中...**")
-                    raw_dates = df[col_map['date']].astype(str)
-                    df['parsed_date'] = robust_parse_date(raw_dates)
+
+                    # 日付 — patiroha.parse_date
+                    df['parsed_date'] = patiroha.parse_date(df[col_map['date']])
                     df['year'] = df['parsed_date'].dt.year
                     df['app_num_main'] = df[col_map['app_num']].astype(str).str.strip()
 
+                    # IPC — patiroha.extract_ipc
                     ipc_delimiter = delimiters['ipc']
-                    df['ipc_normalized'] = df[col_map['ipc']].apply(lambda x: extract_ipc(x, ipc_delimiter))
+                    df['ipc_normalized'] = df[col_map['ipc']].apply(
+                        lambda x: patiroha.extract_ipc(x, delimiter=ipc_delimiter) if isinstance(x, str) else [])
                     ipc_raw_list = df[col_map['ipc']].fillna('').astype(str).str.split(ipc_delimiter)
-                    df['ipc_main_group'] = ipc_raw_list.apply(lambda terms: list(set([t.strip().split('/')[0].strip().upper() for t in terms if t.strip()])))
+                    df['ipc_main_group'] = ipc_raw_list.apply(
+                        lambda terms: list(set([t.strip().split('/')[0].strip().upper() for t in terms if t.strip()])))
 
+                    # Fターム
                     if col_map['fterm']:
                         fterm_delimiter = delimiters['fterm']
                         fterm_raw_list = df[col_map['fterm']].fillna('').astype(str).str.split(fterm_delimiter)
-                        df['fterm_main'] = fterm_raw_list.apply(lambda terms: list(set([t.strip()[:5].upper() for t in terms if t.strip() and len(t) >= 5])))
+                        df['fterm_main'] = fterm_raw_list.apply(
+                            lambda terms: list(set([t.strip()[:5].upper() for t in terms if t.strip() and len(t) >= 5])))
                     else:
                         df['fterm_main'] = [[] for _ in range(len(df))]
 
+                    # 出願人 — patiroha.normalize_applicant
                     applicant_delimiter = delimiters['applicant']
-                    applicant_raw_list = df[col_map['applicant']].fillna('').astype(str).str.split(applicant_delimiter)
-                    df['applicant_main'] = applicant_raw_list.apply(lambda names: list(set([n.strip() for n in names if n.strip()])))
-                    
+                    df['applicant_main'] = df[col_map['applicant']].apply(
+                        lambda x: patiroha.normalize_applicant(x, delimiter=applicant_delimiter) if isinstance(x, str) else [])
+
+                    # 発明者
                     if col_map['inventor'] and col_map['inventor'] in df.columns:
                         inventor_delimiter = delimiters['inventor']
                         def clean_inventors(val):
@@ -877,8 +911,8 @@ with container:
                     else:
                         df['inventor_main'] = [[] for _ in range(len(df))]
                     update_progress('norm', 1.0)
-                    
-                    # 6. クリーンアップ (Clean)
+
+                    # クリーンアップ
                     status_text.markdown("🔄 **Phase 6/6: 最終処理中...**")
                     df.drop(columns=['text_for_sbert'], errors='ignore', inplace=True)
                     st.session_state.df_main = df 
@@ -895,3 +929,94 @@ with container:
                     st.error(f"前処理中にエラーが発生しました: {e}")
                     import traceback
                     st.exception(traceback.format_exc())
+
+        # --- CAPCOM セッション管理 ---
+        st.markdown("---")
+
+        if capcom.is_active():
+            session_id = capcom.get_session_id()
+            # session_stateベースのテレメトリ（ファイルI/Oなし）
+            _tel = capcom.get_telemetry()
+            snap_n, prompt_n, data_n = _tel['snapshots'], _tel['prompts'], _tel['data']
+
+            st.markdown(f"""<div style="background: linear-gradient(135deg, #f0f4f8 0%, #e4ecf4 50%, #dce6f0 100%);
+border-radius: 12px; padding: 20px 24px; margin-bottom: 16px;
+border: 1px solid #003366;">
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
+<div style="display: flex; align-items: center; gap: 10px;">
+<span style="font-size: 26px;">📡</span>
+<div>
+<div style="color: #003366; font-size: 22px; font-weight: 800; letter-spacing: 3px;">CAPCOM</div>
+<div style="color: #455A64; font-size: 13px; letter-spacing: 1px; margin-top: 2px;">CAPSULE COMMUNICATOR</div>
+</div>
+</div>
+<div style="display: flex; align-items: center; gap: 6px;
+background: rgba(0,80,30,0.85); border-radius: 20px;
+padding: 5px 14px; border: 1px solid rgba(0,200,83,0.6);">
+<span style="display: inline-block; width: 8px; height: 8px;
+background: #69F0AE; border-radius: 50%;
+box-shadow: 0 0 6px #69F0AE;
+animation: capcom-blink 2s ease-in-out infinite;"></span>
+<span style="color: #fff; font-size: 13px; font-weight: 700;">ONLINE</span>
+</div>
+</div>
+<div style="background: rgba(0,51,102,0.06); border-radius: 8px;
+padding: 10px 14px; margin-bottom: 12px;
+font-family: 'SF Mono', 'Consolas', 'Courier New', monospace;">
+<div style="color: #37474F; font-size: 12px; font-weight: 600; margin-bottom: 4px;">SESSION ID</div>
+<div style="color: #263238; font-size: 15px;">{session_id}</div>
+</div>
+<div style="display: flex; gap: 12px;">
+<div style="flex: 1; background: rgba(0,51,102,0.05); border-radius: 8px;
+padding: 10px 12px; text-align: center;">
+<div style="color: #1565C0; font-size: 24px; font-weight: 700;">{snap_n}</div>
+<div style="color: #37474F; font-size: 12px; font-weight: 600; letter-spacing: 1px;">SNAPSHOTS</div>
+</div>
+<div style="flex: 1; background: rgba(0,51,102,0.05); border-radius: 8px;
+padding: 10px 12px; text-align: center;">
+<div style="color: #E65100; font-size: 24px; font-weight: 700;">{prompt_n}</div>
+<div style="color: #37474F; font-size: 12px; font-weight: 600; letter-spacing: 1px;">PROMPTS</div>
+</div>
+<div style="flex: 1; background: rgba(0,51,102,0.05); border-radius: 8px;
+padding: 10px 12px; text-align: center;">
+<div style="color: #2E7D32; font-size: 24px; font-weight: 700;">{data_n}</div>
+<div style="color: #37474F; font-size: 12px; font-weight: 600; letter-spacing: 1px;">DATA</div>
+</div>
+</div>
+</div>
+<style>@keyframes capcom-blink {{
+0%, 100% {{ opacity: 1; }}
+50% {{ opacity: 0.3; }}
+}}</style>""", unsafe_allow_html=True)
+
+        else:
+            # CAPCOM 待機状態
+            st.markdown("""<div style="background: linear-gradient(135deg, #f5f5f5 0%, #eeeeee 100%);
+border-radius: 12px; padding: 20px 24px; margin-bottom: 16px;
+border: 1px solid #ddd;">
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+<div style="display: flex; align-items: center; gap: 10px;">
+<span style="font-size: 26px; opacity: 0.4;">📡</span>
+<div>
+<div style="color: #78909C; font-size: 22px; font-weight: 800; letter-spacing: 3px;">CAPCOM</div>
+<div style="color: #90A4AE; font-size: 13px; letter-spacing: 1px; margin-top: 2px;">CAPSULE COMMUNICATOR</div>
+</div>
+</div>
+<div style="display: flex; align-items: center; gap: 6px;
+background: rgba(0,0,0,0.03); border-radius: 20px;
+padding: 5px 14px; border: 1px solid #ccc;">
+<span style="display: inline-block; width: 8px; height: 8px; background: #bbb; border-radius: 50%;"></span>
+<span style="color: #777; font-size: 13px; font-weight: 700;">STANDBY</span>
+</div>
+</div>
+<div style="color: #607D8B; font-size: 14px; line-height: 1.6;">
+分析結果をファイル出力し、Claude Code から読み取り可能にします。<br/>
+分析エンジン起動後にセッションを開始できます。
+</div>
+</div>""", unsafe_allow_html=True)
+
+            if st.session_state.get('preprocess_done', False):
+                if st.button("📡 CAPCOMセッション開始", type="primary", key="start_capcom"):
+                    session_id, _ = capcom.init_session()
+                    st.success(f"📡 CAPCOM セッション開始: `{session_id}` (In-Memory)")
+                    st.rerun()

@@ -27,13 +27,14 @@ import utils_ai
 import utils_spatial
 from wordcloud import WordCloud
 from janome.tokenizer import Tokenizer
+import patiroha
 import networkx as nx
 from scipy.spatial import ConvexHull
 
 # 描画用
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
-import japanize_matplotlib
+utils.configure_matplotlib_font()
 
 
 # 警告を非表示
@@ -43,7 +44,7 @@ warnings.filterwarnings('ignore')
 # --- 1. ページ設定 ---
 # ==================================================================
 st.set_page_config(
-    page_title="APOLLO | Saturn V", 
+    page_title="APOLLO CAPCOM | Saturn V", 
     page_icon="🚀", 
     layout="wide"
 )
@@ -90,7 +91,7 @@ t = load_tokenizer_saturn()
 if "stopwords" in st.session_state and st.session_state["stopwords"]:
     stopwords = st.session_state["stopwords"]
 else:
-    stopwords = utils.get_stopwords()
+    stopwords = patiroha.get_stopwords()
 
 _ngram_rows = [
     ("参照符号付き要素", r"[一-龥ぁ-んァ-ンA-Za-z0-9／\-＋・]+?(?:部|層|面|体|板|孔|溝|片|部材|要素|機構|装置|手段|電極|端子|領域|基板|回路|材料|工程)\s*[（(]\s*[0-9０-９A-Za-z]+[A-Za-z]?\s*[）)]", "regex", 1),
@@ -171,7 +172,7 @@ def extract_compound_nouns(text, stopwords_list):
         words.append(compound_word)
     return words
 
-def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
+def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_key=None):
     if not words: return None
     word_freq = Counter(words)
     try:
@@ -186,6 +187,39 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
         ax.set_title(title, fontsize=20)
         ax.axis('off')
         st.pyplot(fig)
+
+        # CAPCOM: ワードクラウドデータ保存
+        if capcom_key:
+            try:
+                import capcom
+                if capcom.is_active():
+                    import io
+                    wc_data = {
+                        "metadata": {"module": "Saturn V", "title": title, "top_n": top_n},
+                        "word_frequencies": {w: c for w, c in word_freq.most_common(100)}
+                    }
+                    capcom.save_data(f"{capcom_key}_wordcloud.json", wc_data)
+                    buf = io.BytesIO()
+                    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+                    buf.seek(0)
+                    capcom.save_snapshot_image(f"{capcom_key}_wordcloud", buf.read())
+            except Exception:
+                pass
+
+        # VOYAGERスナップショットボタン
+        if capcom_key:
+            utils.render_snapshot_button(
+                title=f"ワードクラウド: {title}",
+                description=f"TF-IDFワードクラウド（上位{top_n}語）",
+                key=f"{capcom_key}_wordcloud",
+                fig=fig,
+                data_summary={
+                    "module": "Saturn V",
+                    "type": "wordcloud",
+                    "title": title,
+                    "top_words": [{"word": w, "freq": c} for w, c in word_freq.most_common(top_n)]
+                }
+            )
     except Exception as e:
         st.error(f"ワードクラウドの描画に失敗しました: {e}")
 
@@ -255,13 +289,7 @@ def get_date_bin_options(df_filtered, interval_years, year_column='year'):
 utils.render_sidebar()
 
 st.title("🚀 Saturn V")
-st.markdown("SBERT（文脈・意味）に基づき、インタラクティブな技術マップ分析モジュールです。")
-
-col_theme, _ = st.columns([1, 3])
-with col_theme:
-    selected_theme = st.selectbox("表示テーマ:", ["APOLLO Standard", "Modern Presentation"], key="saturn_theme_selector")
-theme_config = utils.get_theme_config(selected_theme)
-st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
+st.markdown("特許テキストの意味的類似性から技術マップを自動生成。クラスタ構造・ノイズ（萌芽技術）・成長動態を一望します。")
 
 # ==================================================================
 # --- 7. データロード & 初期化 ---
@@ -336,29 +364,31 @@ with tab_main:
                 clustering = clusterer.fit(embedding)
                 st.session_state.df_main['cluster'] = clustering.labels_
                 
-                labels_map = {}
+                # patiroha.auto_label で c-TF-IDF ラベリング
                 label_top_n = int(label_top_n_w)
-                unique_clusters = sorted(st.session_state.df_main['cluster'].unique())
-                
-                for cluster_id in unique_clusters:
-                    if cluster_id == -1:
-                        labels_map[cluster_id] = "ノイズ / 小クラスタ"
-                        continue
-                    indices = st.session_state.df_main[st.session_state.df_main['cluster'] == cluster_id].index
-                    if len(indices) == 0:
-                        labels_map[cluster_id] = "(該当なし)"
-                        continue
-                    cluster_vectors = tfidf_matrix[indices]
-                    mean_vector = np.array(cluster_vectors.mean(axis=0)).flatten()
-                    top_indices = np.argsort(mean_vector)[::-1][:label_top_n]
-                    label = ", ".join([feature_names[i] for i in top_indices])
-                    labels_map[cluster_id] = f"[{cluster_id}] {label}"
+                texts_for_label = (
+                    st.session_state.df_main[col_map['title']].fillna('') + ' ' +
+                    st.session_state.df_main[col_map['abstract']].fillna('')
+                )
+                labels_map = patiroha.auto_label(
+                    texts_for_label,
+                    st.session_state.df_main['cluster'].values,
+                    method='c-tfidf',
+                    top_n=label_top_n,
+                )
                 
                 st.session_state.df_main['cluster_label'] = st.session_state.df_main['cluster'].map(labels_map)
                 st.session_state.saturnv_labels_map = labels_map.copy()
                 st.session_state.saturnv_labels_map_original = labels_map.copy()
                 st.session_state.df_main = update_hover_text(st.session_state.df_main, col_map)
                 st.session_state.saturnv_cluster_done = True
+                # CAPCOM: patents.csvにクラスタ情報を追加更新
+                try:
+                    import capcom
+                    if capcom.is_active():
+                        capcom.save_patents_csv()
+                except Exception:
+                    pass
                 st.success("クラスタリング完了")
                 st.rerun()
             except Exception as e:
@@ -501,7 +531,7 @@ with tab_main:
         # クラスタ領域
         if map_mode == "クラスタ領域 (Clusters)" and not df_universe.empty:
             unique_clusters = sorted(df_universe['cluster'].unique())
-            color_sequence = theme_config["color_sequence"]
+            color_sequence = utils.APOLLO_COLORS
             for i, cid in enumerate(unique_clusters):
                 if cid == -1: continue
                 points = df_universe[df_universe['cluster'] == cid][['umap_x', 'umap_y']].values
@@ -561,7 +591,7 @@ with tab_main:
                         x=df_focus_valid['umap_x'], y=df_focus_valid['umap_y'], mode='markers', 
                         marker=dict(
                             color=df_focus_valid['cluster'], 
-                            colorscale=theme_config["color_sequence"], 
+                            colorscale=utils.APOLLO_COLORS, 
                             showscale=False, 
                             size=5, 
                             opacity=0.8, 
@@ -583,11 +613,10 @@ with tab_main:
                         hoverinfo='text', hovertext=df_focus_noise['hover_text'], name='Noise'
                     ))
 
-        # ラベル追加
         if show_labels_chk:
             label_data_source = df_universe
             target_cids = cluster_values if "ALL" not in cluster_values else label_data_source['cluster'].unique()
-            color_sequence = theme_config["color_sequence"]
+            color_sequence = utils.APOLLO_COLORS
             sorted_unique_cids = sorted(df_universe['cluster'].unique()) 
             
             # Filter Noise from labels
@@ -609,7 +638,7 @@ with tab_main:
                 )
 
         norm_msg = " (絶対評価)" if use_abs_scale and map_mode == "密度マップ (Density)" else ""
-        utils.update_fig_layout(fig_main, f"Saturn V - メインマップ{norm_msg}", height=1200, theme_config=theme_config)
+        utils.update_fig_layout(fig_main, f"Saturn V - メインマップ{norm_msg}", height=1200)
         
 
         # 1. アスペクト比: 歪みを防ぐため1:1を強制
@@ -699,8 +728,7 @@ with tab_main:
                  label = st.session_state.saturnv_labels_map.get(cid, f"Cluster {cid}")
                  count = cluster_counts_snap.get(cid, 0)
                  cluster_summary_lines.append(f"- {label} ({count}件)")
-                 
-                # 代表特許を追加
+
                  if cid in cluster_reps:
                      for rep in cluster_reps[cid]:
                          cluster_summary_lines.append(rep)
@@ -798,6 +826,160 @@ with tab_main:
             
             utils_ai.render_ai_insight_button(prompt, "saturn_main_insight")
 
+            # CAPCOM data/ JSON出力（Saturn V TELESCOPEクラスタ）
+            try:
+                import capcom
+                if capcom.is_active():
+                    clusters_json = []
+                    for cid in sorted(df_universe['cluster'].unique()):
+                        if cid == -1:
+                            continue
+                        label = st.session_state.saturnv_labels_map.get(cid, f"Cluster {cid}")
+                        auto_label = st.session_state.get('saturnv_labels_map_original', {}).get(cid, label)
+                        count = int(cluster_counts_snap.get(cid, 0))
+                        # 重心座標
+                        cid_mask = df_universe['cluster'] == cid
+                        cx = float(df_universe.loc[cid_mask, 'umap_x'].mean()) if cid_mask.any() else 0
+                        cy = float(df_universe.loc[cid_mask, 'umap_y'].mean()) if cid_mask.any() else 0
+                        # TF-IDF上位語
+                        tfidf_terms = []
+                        try:
+                            cid_indices = df_universe[cid_mask].index.tolist()
+                            valid_idx = [i for i in cid_indices if i < tfidf_matrix.shape[0]]
+                            if valid_idx:
+                                mean_tfidf = tfidf_matrix[valid_idx].mean(axis=0).A1
+                                top_idx = mean_tfidf.argsort()[::-1][:10]
+                                tfidf_terms = [feature_names[i] for i in top_idx]
+                        except:
+                            pass
+
+                        # 代表特許（各エントリ200文字で截断）
+                        reps_raw = []
+                        if cid in cluster_reps:
+                            for rep_str in cluster_reps[cid]:
+                                reps_raw.append(rep_str[:200] if len(rep_str) > 200 else rep_str)
+
+                        clusters_json.append({
+                            "cluster_id": int(cid),
+                            "label": label,
+                            "auto_label": auto_label,
+                            "count": count,
+                            "centroid": [round(cx, 4), round(cy, 4)],
+                            "tfidf_top_terms": tfidf_terms,
+                            "representative_patents": reps_raw
+                        })
+
+                    noise_count = int((df_universe['cluster'] == -1).sum()) if -1 in df_universe['cluster'].values else 0
+
+                    # ノイズ特許のデータ抽出（上限200件）
+                    noise_patents = []
+                    if noise_count > 0:
+                        df_noise = df_universe[df_universe['cluster'] == -1]
+                        for _, row in df_noise.head(200).iterrows():
+                            noise_entry = {
+                                "umap_x": round(float(row['umap_x']), 4),
+                                "umap_y": round(float(row['umap_y']), 4),
+                            }
+                            title_col = col_map.get('title')
+                            if title_col and title_col in row.index and pd.notna(row[title_col]):
+                                noise_entry["title"] = str(row[title_col])[:100]
+                            if 'applicant_main' in row.index:
+                                val = row['applicant_main']
+                                noise_entry["applicant"] = val[0] if isinstance(val, list) and val else str(val)[:50]
+                            if 'year' in row.index and pd.notna(row['year']):
+                                noise_entry["year"] = int(row['year'])
+                            noise_patents.append(noise_entry)
+
+                    # ノイズ率解釈
+                    _noise_ratio = round(noise_count / len(df_universe), 4) if len(df_universe) > 0 else 0
+                    if _noise_ratio < 0.05:
+                        _noise_interp = "成熟・均質な技術領域（ノイズ率 < 5%）"
+                    elif _noise_ratio < 0.15:
+                        _noise_interp = "標準的・安定構造（ノイズ率 5-15%）"
+                    elif _noise_ratio < 0.30:
+                        _noise_interp = "多様・融合活発（ノイズ率 15-30%）"
+                    else:
+                        _noise_interp = "萌芽・黎明期（ノイズ率 > 30%）"
+
+                    # ノイズ時系列分布
+                    _noise_year_dist = {}
+                    _noise_temporal_pattern = ""
+                    if noise_count > 0 and 'year' in df_universe.columns:
+                        _df_noise_capcom = df_universe[df_universe['cluster'] == -1]
+                        _year_counts = _df_noise_capcom['year'].dropna().value_counts().sort_index()
+                        _noise_year_dist = {str(int(k)): int(v) for k, v in _year_counts.items()}
+                        if not _year_counts.empty:
+                            _recent_years = _year_counts.index.max() - 3
+                            _recent_ratio = _year_counts[_year_counts.index > _recent_years].sum() / noise_count
+                            if _recent_ratio > 0.6:
+                                _noise_temporal_pattern = "近年集中（新興テーマの可能性）"
+                            elif _recent_ratio < 0.2:
+                                _noise_temporal_pattern = "過去集中（歴史的バリエーション）"
+                            else:
+                                _noise_temporal_pattern = "均一分布（永続的ニッチ）"
+
+                    # ノイズ出願人分布
+                    _noise_top_applicants = []
+                    if noise_count > 0 and 'applicant_main' in df_universe.columns:
+                        _df_noise_capcom = df_universe[df_universe['cluster'] == -1]
+                        _all_apps = []
+                        for _apps in _df_noise_capcom['applicant_main']:
+                            if isinstance(_apps, list):
+                                _all_apps.extend(_apps)
+                            elif isinstance(_apps, str):
+                                _all_apps.append(_apps)
+                        if _all_apps:
+                            _app_counter = Counter(_all_apps)
+                            _noise_top_applicants = [{"applicant": a, "count": c} for a, c in _app_counter.most_common(10)]
+
+                    # ノイズ萌芽キーワード
+                    _noise_keywords = []
+                    if noise_count >= 5:
+                        try:
+                            _title_col = col_map.get('title', '')
+                            _abstract_col = col_map.get('abstract', '')
+                            if _title_col and _title_col in df_universe.columns:
+                                _df_noise_capcom = df_universe[df_universe['cluster'] == -1]
+                                _noise_texts = (_df_noise_capcom[_title_col].fillna('') + ' ' +
+                                               _df_noise_capcom.get(_abstract_col, pd.Series([''] * len(_df_noise_capcom))).fillna(''))
+                                _noise_kws = _noise_texts.apply(
+                                    lambda x: patiroha.extract_keywords(x, stopwords=patiroha.get_stopwords()))
+                                _all_kws = []
+                                for _kw_list in _noise_kws:
+                                    _all_kws.extend(_kw_list)
+                                _kw_freq = Counter(_all_kws).most_common(20)
+                                _noise_keywords = [{"keyword": k, "frequency": f} for k, f in _kw_freq]
+                        except Exception:
+                            pass
+
+                    saturnv_json = {
+                        "metadata": {
+                            "module": "Saturn V",
+                            "mode": "TELESCOPE",
+                            "n_clusters": len(clusters_json),
+                            "noise_count": noise_count,
+                            "noise_ratio": _noise_ratio,
+                            "total_patents": len(df_universe)
+                        },
+                        "clusters": clusters_json,
+                        "noise_patents": noise_patents,
+                        "noise_analysis": {
+                            "noise_count": noise_count,
+                            "noise_ratio": _noise_ratio,
+                            "noise_interpretation": _noise_interp,
+                            "temporal_pattern": _noise_temporal_pattern,
+                            "year_distribution": _noise_year_dist,
+                            "top_applicants": _noise_top_applicants,
+                            "emerging_keywords": _noise_keywords,
+                        },
+                        "spatial_context": spatial_info if 'spatial_info' in dir() else ""
+                    }
+                    # クラスタ動態データを追加（前回実行時に session_state に保存されたものを使用）
+                    if 'saturnv_dynamics_data' in st.session_state:
+                        saturnv_json['cluster_dynamics'] = st.session_state['saturnv_dynamics_data']
+                    capcom.save_data("saturnv_clusters.json", saturnv_json)
+            except Exception as e:
+                pass
 
         st.subheader("ラベル編集")
         utils.render_ai_label_assistant(st.session_state.df_main, 'cluster', "saturnv_labels_map", col_map, tfidf_matrix, feature_names, widget_key_prefix="main_label")
@@ -811,6 +993,125 @@ with tab_main:
             st.session_state.df_main = update_hover_text(st.session_state.df_main, col_map)
             st.session_state.saturnv_labels_map = st.session_state.saturnv_labels_map_custom
             st.rerun()
+
+        # --- ノイズ分析セクション ---
+        df_main = st.session_state.df_main
+        if df_main is not None and 'cluster' in df_main.columns:
+            noise_mask = df_main['cluster'] == -1
+            noise_count = noise_mask.sum()
+            total_count = len(df_main)
+            noise_ratio = noise_count / total_count if total_count > 0 else 0
+
+            with st.expander(f"🔍 ノイズ分析 ({noise_count}件 / {noise_ratio:.1%})", expanded=False):
+                # 1. ノイズ率の解釈
+                if noise_ratio < 0.05:
+                    noise_interp = "成熟・均質な技術領域（ノイズ率 < 5%）"
+                elif noise_ratio < 0.15:
+                    noise_interp = "標準的・安定構造（ノイズ率 5-15%）"
+                elif noise_ratio < 0.30:
+                    noise_interp = "多様・融合活発（ノイズ率 15-30%）"
+                else:
+                    noise_interp = "萌芽・黎明期（ノイズ率 > 30%）"
+
+                st.info(f"**ノイズ率解釈**: {noise_interp}")
+
+                if noise_count > 0:
+                    df_noise = df_main[noise_mask].copy()
+
+                    # 2. 時系列分析
+                    st.markdown("##### 時系列分布")
+                    if 'year' in df_noise.columns:
+                        year_counts = df_noise['year'].dropna().value_counts().sort_index()
+                        if not year_counts.empty:
+                            recent_years = year_counts.index.max() - 3
+                            recent_ratio = year_counts[year_counts.index > recent_years].sum() / noise_count
+                            if recent_ratio > 0.6:
+                                st.markdown("📈 **近年集中**: ノイズの多くが直近3年に集中 → **新興テーマの可能性**")
+                            elif recent_ratio < 0.2:
+                                st.markdown("📊 **過去集中**: ノイズの多くが過去に分布 → **歴史的バリエーション**")
+                            else:
+                                st.markdown("📉 **均一分布**: ノイズが期間全体に分布 → **永続的ニッチ**")
+
+                            import plotly.express as px
+                            fig_noise_year = px.bar(x=year_counts.index, y=year_counts.values,
+                                                   labels={'x': '年', 'y': 'ノイズ件数'})
+                            fig_noise_year.update_layout(height=300, title='ノイズ特許の年別分布')
+                            st.plotly_chart(fig_noise_year, use_container_width=True)
+
+                    # 3. 出願人分析
+                    st.markdown("##### 出願人分布")
+                    if 'applicant_main' in df_noise.columns:
+                        all_applicants = []
+                        for apps in df_noise['applicant_main']:
+                            if isinstance(apps, list):
+                                all_applicants.extend(apps)
+                            elif isinstance(apps, str):
+                                all_applicants.append(apps)
+                        if all_applicants:
+                            from collections import Counter
+                            app_counts = Counter(all_applicants)
+                            top_apps = app_counts.most_common(10)
+                            top1_share = top_apps[0][1] / noise_count if top_apps else 0
+                            if top1_share > 0.3:
+                                st.markdown(f"🎯 **集中**: 上位出願人 '{top_apps[0][0]}' がノイズの{top1_share:.0%}を占める → **戦略的ニッチ**")
+                            else:
+                                st.markdown("🌐 **分散**: 多数の出願人にノイズが分布 → **標準化前段階**")
+
+                            st.dataframe(
+                                pd.DataFrame(top_apps, columns=['出願人', 'ノイズ件数']),
+                                use_container_width=True, hide_index=True
+                            )
+
+                    # 4. 萌芽テーマ抽出（TF-IDFキーワード）
+                    st.markdown("##### 萌芽テーマ候補")
+                    if noise_count >= 5:
+                        col_map = st.session_state.get('col_map', {})
+                        title_col = col_map.get('title', '')
+                        abstract_col = col_map.get('abstract', '')
+                        if title_col and title_col in df_noise.columns:
+                            noise_texts = (df_noise[title_col].fillna('') + ' ' +
+                                          df_noise.get(abstract_col, pd.Series([''] * len(df_noise))).fillna(''))
+                            noise_kws = noise_texts.apply(
+                                lambda x: patiroha.extract_keywords(x, stopwords=patiroha.get_stopwords()))
+
+                            from collections import Counter
+                            all_kws = []
+                            for kw_list in noise_kws:
+                                all_kws.extend(kw_list)
+                            kw_freq = Counter(all_kws).most_common(20)
+
+                            if kw_freq:
+                                st.markdown("ノイズ特許から抽出した頻出キーワード（萌芽技術の候補）:")
+                                kw_df = pd.DataFrame(kw_freq, columns=['キーワード', '出現頻度'])
+                                st.dataframe(kw_df, use_container_width=True, hide_index=True)
+
+                    # CAPCOM出力
+                    try:
+                        import capcom
+                        if capcom.is_active():
+                            noise_data = {
+                                'noise_count': int(noise_count),
+                                'noise_ratio': round(noise_ratio, 4),
+                                'noise_interpretation': noise_interp,
+                            }
+                            # existing saturnv data will be updated elsewhere
+                            st.caption("📡 ノイズ分析データはCAPCOMに蓄積されます")
+                    except Exception:
+                        pass
+
+        # --- クラスタ動態マップ (Saturn V TELESCOPE) ---
+        if df_main is not None and 'cluster' in df_main.columns and 'year' in df_main.columns:
+            labels_map = st.session_state.get('saturnv_labels_map', {})
+            if labels_map and df_main['cluster'].nunique() > 1:
+                # 戻り値 dyn_data を取得して session_state に保存（CAPCOM JSON 出力用）
+                dyn_data = utils.render_cluster_dynamics_section(
+                    df_main, 'cluster', labels_map,
+                    year_col='year', cagr_window=5,
+                    unique_key='saturnv_dynamics',
+                    module_name='Saturn V',
+                )
+                if dyn_data:
+                    st.session_state['saturnv_dynamics_data'] = dyn_data
 
     # --- PROBE (ドリルダウン) ---
     with tab_drill:
@@ -913,18 +1214,17 @@ with tab_main:
                             clusterer_drill = hdbscan.HDBSCAN(min_cluster_size=int(drill_min_cluster_size_w), min_samples=int(drill_min_samples_w), metric='euclidean', cluster_selection_method='eom')
                             df_subset['drill_cluster'] = clusterer_drill.fit_predict(embedding_drill)
                             
-                            drill_labels_map = {}
-                            for cid in sorted(df_subset['drill_cluster'].unique()):
-                                if cid == -1:
-                                    drill_labels_map[cid] = "ノイズ"
-                                    continue
-                                idxs = df_subset[df_subset['drill_cluster'] == cid].index
-                                tfidf_pos = [subset_indices_pd.get_loc(i) for i in idxs if i in subset_indices_pd]
-                                if tfidf_pos:
-                                    mean_vec = np.array(subset_tfidf[tfidf_pos].mean(axis=0)).flatten()
-                                    top_idx = np.argsort(mean_vec)[::-1][:int(drill_label_top_n_w)]
-                                    label = ", ".join([feature_names[i] for i in top_idx])
-                                    drill_labels_map[cid] = f"[{cid}] {label}"
+                            # patiroha.auto_label で c-TF-IDF ラベリング（ドリルダウン）
+                            drill_texts = (
+                                df_subset[col_map['title']].fillna('') + ' ' +
+                                df_subset[col_map['abstract']].fillna('')
+                            )
+                            drill_labels_map = patiroha.auto_label(
+                                drill_texts,
+                                df_subset['drill_cluster'].values,
+                                method='c-tfidf',
+                                top_n=int(drill_label_top_n_w),
+                            )
                             
                             df_subset['drill_cluster_label'] = df_subset['drill_cluster'].map(drill_labels_map)
                             df_subset = update_drill_hover_text(df_subset)
@@ -985,7 +1285,7 @@ with tab_main:
                 fig_drill.add_trace(go.Histogram2dContour(**contour_d))
                 
             if drill_map_mode == "クラスタ領域 (Clusters)":
-                color_sequence = theme_config["color_sequence"]
+                color_sequence = utils.APOLLO_COLORS
                 unique_clusters_d = sorted(df_drill_plot['drill_cluster'].unique())
                 for i, cid in enumerate(unique_clusters_d):
                     if cid == -1: continue
@@ -1023,7 +1323,7 @@ with tab_main:
                     x=df_drill_valid['drill_x'], y=df_drill_valid['drill_y'], mode='markers',
                     marker=dict(
                         color=df_drill_valid['drill_cluster'], 
-                        colorscale=theme_config["color_sequence"] if isinstance(theme_config["color_sequence"], str) else 'turbo', 
+                        colorscale=utils.APOLLO_COLORS if isinstance(utils.APOLLO_COLORS, str) else 'turbo', 
                         showscale=False, 
                         size=6, 
                         opacity=0.9, 
@@ -1034,7 +1334,7 @@ with tab_main:
             
             annotations_drill = []
             if drill_show_labels_chk:
-                color_sequence = theme_config["color_sequence"]
+                color_sequence = utils.APOLLO_COLORS
                 sorted_unique_cids_d = sorted(df_drill_plot['drill_cluster'].unique())
                 
                 for cid, grp in df_drill_plot[df_drill_plot['drill_cluster'] != -1].groupby('drill_cluster'):
@@ -1055,7 +1355,7 @@ with tab_main:
                         borderpad=4
                     ))
             fig_drill.update_layout(annotations=annotations_drill)
-            utils.update_fig_layout(fig_drill, f'Saturn V ドリルダウン: {st.session_state.drill_base_label}', height=1000, theme_config=theme_config)
+            utils.update_fig_layout(fig_drill, f'Saturn V ドリルダウン: {st.session_state.drill_base_label}', height=1000)
             st.plotly_chart(fig_drill, use_container_width=True, config={
                 'editable': True,
                 'edits': {
@@ -1167,6 +1467,45 @@ with tab_main:
             )
             utils_ai.render_ai_insight_button(drill_prompt, "saturn_drill_insight")
 
+            # CAPCOM data/ JSON出力（Saturn V PROBEドリルダウン）
+            try:
+                import capcom
+                if capcom.is_active():
+                    drill_clusters_json = []
+                    drill_counts = df_drill['drill_cluster'].value_counts()
+                    drill_reps = utils.get_cluster_representatives(df_drill, cluster_col='drill_cluster', n_reps=3)
+                    for cid in sorted(df_drill['drill_cluster'].unique()):
+                        if cid == -1:
+                            continue
+                        label = drill_labels_map.get(cid, f"Sub-Cluster {cid}")
+                        count = int(drill_counts.get(cid, 0))
+                        cid_mask = df_drill['drill_cluster'] == cid
+                        cx = float(df_drill.loc[cid_mask, 'drill_x'].mean()) if cid_mask.any() else 0
+                        cy = float(df_drill.loc[cid_mask, 'drill_y'].mean()) if cid_mask.any() else 0
+                        reps_full = drill_reps.get(cid, []) if cid in drill_reps else []
+                        reps_raw = [r[:200] if len(r) > 200 else r for r in reps_full]
+                        drill_clusters_json.append({
+                            "cluster_id": int(cid),
+                            "label": label,
+                            "count": count,
+                            "centroid": [round(cx, 4), round(cy, 4)],
+                            "representative_patents": reps_raw
+                        })
+                    drill_json = {
+                        "metadata": {
+                            "module": "Saturn V",
+                            "mode": "PROBE",
+                            "parent_cluster": st.session_state.get('drill_base_label', ''),
+                            "n_clusters": len(drill_clusters_json),
+                            "total_patents": len(df_drill)
+                        },
+                        "clusters": drill_clusters_json,
+                        "spatial_context": drill_spatial_info if 'drill_spatial_info' in dir() else ""
+                    }
+                    capcom.save_data("saturnv_drilldown.json", drill_json)
+            except Exception as e:
+                pass
+
             st.subheader("サブクラスタ・ラベル編集")
             utils.render_ai_label_assistant(df_drill, 'drill_cluster', "drill_labels_map", col_map, tfidf_matrix, feature_names, widget_key_prefix="drill_label")
 
@@ -1187,8 +1526,8 @@ with tab_main:
             st.subheader("クラスタ・テキスト分析 (Text Mining)")
             col_tm1, col_tm2 = st.columns(2)
             with col_tm1:
-                cooc_top_n = st.slider("共起: 上位単語数", 30, 100, 50, key="cooc_top_n")
-                cooc_threshold = st.slider("共起: Jaccard係数 閾値", 0.01, 0.3, 0.05, 0.01, key="cooc_threshold")
+                cooc_top_n = st.slider("共起: 上位単語数", 30, 100, 70, key="cooc_top_n")
+                cooc_threshold = st.slider("共起: Jaccard係数 閾値", 0.01, 0.3, 0.03, 0.01, key="cooc_threshold")
             
             if st.button("テキスト分析を実行", key="run_text_mining"):
                 with st.spinner("分析中..."):
@@ -1201,8 +1540,8 @@ with tab_main:
                     if not words: st.warning("有効なキーワードなし")
                     else:
                         st.markdown("##### 1. ワードクラウド")
-                        generate_wordcloud_and_list(words, f"クラスタ: {st.session_state.drill_base_label}", 30, FONT_PATH)
-                        
+                        generate_wordcloud_and_list(words, f"クラスタ: {st.session_state.drill_base_label}", 30, FONT_PATH, capcom_key="saturnv_drill")
+
                         st.markdown("##### 2. 共起ネットワーク")
                         word_freq = Counter(words)
                         top_words = [w for w, c in word_freq.most_common(cooc_top_n)]
@@ -1244,7 +1583,7 @@ with tab_main:
                                 marker=dict(showscale=True, colorscale='YlGnBu', size=node_size, color=node_size, line_width=2)
                             )
                             fig_net = go.Figure(data=[edge_trace, node_trace], layout=go.Layout(title='共起ネットワーク', showlegend=False, hovermode='closest', margin=dict(b=20,l=5,r=5,t=40), xaxis=dict(showgrid=False, zeroline=False, showticklabels=False), yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
-                            utils.update_fig_layout(fig_net, '共起ネットワーク', theme_config=theme_config, show_axes=False)
+                            utils.update_fig_layout(fig_net, '共起ネットワーク', show_axes=False)
                             fig_net.update_xaxes(visible=False)
                             fig_net.update_yaxes(visible=False)
                             st.plotly_chart(fig_net, use_container_width=True)
@@ -1328,14 +1667,14 @@ with tab_main:
                 else:
                     # 1. 時系列
                     yc = df_s['year'].value_counts().sort_index().reindex(range(s_year, e_year+1), fill_value=0)
-                    fig1 = px.bar(x=yc.index, y=yc.values, labels={'x':'年', 'y':'件数'}, color_discrete_sequence=[theme_config["color_sequence"][0]])
-                    utils.update_fig_layout(fig1, '出願推移', theme_config=theme_config, show_axes=True)
+                    fig1 = px.bar(x=yc.index, y=yc.values, labels={'x':'年', 'y':'件数'}, color_discrete_sequence=[utils.APOLLO_COLORS[0]])
+                    utils.update_fig_layout(fig1, '出願推移', show_axes=True)
                     st.plotly_chart(fig1, use_container_width=True)
                     
                     # 2. ランキング
                     ac = df_s['applicant_main'].explode().value_counts().head(n_apps).sort_values(ascending=True)
-                    fig2 = px.bar(x=ac.values, y=ac.index, orientation='h', labels={'x':'件数', 'y':'出願人'}, color_discrete_sequence=[theme_config["color_sequence"][1]])
-                    utils.update_fig_layout(fig2, '出願人ランキング', height=max(600, len(ac)*30), theme_config=theme_config, show_axes=True)
+                    fig2 = px.bar(x=ac.values, y=ac.index, orientation='h', labels={'x':'件数', 'y':'出願人'}, color_discrete_sequence=[utils.APOLLO_COLORS[1]])
+                    utils.update_fig_layout(fig2, '出願人ランキング', height=max(600, len(ac)*30), show_axes=True)
                     st.plotly_chart(fig2, use_container_width=True)
                     
                     # 3. バブル
@@ -1346,7 +1685,7 @@ with tab_main:
                     
                     if not pd_plot.empty:
                         fig3 = px.scatter(pd_plot, x='year', y='ap', size='count', color='ap', labels={'year':'出願年', 'ap':'出願人', 'count':'件数'}, category_orders={'ap': top_a})
-                        utils.update_fig_layout(fig3, '出願年別動向', height=700, theme_config=theme_config, show_axes=True)
+                        utils.update_fig_layout(fig3, '出願年別動向', height=700, show_axes=True)
                         fig3.update_layout(
                             legend=dict(
                                 orientation="v", 

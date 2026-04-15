@@ -3,13 +3,21 @@ import platform
 import os
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
-import string
 import re
 import json
 import pandas as pd
 import numpy as np
-from sklearn.metrics.pairwise import euclidean_distances
-from janome.tokenizer import Tokenizer
+import patiroha
+import plotly.express as px
+
+# ==================================================================
+# --- 0. APOLLO Standard 色定数 ---
+# ==================================================================
+APOLLO_COLORS = px.colors.qualitative.G10      # Plotly 離散カラーパレット (10色)
+APOLLO_BG = "#ffffff"                          # 背景色 (paper_bgcolor / plot_bgcolor)
+APOLLO_TEXT = "#333333"                        # 文字色 (font.color)
+APOLLO_ACCENT = "#003366"                      # アクセント色 (H1タイトル等)
+APOLLO_TEMPLATE = "plotly_white"               # Plotly テンプレート
 
 # ==================================================================
 # --- 1. フォント設定 (共通) ---
@@ -59,190 +67,20 @@ def configure_matplotlib_font():
     return None
 
 # ==================================================================
-# --- 2. ストップワード (共通) ---
+# --- 2. ストップワード (共通) — patiroha委譲 ---
 # ==================================================================
-# 基本ストップワードリスト
 
-# 1. 一般的な日本語ストップワード（接続詞・代名詞・形式名詞など）
-_sw_general = [
-    "する","ある","なる","ため","こと","よう","もの","これ","それ","あれ","ここ","そこ","どれ","どの",
-    "この","その","当該","該","および","及び","または","また","例えば","例えばは","において","により",
-    "に対して","に関して","について","として","としては","場合","一方","他方","さらに","そして","ただし",
-    "なお","等","など","等々","いわゆる","所謂","同様","同時","前記","本","同","各","各種","所定","所望",
-    "一例","他","一部","一つ","複数","少なくとも","少なくとも一つ","上記","下記","前述","後述","既述",
-    "関する","基づく","用いる","使用","利用","有する","含む","備える","設ける","すなわち","従って",
-    "しかしながら","次に","特に","具体的に","詳細に","いずれ","うち","それぞれ","とき",
-    "かかる","かような","かかる場合","本件","本願","本出願","本明細書","これら","それら","各々","随時","適宜",
-    "任意","必ずしも","通常","一般に","典型的","代表的","並びに","若しくは","又は","且つ","即ち","何ら","一切",
-    "係る","関わる","介して","沿って","伴う","基づいて","更なる","単数","全体","全部","大半","約","概して","ほぼ",
-    "できる", "いる", "明細書", "解決", "準備", "提供", "発生", "未満", "超", "際", "十分"
-]
-
-# 2. 特許特有の専門用語・定型句・区分
-_sw_patent_terms = [
-    "本発明","発明","実施例","実施形態","変形例","請求","請求項","図","図面","符号","符号の説明",
-    "図面の簡単な説明","発明の詳細な説明","技術分野","背景技術","従来技術","発明が解決しようとする課題","課題",
-    "解決手段","効果","要約","発明の効果","目的","手段","構成","構造","工程","処理","方法","手法","方式",
-    "特徴","特徴とする","特徴部","ステップ","フロー","シーケンス","定義",
-    "関係","対応","整合","実施の形態","実施の態様","態様","変形","修正例","図示","図示例","図示しない",
-    "参照","参照符号","段落","詳細説明","要旨","一実施形態","他の実施形態","一実施例","別の側面","付記",
-    "適用例","用語の定義","開示","本開示","開示内容","記載","記述","掲載","言及","内容","詳細","説明","表記","表現","箇条書き","以下の","以上の","全ての","任意の","特定の",
-    "出願","出願人","出願番号","出願日","出願書","出願公開","公開","公開番号",
-    "公開公報","公報","公報番号","特許","特許番号","特許文献","非特許文献","引用","引用文献","先行技術",
-    "審査","審査官","拒絶","意見書","補正書","優先","優先日","分割出願","継続出願","国内移行","国際出願",
-    "国際公開","PCT","登録","公開日","審査請求","拒絶理由","補正","訂正","無効審判","異議","取消","取下げ",
-    "公知","周知","慣用","既知","市販","容易","困難","不可能","重要","問題","結果","作用",
-    "事件番号","代理人","弁理士","係属","経過", "比較例","参考例","試験","試料","評価","条件","実験","実験例"
-]
-
-# 3. 構造・位置・方向・形状（一般名詞）
-_sw_structure = [
-    "上部","下部","内部","外部","内側","外側","表面","裏面","側面","上面","下面","端面","先端","基端","後端","一端","他端","中心","中央","周縁","周辺",
-    "近傍","方向","位置","空間","領域","範囲","間隔","距離","形状","形態","状態","種類","層","膜","部",
-    "部材","部位","部品","機構","装置","容器","組成","材料","用途","適用","適用例","片側","両側","左側",
-    "右側","前方","後方","上流","下流","隣接","近接","離間","間置","介在","重畳","概ね","略","略中央",
-    "固定側","可動側","伸長","収縮","係合","嵌合","取付","連結部","支持体","支持部","ガイド部",
-    "軸","シャフト","ギア","モータ","エンジン","アクチュエータ","センサ","バルブ","ポンプ","筐体","ハウジング","フレーム",
-    "シャーシ","駆動","伝達","支持","連結", "処理装置","端末","ユニット","モジュール","回路","素子"
-]
-
-# 4. IT・データ・制御関連
-_sw_it_control = [
-    "システム","プログラム","記憶媒体","データ","情報","信号","出力","入力","制御","演算","取得","送信","受信","表示","通知","設定","変更",
-    "更新","保存","削除","追加","実行","開始","終了","継続","停止","判定","判断","決定","選択","特定",
-    "抽出","検出","検知","測定","計測","移動","回転","変位","変形","固定","配置","生成","付与","供給",
-    "適用","照合","比較","算出","解析","同定","初期化","読出","書込","登録","記録","配信","連携","切替",
-    "起動","復帰","監視","通知処理","取得処理","演算処理",
-    "電源","電圧","電流","信号線","配線","端子","端部","接続","接続部","演算部","記憶部","記憶装置","記録媒体",
-    "ユーザ","利用者","クライアント","サーバ","画面","UI","GUI",
-    "インターフェース","データベース","DB","ネットワーク","通信","要求","応答","リクエスト","レスポンス","パラメータ",
-    "引数","属性","プロパティ","フラグ","ID","ファイル","データ構造","テーブル","レコード"
-]
-
-# 5. 化学・材料・実験条件
-_sw_chemistry = [
-    "溶液","溶媒","触媒","反応","生成物","原料","成分","含有","含有量","配合","混合","混合物","濃度","温度","時間",
-    "割合","比率","基","官能基","化合物","組成物","樹脂","ポリマー","モノマー","基板","基材","フィルム","シート",
-    "粒子","粉末","反応条件","反応時間","反応温度",
-    "良好","容易","簡便","適切","有利","有用","有効",
-    "効果的","高い","低い","大きい","小さい","新規","改良","改善","抑制","向上","低減","削減","増加",
-    "減少","可能","好適","好ましい","望ましい","優れる","優れた","高性能","高効率","低コスト","コスト",
-    "簡易","安定","安定性","耐久","耐久性","信頼性","簡素","簡略","単純","最適","最適化","汎用","汎用性",
-    "実現","達成","確保","維持","防止","回避","促進","不要","必要","高精度","省電力","省資源","高信頼",
-    "低負荷","高純度","高密度","高感度","迅速","円滑","簡略化","低価格","実効的","可能化","有効化",
-    "非必須","適合","互換"
-]
-
-# 6. 数字・単位・特殊記号・法人格
-_sw_misc = [
-    "第","第一","第二","第三","第1","第２","第３","第１","第２","第３","１","２","３","４","５","６","７","８","９","０",
-    "一","二","三","四","五","六","七","八","九","零","数","複合","多数","少数","図1","図2","図3","図4","図5","図6","図7","図8","図9",
-    "表1","表2","表3","式1","式2","式3","０","１","２","３","４","５","６","７","８","９","%","％","wt%","vol%","質量%","重量%","容量%","mol","mol%","mol/L","M","mm","cm","m","nm","μm","μ","rpm",
-    "Pa","kPa","MPa","GPa","N","W","V","A","mA","Hz","kHz","MHz","GHz","℃","°C","K","mL","L","g","kg","mg","wt","vol",
-    "h","hr","hrs","min","s","sec","ppm","ppb","bar","Ω","ohm","J","kJ","Wh","kWh",
-    "株式会社","有限会社","合資会社","合名会社","合同会社","Inc","Inc.","Ltd","Ltd.","Co","Co.","Corp","Corp.","LLC",
-    "GmbH","AG","BV","B.V.","S.A.","S.p.A.","（株）","㈱","（有）",
-    "以上", "以下"
-]
-
-# 7. 非特許文献 (NPL: Academic, News)
-_sw_npl = [
-    "論文","研究","報告","学会","発表","大学","研究所","教授","博士","著者","Abstract","Introduction","Conclusion","Fig","Table","et al",
-    "ニュース","報道","市場","企業","会社","本日","現地時間","増","減","前年比","見通し","予測","アナリスト","価格","円","ドル",
-    "発売","開始","終了","買収","提携","合意","設立","方針","戦略","計画","事業","売上","利益","業績","決算",
-    "株価","株式","投資","ファンド","調達","資金","規模","シェア","拡大","縮小","成長","減少","推移","動向", "概況", "見込み", "予想", "分析", "調査",
-    
-    # 英単語ストップワード (一般)
-    "the", "of", "and", "a", "an", "to", "in", "is", "you", "that", "it", "he", "was", "for", "on", "are", "as", "with", "his", "they", "i", "at", 
-    "be", "this", "have", "from", "or", "one", "had", "by", "word", "but", "not", "what", "all", "were", "we", "when", "your", "can", "said", 
-    "there", "use", "each", "which", "she", "do", "how", "their", "if", "will", "up", "other", "about", "out", "many", "then", "them", 
-    "these", "so", "some", "her", "would", "make", "like", "him", "into", "time", "has", "look", "two", "more", "write", "go", "see", "number", 
-    "no", "way", "could", "people", "my", "than", "first", "water", "been", "call", "who", "oil", "its", "now", "find", "day", "did", "get",
-    "come", "made", "may", "part", "over", "new", "sound", "take", "only", "little", "work", "know", "place", "year", "live", "me", "back",
-    "give", "most", "very", "after", "thing", "our", "just", "name", "good", "sentence", "man", "think", "say", "great", "where", "help",
-    "through", "much", "before", "line", "right", "too", "mean", "old", "any", "same", "tell", "boy", "follow", "came", "want", "show",
-    "also", "around", "form", "three", "small", "set", "put", "end", "does", "another", "well", "large", "must", "big", "even", "such",
-    "because", "turn", "here", "why", "ask", "went", "men", "read", "need", "land", "different", "home", "us", "move", "try", "kind",
-    "hand", "picture", "again", "change", "off", "play", "spell", "air", "away", "animal", "house", "point", "page", "letter", "mother",
-    "answer", "found", "should", "america", "world", "high",
-    
-    # 前置詞・接続詞
-    "above", "across", "against", "along", "among", "behind", "below", "beneath", "beside", "between", "down",
-    "during", "except", "inside", "near", "onto", "outside", "past",
-    "since", "throughout", "toward", "under", "underneath", "until", "upon", "within", "without",
-    "although", "unless", "while", "whenever", "wherever", "whether", "though", "even though",
-
-    # 代名詞
-    "mine", "myself", "yours", "yourself", "himself", "hers", "herself",
-    "itself", "ours", "ourselves", "theirs", "themselves",
-    "whom", "whose", "those",
-
-    # 学術・研究用語
-    "abstract", "introduction", "method", "methodology", "results", "discussion", "conclusion", "references", "appendix", "figure", "table",
-    "study", "research", "analysis", "investigation", "examination", "experiment", "survey", "review",
-    "data", "dataset", "information", "evidence", "findings", "outcome", "performance", "evaluation",
-    "proposed", "presented", "developed", "designed", "implemented", "demonstrated", "shown", "observed", "measured",
-    "significant", "important", "major", "key", "main", "primary", "secondary", "novel", "existing", "previous", "prior", "related",
-    "approach", "technique", "algorithm", "system", "model", "framework", "architecture", "mechanism", "process", "procedure",
-    "based on", "using", "via", "utilizing", "employing", "applying",
-    "however", "furthermore", "moreover", "therefore", "thus", "hence", "consequently", "accordingly", "additionally",
-    "in addition", "in contrast", "on the other hand", "for example", "for instance", "such as",
-    "et al", "et al.", "ibid", "op cit", "vs", "versus"
-]
-
-# 一般名詞 / ノイズ単語 (日本語) - NPLノイズ削減用
-_sw_npl_noise = [
-    "新た", "新規", "よう", "ため", "もの", "こと", "とき", "場合", "際", "点", "ほう", "どこ", "その他", "それら", "これら",
-    "一覧", "概要", "詳細", "解説", "説明", "紹介", "ページ", "サイト", "記事", "関連", "リンク"
-]
-_sw_npl.extend(_sw_npl_noise)
-
-# 統合リストの作成
-# 統合リストの定義 (分離のため構成を変更)
-def _get_expanded_set(word_list):
-    """全角半角展開したセットを返すヘルパー"""
-    expanded = set(word_list)
-    hankaku = string.ascii_letters + string.digits
-    zenkaku = "ａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺ０１２３４５６７８９"
-    trans = str.maketrans(hankaku, zenkaku)
-    for w in word_list:
-        if any(c in hankaku for c in w): expanded.add(w.translate(trans))
-    return expanded
+def get_stopwords(mode='patent'):
+    """ストップワード取得 (patiroha委譲)"""
+    return patiroha.get_stopwords(mode)
 
 def get_patent_stopwords():
-    """特許分析用のストップワード (NPL用語を含まない)"""
-    base_list = (
-        _sw_general + 
-        _sw_patent_terms + 
-        _sw_structure + 
-        _sw_it_control + 
-        _sw_chemistry + 
-        _sw_misc
-    )
-    return sorted(list(_get_expanded_set(base_list)))
+    """特許分析用のストップワード"""
+    return patiroha.get_stopwords("patent")
 
 def get_npl_stopwords():
-    """NPL分析用のストップワード (特許用 + NPL用語)"""
-    base_list = (
-        _sw_general + 
-        _sw_patent_terms + 
-        _sw_structure + 
-        _sw_it_control + 
-        _sw_chemistry + 
-        _sw_misc + 
-        _sw_npl
-    )
-    return sorted(list(_get_expanded_set(base_list)))
-
-def get_stopwords(mode="patent"):
-    """
-    互換性のためのラッパー
-    mode: "patent" (Default) or "npl"
-    """
-    if mode == "npl":
-        return get_npl_stopwords()
-    else:
-        return get_patent_stopwords()
+    """NPL分析用のストップワード"""
+    return patiroha.get_stopwords("npl")
 
 # ==================================================================
 # --- 3. サイドバー設定 (共通) ---
@@ -250,14 +88,13 @@ def get_stopwords(mode="patent"):
 def render_sidebar():
     """共通サイドバーを描画する"""
 
-    
+
     # 共通CSSの適用
     st.markdown("""
     <style>
-        html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-        html { overflow-y: scroll !important; overflow-x: hidden !important; }
-        body { width: 100% !important; min-width: 100% !important; overflow-x: hidden !important; }
-        .stApp { overflow-x: hidden !important; }
+        html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #ffffff; color: #333333; }
+        [data-testid="stSidebar"] { background-color: #f8f9fa; }
+        [data-testid="stHeader"] { background-color: #ffffff; }
         
         /* H1 Title Spacing */
         [data-testid="stSidebar"] h1 { 
@@ -289,9 +126,13 @@ def render_sidebar():
     """, unsafe_allow_html=True)
 
     with st.sidebar:
-        st.title("APOLLO") 
-        st.markdown("Advanced Patent & Overall Landscape-analytics Logic Orbiter")
-        st.markdown("**v6.0.1**")
+        st.title("APOLLO")
+        st.markdown("""
+Advanced Patent & Overall Landscape-analytics
+Logic Orbiter
+
+**v7.0.0**
+""")
         st.markdown("---")
         st.subheader("Home"); st.page_link("Home.py", label="Mission Control", icon="🛰️")
         st.subheader("Modules")
@@ -304,111 +145,74 @@ def render_sidebar():
         st.page_link("pages/6_🔗_CREW.py", label="CREW", icon="🔗")
         st.page_link("pages/9_🌌_NEBULA.py", label="NEBULA", icon="🌌")
         st.page_link("pages/8_📝_VOYAGER.py", label="VOYAGER", icon="📝")
+        st.page_link("pages/10_📡_CAPCOM.py", label="CAPCOM", icon="📡")
         st.markdown("---")
+
+        # --- CAPCOM ステータスインジケーター ---
+        try:
+            import capcom
+            if capcom.is_active():
+                _sid = st.session_state.get('capcom_session_id', '')
+                # session_stateベースのテレメトリ（ファイルI/Oなし）
+                _tel = capcom.get_telemetry()
+                _sc, _pc, _dc = _tel['snapshots'], _tel['prompts'], _tel['data']
+                st.markdown(f"""
+                <div style="background: linear-gradient(135deg, #f0f4f8 0%, #e8eef5 100%);
+                            border-radius: 10px; padding: 12px 14px; margin-bottom: 10px;
+                            border: 1px solid #003366;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                        <span style="display: inline-block; width: 8px; height: 8px;
+                                     background: #00C853; border-radius: 50%;
+                                     box-shadow: 0 0 4px #00C853; animation: capcom-pulse 2s ease-in-out infinite;"></span>
+                        <span style="color: #003366; font-size: 14px; font-weight: 700;
+                                     letter-spacing: 2px;">CAPCOM ONLINE</span>
+                    </div>
+                    <div style="color: #263238; font-size: 13px; font-family: 'SF Mono', 'Consolas', monospace;">
+                        {_sid}<br/>
+                        📸 {_sc} &nbsp; 📄 {_pc} &nbsp; 📊 {_dc}
+                    </div>
+                </div>
+                <style>@keyframes capcom-pulse {{
+                    0%, 100% {{ opacity: 1; }}
+                    50% {{ opacity: 0.4; }}
+                }}</style>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown("""
+                <div style="background: #f5f5f5; border-radius: 10px; padding: 10px 14px;
+                            margin-bottom: 10px; border: 1px solid #ddd;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 8px; height: 8px;
+                                     background: #bbb; border-radius: 50%;"></span>
+                        <span style="color: #777; font-size: 14px; font-weight: 700;
+                                     letter-spacing: 2px;">CAPCOM STANDBY</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        except Exception:
+            pass
+
         st.caption("ナビゲーション:\n1. Mission Control でデータをアップロードし、前処理を実行します。\n2. 上のリストから分析モジュールを選択します。")
         st.markdown("---")
         st.caption("© 2025-2026 しばやま")
 
 # ==================================================================
-# --- 4. テーマ設定 (共通) ---
-# ==================================================================
-def get_theme_config(theme_name):
-    """テーマに応じたカラー設定を返す"""
-    import plotly.express as px
-    
-    themes = {
-        "APOLLO Standard": {
-            "bg_color": "#ffffff",
-            "text_color": "#333333",
-            "sidebar_bg": "#f8f9fa",
-            "plotly_template": "plotly_white",
-            "color_sequence": px.colors.qualitative.G10,
-            "accent_color": "#003366",
-            "density_scale": "Blues",
-            "css": """
-                html, body { background-color: #ffffff; color: #333333; }
-                [data-testid="stSidebar"] { background-color: #f8f9fa; }
-                [data-testid="stHeader"] { background-color: #ffffff; }
-                h1, h2, h3 { color: #003366; }
-            """
-        },
-        "Modern Presentation": {
-            "bg_color": "#fdfdfd",
-            "text_color": "#2c3e50",
-            "sidebar_bg": "#eaeaea",
-            "plotly_template": "plotly_white",
-            "color_sequence": ["#264653", "#2a9d8f", "#e9c46a", "#f4a261", "#e76f51", "#8ab17d"],
-            "accent_color": "#264653",
-            "density_scale": "Teal",
-            "css": """
-                html, body { background-color: #fdfdfd; color: #2c3e50; font-family: "Helvetica Neue", Arial, sans-serif; }
-                [data-testid="stSidebar"] { background-color: #eaeaea; }
-                [data-testid="stHeader"] { background-color: #fdfdfd; }
-                h1, h2, h3 { color: #264653; font-family: "Georgia", serif; }
-                .stButton>button { background-color: #264653; color: white; border-radius: 0px; }
-            """
-        }
-    }
-    return themes.get(theme_name, themes["APOLLO Standard"])
-
-# ==================================================================
 # --- 5. Snapshot (VOYAGER連携) ---
 # ==================================================================
 def calculate_hhi(counts):
-    """ヘルフィンダール・ハーシュマン指数 (HHI) を計算し、公取委基準で判定する"""
-    if not counts or sum(counts) == 0: return 0.0, "データ不足"
-    
-    total = sum(counts)
-    shares = [c / total for c in counts]
-    hhi = sum([s ** 2 for s in shares])
-    
-    # 公正取引委員会の基準 (0-1スケール)
-    if hhi < 0.10: status = "競争的 (分散)"
-    elif hhi < 0.18: status = "中程度の集中"
-    else: status = "寡占的 (高集中)"
-    
-    return hhi, status
+    """ヘルフィンダール・ハーシュマン指数 (HHI) を計算し、公取委基準で判定する (patiroha委譲)"""
+    result = patiroha.calculate_hhi(counts)
+    return result.value, result.status
 
 def calculate_cagr_slope(df_subset, year_col='year'):
-    """年平均成長率(CAGR)とトレンド(Slope)を計算する"""
-    if year_col not in df_subset.columns: return None, None
-    
-    years = df_subset[year_col].dropna().astype(int)
-    if years.empty: return None, None
-    
-    counts = years.value_counts().sort_index()
-    if len(counts) < 2: return 0.0, "Stable"
-    
-    # 直近3-5年のトレンドを見る
-    y_vals = counts.index.values
-    c_vals = counts.values
-    
-    # Slope (線形回帰)
-    try:
-        slope, _ = np.polyfit(y_vals, c_vals, 1)
-        if slope > 0.5: trend = "急上昇 📈"
-        elif slope > 0: trend = "増加傾向 ↗️"
-        elif slope > -0.5: trend = "減少傾向 ↘️"
-        else: trend = "失速 📉"
-    except:
-        trend = "不明"
-        slope = 0
-        
-    # CAGR (最初と最後)
-    try:
-        start_val = c_vals[0] if c_vals[0] > 0 else 1
-        end_val = c_vals[-1]
-        n_years = max(1, y_vals[-1] - y_vals[0])
-        cagr = (end_val / start_val) ** (1/n_years) - 1
-    except:
-        cagr = 0.0
-        
-    return cagr, trend
+    """年平均成長率(CAGR)とトレンド(Slope)を計算する (patiroha委譲)"""
+    result = patiroha.calculate_cagr(df_subset, year_col=year_col)
+    return result.growth_rate, result.trend
 
 @st.cache_data(show_spinner=False)
 def generate_rich_summary(df_target, title_col='title', abstract_col='abstract', n_representatives=5):
     """
-    VOYAGER v5.1用の高解像度サマリを生成する (Cached)
+    VOYAGER用の高解像度サマリを生成する (Cached)
     - 統計情報 (HHI, CAGR, Trend)
     - 代表特許 (Centroid Distance)
     """
@@ -459,24 +263,21 @@ def generate_rich_summary(df_target, title_col='title', abstract_col='abstract',
                 # Column mapping for enhanced info
                 col_map = st.session_state.get('col_map', {})
                 app_col = col_map.get('applicant', 'applicant')
-                
+                ipc_col = col_map.get('ipc', None)
+                num_col = col_map.get('pub_number', None) or col_map.get('app_num', None)
+
                 for idx in top_global_indices:
                     try:
                         row = st.session_state.df_main.loc[idx]
                         t_val = str(row.get(title_col, ''))
                         a_val = str(row.get(abstract_col, ''))
-                        
+
                         # Enhanced Info
                         y_val = str(row.get('year', 'N/A'))
-                        app_val = "N/A"
-                        if app_col and app_col in row:
-                            val = row[app_col]
-                            if isinstance(val, list):
-                                # Clean join: Filter out None/nan/invalid
-                                clean_vals = [str(x).strip() for x in val if x and str(x).lower() != 'nan']
-                                app_val = ", ".join(clean_vals)
-                            else: app_val = str(val)
-                        
+                        app_val = _extract_field_value(row, app_col, max_len=30) if app_col else "N/A"
+                        ipc_val = _extract_field_value(row, ipc_col, max_len=40) if ipc_col else "N/A"
+                        num_val = str(row.get(num_col, 'N/A')) if num_col and num_col in row.index else "N/A"
+
                         # Check validity
                         if (not t_val or t_val == 'nan') and (not a_val or a_val == 'nan'):
                              invalid_count += 1
@@ -485,20 +286,19 @@ def generate_rich_summary(df_target, title_col='title', abstract_col='abstract',
                         else:
                              title = t_val if t_val and t_val != 'nan' else "No Title"
                              abstract = a_val if a_val and a_val != 'nan' else "No Abstract"
-                        
+
                         title = title.replace('\n', ' ')
-                        abstract = abstract.replace('\n', ' ')[:200] + "..." 
-                        
-                        # Clean up Applicant (truncate if too long)
-                        if len(app_val) > 30: app_val = app_val[:30] + "..."
-                        
-                        reps.append(f"- 【{title}】 (出願: {y_val}, {app_val}) {abstract}")
-                        
+                        abstract = abstract.replace('\n', ' ')[:200] + "..."
+
+                        reps.append(f"- [{num_val}]【{title}】 (出願: {y_val}, {app_val}, IPC:{ipc_val}) {abstract}")
+
                         summary.setdefault('representatives_raw', []).append({
                             'title': title,
                             'abstract': abstract,
                             'year': y_val,
-                            'applicant': app_val
+                            'applicant': app_val,
+                            'ipc': ipc_val,
+                            'number': num_val
                         })
                     except: pass
                 
@@ -516,73 +316,82 @@ def generate_rich_summary(df_target, title_col='title', abstract_col='abstract',
 
 def get_cluster_representatives(df_subset, cluster_col='cluster', n_reps=3):
     """
-    データフレーム内の各クラスタについて、重心に近い代表特許を抽出する。
+    データフレーム内の各クラスタについて、重心に近い代表特許を抽出する (patiroha委譲)。
     Returns:
         dict: {cluster_id: ["- 【Title】(Applicant): Abstract...", ...]}
     """
     reps_dict = {}
-    
+
     unique_clusters = sorted(df_subset[cluster_col].unique())
     embeddings = st.session_state.get('sbert_embeddings')
-    
+
     col_map = st.session_state.get('col_map', {})
     title_col = col_map.get('title', 'title')
     abs_col = col_map.get('abstract', 'abstract')
     app_col = col_map.get('applicant', 'applicant')
+    ipc_col = col_map.get('ipc', None)
+    num_col = col_map.get('pub_number', None) or col_map.get('app_num', None)
 
     for cid in unique_clusters:
-        if cid == -1: continue # Skip noise
-        
-        # Cluster subset
+        if cid == -1: continue
+
         df_c = df_subset[df_subset[cluster_col] == cid]
         if df_c.empty: continue
-        
+
         try:
             target_indices = []
-            # Plan A: Centroid-based (if embeddings exist)
-            if embeddings is not None and len(embeddings) >= df_subset.index.max():
-                 valid_indices = [i for i in df_c.index if i < len(embeddings)]
-                 if valid_indices:
-                     vectors = embeddings[valid_indices]
-                     centroid = np.mean(vectors, axis=0)
-                     dots = np.dot(vectors, centroid)
-                     top_indices_local = np.argsort(dots)[::-1][:n_reps]
-                     target_indices = [valid_indices[i] for i in top_indices_local]
 
-            # Plan B: Random/Head (Fallback)
+            # patiroha.find_representatives でセントロイドベース抽出
+            if embeddings is not None and len(embeddings) >= df_subset.index.max():
+                valid_indices = [i for i in df_c.index if i < len(embeddings)]
+                if valid_indices:
+                    vectors = embeddings[valid_indices]
+                    reps = patiroha.find_representatives(vectors, df_c, n=n_reps)
+                    # reps から元のインデックスを復元
+                    for r in reps:
+                        if hasattr(r, 'index') and r.index is not None:
+                            target_indices.append(r.index)
+
+            # フォールバック: head選択
             if not target_indices:
-                 # Shuffle and take top N to avoid bias of file order, or just take head for stability
-                 # Let's take head for stability, or user specified sort?
-                 # Actually, usually there is no sort. Random might be better for "Variety"?
-                 # But head is safer.
-                 target_indices = df_c.index[:n_reps].tolist()
+                target_indices = df_c.index[:n_reps].tolist()
 
             cluster_reps = []
             for idx in target_indices:
                 row = st.session_state.df_main.loc[idx]
-                
-                # Title
+
                 t_val = str(row.get(title_col, 'No Title')).replace('\n', ' ')
-                # Abstract
-                a_val = str(row.get(abs_col, 'No Abstract')).replace('\n', ' ')[:80] + "..."
-                # Applicant
-                app_val = "N/A"
-                if app_col in row:
-                    val = row[app_col]
-                    if isinstance(val, list):
-                         app_val = ",".join([str(x) for x in val if x])[:20]
-                    else:
-                         app_val = str(val)[:20]
-                
-                cluster_reps.append(f"  * 【{t_val}】({app_val}): {a_val}")
-            
+                a_val = str(row.get(abs_col, 'No Abstract')).replace('\n', ' ')[:200] + "..."
+                app_val = _extract_field_value(row, app_col, max_len=30)
+                y_val = str(row.get('year', 'N/A'))
+                ipc_val = _extract_field_value(row, ipc_col, max_len=40) if ipc_col else "N/A"
+                num_val = str(row.get(num_col, 'N/A')) if num_col and num_col in row.index else "N/A"
+
+                cluster_reps.append(f"  * [{num_val}]【{t_val}】({app_val}, {y_val}, IPC:{ipc_val}): {a_val}")
+
             reps_dict[cid] = cluster_reps
-            
+
         except Exception as e:
-            print(f"Error in getting reps for cluster {cid}: {e}")
             continue
-            
+
     return reps_dict
+
+
+def _extract_field_value(row, col_name, max_len=30):
+    """行からフィールド値を安全に抽出するヘルパー"""
+    if not col_name or col_name not in row.index:
+        return "N/A"
+    val = row[col_name]
+    if isinstance(val, list):
+        clean_vals = [str(x).strip() for x in val if x and str(x).lower() != 'nan']
+        result = ", ".join(clean_vals)
+    elif pd.isna(val):
+        return "N/A"
+    else:
+        result = str(val)
+    if len(result) > max_len:
+        result = result[:max_len] + "..."
+    return result
 
 def get_keyword_centric_representatives(df_target, top_keywords, n_reps=10):
     """
@@ -605,60 +414,67 @@ def get_keyword_centric_representatives(df_target, top_keywords, n_reps=10):
         t_col = col_map.get('title', 'title')
         a_col = col_map.get('abstract', 'abstract')
         app_col = col_map.get('applicant', 'applicant')
+        ipc_col = col_map.get('ipc', None)
+        num_col = col_map.get('pub_number', None) or col_map.get('app_num', None)
         y_col = 'year'
 
-        # 1. Scoring Logic: Count occurrences of top keywords in Title, Abstract, Claims(if any)
-        # 正規表現の最適化: 高速化のため上位キーワードの「OR」全体一致パターンを構築
-        # パフォーマンスのため上位30キーワードに制限
+        # 上位30キーワードでスコアリング
         target_kws = top_keywords[:30]
-        # 念のためキーワードをエスケープ
         import re
         safe_kws = [re.escape(k) for k in target_kws if k and isinstance(k, str)]
         if not safe_kws: return []
-        
+
         pattern = "|".join(safe_kws)
-        
-        # スコア計算
-        # タイトル重み: x2, 要約: x1
+
+        # スコア計算（タイトル重み: x2, 要約: x1）
         score_series = pd.Series(0, index=df.index)
-        
         if t_col in df.columns:
             score_series += df[t_col].astype(str).str.count(pattern) * 2
         if a_col in df.columns:
             score_series += df[a_col].astype(str).str.count(pattern)
-            
+
         df['_kw_score'] = score_series
-        
-        # 2. Sort and Extract
-        # 抽出要件: スコア > 0
+
+        # スコア > 0 のみ抽出してソート
         df_sorted = df[df['_kw_score'] > 0].sort_values(by='_kw_score', ascending=False).head(n_reps)
-        
+
         reps = []
         for _, row in df_sorted.iterrows():
             title = str(row.get(t_col, 'No Title')).replace('\n', ' ')
-            abstract = str(row.get(a_col, 'No Abstract')).replace('\n', ' ')[:100] + "..."
+            abstract = str(row.get(a_col, 'No Abstract')).replace('\n', ' ')[:200] + "..."
             year = str(row.get(y_col, '-'))
-            
+
             app_val = "N/A"
-            if app_col in row:
+            if app_col and app_col in row.index:
                 val = row[app_col]
                 if isinstance(val, list): app_val = ",".join([str(x) for x in val if x])
                 else: app_val = str(val)
-            if len(app_val) > 20: app_val = app_val[:20] + "..."
-            
+            if len(app_val) > 30: app_val = app_val[:30] + "..."
+
+            # IPC
+            ipc_val = "N/A"
+            if ipc_col and ipc_col in row.index:
+                val = row[ipc_col]
+                if isinstance(val, list): ipc_val = ",".join([str(x) for x in val if x])[:40]
+                else: ipc_val = str(val)[:40]
+
+            # 番号
+            num_val = str(row.get(num_col, 'N/A')) if num_col and num_col in row.index else "N/A"
+
             reps.append({
                 'title': title,
                 'abstract': abstract,
                 'year': year,
                 'applicant': app_val,
+                'ipc': ipc_val,
+                'number': num_val,
                 'score': row['_kw_score'],
-                'matched_keywords_count': row['_kw_score'] # Simplified
             })
-            
+
         return reps
 
     except Exception as e:
-        print(f"Error in keyword-centric extraction: {e}")
+        pass
         return []
 
 def render_snapshot_button(title, description, key, fig=None, data_summary=None, figs=None):
@@ -694,7 +510,7 @@ def render_snapshot_button(title, description, key, fig=None, data_summary=None,
             'data_summary': data_summary,
             'module': module_name,
             'timestamp': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'images': [] # 新機能: 画像リストを保存
+            'images': [] # 画像リストを保存
         }
         
         # 対象フィギュアの統合
@@ -781,6 +597,25 @@ def render_snapshot_button(title, description, key, fig=None, data_summary=None,
             snapshot_data['image'] = None
 
         st.session_state['snapshots'].append(snapshot_data)
+
+        # --- CAPCOM出力フック ---
+        try:
+            import capcom
+            if capcom.is_active():
+                # PNG画像を保存
+                for idx, img_bytes in enumerate(snapshot_data.get('images', [])):
+                    if img_bytes:
+                        suffix = idx if len(snapshot_data.get('images', [])) > 1 else None
+                        capcom.save_snapshot_image(key, img_bytes, index=suffix)
+
+                # 1スナップショット操作 = +1（画像数ではなく操作回数をカウント）
+                capcom.increment_snap_count()
+
+                # metadata.jsonを更新（全スナップショット）
+                capcom.save_metadata(st.session_state['snapshots'])
+        except Exception as e:
+            pass
+
         st.rerun()
 
     if is_saved:
@@ -790,9 +625,10 @@ def render_snapshot_button(title, description, key, fig=None, data_summary=None,
 # --- 5. AI アシスタント (共通) ---
 # ==================================================================
 def generate_ai_cluster_prompt(df_source, cluster_col, target_cols, tfidf_matrix, feature_names, n_samples=5):
-    """クラスタごとの代表文献を抽出し、命名用プロンプトを生成する"""
+    """クラスタごとの代表文献を抽出し、命名用プロンプトを生成する（c-TF-IDF方式）"""
+    from sklearn.metrics.pairwise import euclidean_distances
     if df_source.empty: return "データがありません。"
-    
+
     unique_clusters = sorted([c for c in df_source[cluster_col].unique() if c != -1])
     if not unique_clusters: return "有効なクラスタがありません。"
 
@@ -801,38 +637,47 @@ def generate_ai_cluster_prompt(df_source, cluster_col, target_cols, tfidf_matrix
         embedding_cols = ['umap_x', 'umap_y']
     elif 'drill_x' in df_source.columns and 'drill_y' in df_source.columns:
         embedding_cols = ['drill_x', 'drill_y']
-    elif 'x' in df_source.columns and 'y' in df_source.columns: # MEGA対応
+    elif 'acad_umap_x' in df_source.columns and 'acad_umap_y' in df_source.columns:
+        embedding_cols = ['acad_umap_x', 'acad_umap_y']
+    elif 'x' in df_source.columns and 'y' in df_source.columns:
         embedding_cols = ['x', 'y']
     else:
         return "埋め込み座標が見つかりません。"
 
+    # c-TF-IDFでクラスタ判別キーワードを一括抽出
+    ctfidf_keywords = {}
+    try:
+        # テキスト列を結合
+        text_col_candidates = [c for c in target_cols if c and c in df_source.columns]
+        if text_col_candidates:
+            texts = df_source[text_col_candidates[0]].fillna('')
+            for c in text_col_candidates[1:]:
+                texts = texts + ' ' + df_source[c].fillna('')
+            # patiroha.auto_label を top_n=10 で呼んでキーワード部分を抽出
+            label_map_10 = patiroha.auto_label(
+                texts, df_source[cluster_col].values,
+                method='c-tfidf', top_n=10,
+                label_format="{terms}",  # IDプレフィックスなし
+            )
+            ctfidf_keywords = label_map_10
+    except Exception:
+        pass
+
     sampled_docs = []
-    
+
     for cid in unique_clusters:
         c_df = df_source[df_source[cluster_col] == cid]
         if c_df.empty: continue
-        
-        # キーワード抽出 (TF-IDF)
-        keywords_str = ""
-        try:
-            valid_indices = [i for i in c_df.index if i < tfidf_matrix.shape[0]]
-            if valid_indices:
-                sub_matrix = tfidf_matrix[valid_indices]
-                mean_vec = np.array(sub_matrix.mean(axis=0)).flatten()
-                top_idx = np.argsort(mean_vec)[::-1][:10] # Top 10 words
-                keywords = [feature_names[i] for i in top_idx]
-                keywords_str = ", ".join(keywords)
-        except Exception as e:
-            keywords_str = f"(抽出エラー: {e})"
 
-        # 重心計算
+        # c-TF-IDFキーワード
+        keywords_str = ctfidf_keywords.get(cid, "")
+
+        # 重心計算 → 重心に近い代表文献を抽出
         coords = c_df[embedding_cols].values
         centroid = coords.mean(axis=0)
-        
-        # 重心に近い順にソート
         dists = euclidean_distances(coords, centroid.reshape(1, -1)).flatten()
         top_indices = np.argsort(dists)[:n_samples]
-        
+
         docs = []
         for idx in top_indices:
             row = c_df.iloc[idx]
@@ -842,8 +687,8 @@ def generate_ai_cluster_prompt(df_source, cluster_col, target_cols, tfidf_matrix
                     val = str(row[col]).replace('\n', ' ')
                     text_parts.append(val)
             docs.append(f"  - {' '.join(text_parts)}")
-        
-        sampled_docs.append(f"Cluster {cid}:\n[特徴語] {keywords_str}\n[代表特許]\n" + "\n".join(docs))
+
+        sampled_docs.append(f"Cluster {cid}:\n[特徴語(c-TF-IDF)] {keywords_str}\n[代表文献]\n" + "\n".join(docs))
 
     sampled_docs_str = "\n\n".join(sampled_docs)
 
@@ -887,7 +732,7 @@ def render_ai_label_assistant(df_source, cluster_col, label_map_key, col_map, tf
             target_cols = [col_map.get('title'), col_map.get('abstract')]
             prompt = generate_ai_cluster_prompt(df_source, cluster_col, target_cols, tfidf_matrix, feature_names, n_samples=n_samples_ai)
             st.session_state[f"ai_prompt_{label_map_key}"] = prompt
-        
+
         if f"ai_prompt_{label_map_key}" in st.session_state:
             st.code(st.session_state[f"ai_prompt_{label_map_key}"], language="markdown")
             st.info("👆 右上のコピーボタンでコピーし、LLMに入力してください。")
@@ -971,21 +816,322 @@ def create_label_editor_ui(original_map, current_map, key_prefix):
             widgets_dict[-1] = curr_noise
     return widgets_dict
 
-def update_fig_layout(fig, title, height=1000, width=800, theme_config=None, show_axes=False, show_legend=True):
-    """Plotlyのレイアウトを統一的に更新する"""
-    if theme_config is None:
-        return fig
-    
+def render_cluster_dynamics_map(
+    df, cluster_col, cluster_labels_map, year_col='year',
+    cagr_window=5, unique_key='dynamics'
+):
+    """
+    クラスタ動態マップを生成する。
+    X=累積件数、Y=CAGR、バブル=シェア、4象限表示。
+
+    Args:
+        df: DataFrame with cluster and year columns
+        cluster_col: cluster ID column name
+        cluster_labels_map: dict mapping cluster_id -> label string
+        year_col: year column name
+        cagr_window: years for CAGR calculation (default 5)
+        unique_key: unique key for Streamlit widgets
+
+    Returns:
+        tuple: (plotly Figure, dynamics_data dict for CAPCOM export)
+    """
+    import plotly.graph_objects as go
+    import patiroha
+
+    # Filter out noise (cluster == -1)
+    df_valid = df[df[cluster_col] != -1].copy() if -1 in df[cluster_col].values else df.copy()
+
+    clusters = sorted(df_valid[cluster_col].unique())
+    if len(clusters) == 0:
+        return None, None
+
+    # Calculate per-cluster metrics
+    total_patents = len(df_valid)
+    years = df_valid[year_col].dropna()
+    if years.empty:
+        return None, None
+    max_year = int(years.max())
+    min_cagr_year = max_year - cagr_window
+
+    cluster_data = []
+    for cid in clusters:
+        df_c = df_valid[df_valid[cluster_col] == cid]
+        cumulative = len(df_c)
+        share = cumulative / total_patents if total_patents > 0 else 0
+        label = cluster_labels_map.get(cid, f"Cluster {cid}")
+
+        # CAGR calculation
+        years_c = df_c[year_col].dropna()
+        if years_c.empty:
+            cagr = 0.0
+        else:
+            recent = len(df_c[df_c[year_col] > min_cagr_year])
+            past = len(df_c[df_c[year_col] <= min_cagr_year])
+            if past > 0 and recent > 0:
+                n_years = cagr_window
+                cagr = (recent / past) ** (1 / n_years) - 1
+            elif past == 0 and recent > 0:
+                cagr = 1.0  # New cluster (100% growth)
+            else:
+                cagr = -0.5  # Declining
+
+        cluster_data.append({
+            'cluster_id': cid,
+            'label': label,
+            'cumulative_count': cumulative,
+            'cagr': round(cagr, 4),
+            'share': round(share, 4),
+        })
+
+    if not cluster_data:
+        return None, None
+
+    # Calculate thresholds (median)
+    x_vals = [d['cumulative_count'] for d in cluster_data]
+    y_vals = [d['cagr'] for d in cluster_data]
+    import numpy as np
+    x_threshold = float(np.median(x_vals))
+    y_threshold = float(np.median(y_vals))
+
+    # Assign quadrants
+    quadrant_names = {
+        (True, True): '成長リーダー',
+        (False, True): '新興クラスタ',
+        (True, False): '成熟クラスタ',
+        (False, False): 'ニッチ/衰退',
+    }
+    for d in cluster_data:
+        x_high = d['cumulative_count'] >= x_threshold
+        y_high = d['cagr'] >= y_threshold
+        d['quadrant'] = quadrant_names[(x_high, y_high)]
+
+    # Build Plotly figure
+    quadrant_colors = {
+        '成長リーダー': '#2E7D32',
+        '新興クラスタ': '#1565C0',
+        '成熟クラスタ': '#E65100',
+        'ニッチ/衰退': '#78909C',
+    }
+
+    fig = go.Figure()
+
+    for qname, qcolor in quadrant_colors.items():
+        q_items = [d for d in cluster_data if d['quadrant'] == qname]
+        if not q_items:
+            continue
+        fig.add_trace(go.Scatter(
+            x=[d['cumulative_count'] for d in q_items],
+            y=[d['cagr'] for d in q_items],
+            mode='markers+text',
+            marker=dict(
+                size=[max(15, d['share'] * 200) for d in q_items],
+                color=qcolor,
+                opacity=0.7,
+                line=dict(width=1, color='white'),
+            ),
+            text=[d['label'] for d in q_items],
+            textposition='top center',
+            textfont=dict(size=10),
+            name=qname,
+            hovertemplate=(
+                '<b>%{text}</b><br>'
+                '累積件数: %{x}<br>'
+                'CAGR: %{y:.1%}<br>'
+                '<extra>%{fullData.name}</extra>'
+            ),
+        ))
+
+    # Add quadrant lines
+    fig.add_hline(y=y_threshold, line_dash="dash", line_color="gray", opacity=0.5)
+    fig.add_vline(x=x_threshold, line_dash="dash", line_color="gray", opacity=0.5)
+
+    # Add quadrant labels
+    x_range = max(x_vals) - min(x_vals) if len(x_vals) > 1 else max(x_vals)
+    x_min_plot = min(x_vals) - x_range * 0.1
+    x_max_plot = max(x_vals) + x_range * 0.1
+    y_range = max(y_vals) - min(y_vals) if len(y_vals) > 1 else abs(max(y_vals))
+    y_min_plot = min(y_vals) - y_range * 0.15
+    y_max_plot = max(y_vals) + y_range * 0.15
+
+    annotations = [
+        dict(x=x_max_plot * 0.95, y=y_max_plot * 0.95, text="成長リーダー", showarrow=False,
+             font=dict(size=12, color='rgba(46,125,50,0.4)'), xanchor='right', yanchor='top'),
+        dict(x=x_min_plot * 1.05 if x_min_plot > 0 else x_threshold * 0.1, y=y_max_plot * 0.95,
+             text="新興クラスタ", showarrow=False,
+             font=dict(size=12, color='rgba(21,101,192,0.4)'), xanchor='left', yanchor='top'),
+        dict(x=x_max_plot * 0.95, y=y_min_plot * 1.05 if y_min_plot < 0 else y_threshold * 0.1,
+             text="成熟クラスタ", showarrow=False,
+             font=dict(size=12, color='rgba(230,81,0,0.4)'), xanchor='right', yanchor='bottom'),
+        dict(x=x_min_plot * 1.05 if x_min_plot > 0 else x_threshold * 0.1,
+             y=y_min_plot * 1.05 if y_min_plot < 0 else y_threshold * 0.1,
+             text="ニッチ/衰退", showarrow=False,
+             font=dict(size=12, color='rgba(120,144,156,0.4)'), xanchor='left', yanchor='bottom'),
+    ]
+
+    fig.update_layout(
+        title=dict(text='クラスタ動態マップ', font=dict(size=16)),
+        xaxis=dict(title='累積件数', gridcolor='#f0f0f0'),
+        yaxis=dict(title=f'CAGR (直近{cagr_window}年)', tickformat='.0%', gridcolor='#f0f0f0'),
+        plot_bgcolor='white',
+        annotations=annotations,
+        height=800,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1),
+    )
+
+    fig.update_layout(
+        template=APOLLO_TEMPLATE,
+        paper_bgcolor=APOLLO_BG,
+    )
+
+    # Build CAPCOM export data
+    quadrant_summary = {}
+    for qname in quadrant_colors:
+        q_items = [d for d in cluster_data if d['quadrant'] == qname]
+        quadrant_summary[qname] = {
+            'count': len(q_items),
+            'total_patents': sum(d['cumulative_count'] for d in q_items),
+        }
+
+    dynamics_data = {
+        'x_axis': 'cumulative_count',
+        'y_axis': 'cagr',
+        'cagr_window_years': cagr_window,
+        'x_threshold': x_threshold,
+        'y_threshold': y_threshold,
+        'clusters': cluster_data,
+        'quadrant_summary': quadrant_summary,
+    }
+
+    # --- 象限別拡大図を生成 ---
+    quadrant_figs = {}
+    for qname, qcolor in quadrant_colors.items():
+        q_items = [d for d in cluster_data if d['quadrant'] == qname]
+        if not q_items:
+            continue
+        fig_q = go.Figure()
+        fig_q.add_trace(go.Scatter(
+            x=[d['cumulative_count'] for d in q_items],
+            y=[d['cagr'] for d in q_items],
+            mode='markers+text',
+            marker=dict(
+                size=[max(20, d['share'] * 300) for d in q_items],
+                color=qcolor,
+                opacity=0.8,
+                line=dict(width=1, color='white'),
+            ),
+            text=[d['label'] for d in q_items],
+            textposition='top center',
+            textfont=dict(size=11),
+            name=qname,
+            hovertemplate=(
+                '<b>%{text}</b><br>'
+                '累積件数: %{x}<br>'
+                'CAGR: %{y:.1%}<br>'
+                f'<extra>{qname}</extra>'
+            ),
+        ))
+        fig_q.update_layout(
+            title=dict(text=f'{qname} ({len(q_items)}クラスタ)', font=dict(size=14)),
+            xaxis=dict(title='累積件数', gridcolor='#f0f0f0'),
+            yaxis=dict(title=f'CAGR (直近{cagr_window}年)', tickformat='.0%', gridcolor='#f0f0f0'),
+            plot_bgcolor='white',
+            height=400,
+            showlegend=False,
+        )
+        quadrant_figs[qname] = fig_q
+
+    return fig, dynamics_data, quadrant_figs
+
+
+def render_cluster_dynamics_section(
+    df, cluster_col, cluster_labels_map, year_col='year',
+    cagr_window=5, unique_key='dynamics',
+    module_name='SaturnV'
+):
+    """
+    クラスタ動態マップのUI全体を描画する。
+    CAGRウィンドウ設定UI + 全体図 + 象限別拡大図 + スナップショット対応。
+    """
+    st.markdown("### クラスタ動態マップ")
+
+    # --- CAGR ウィンドウ設定 ---
+    years = df[year_col].dropna()
+    if years.empty:
+        st.info("年データがないためクラスタ動態マップを表示できません。")
+        return None
+    data_span = int(years.max()) - int(years.min())
+    max_window = max(2, min(data_span, 15))
+    default_window = min(cagr_window, max_window)
+
+    cagr_window_actual = st.slider(
+        "CAGR計算期間（直近N年）", min_value=2, max_value=max_window,
+        value=default_window, key=f"cagr_window_{unique_key}",
+        help=f"データ期間: {int(years.min())}〜{int(years.max())}年（{data_span}年間）"
+    )
+
+    result = render_cluster_dynamics_map(
+        df, cluster_col, cluster_labels_map,
+        year_col=year_col, cagr_window=cagr_window_actual,
+        unique_key=unique_key,
+    )
+    if result is None or result[0] is None:
+        st.info("クラスタ動態マップを生成できませんでした。")
+        return None
+
+    fig, dynamics_data, quadrant_figs = result
+
+    # --- 全体図 ---
+    st.plotly_chart(fig, use_container_width=True)
+
+    # スナップショット（全体図）
+    summary_lines = []
+    for qname, qinfo in dynamics_data['quadrant_summary'].items():
+        summary_lines.append(f"- {qname}: {qinfo['count']}クラスタ ({qinfo['total_patents']}件)")
+    summary_text = "\n".join(summary_lines)
+
+    render_snapshot_button(
+        title=f"{module_name} クラスタ動態マップ",
+        description=f"X=累積件数, Y=CAGR(直近{cagr_window_actual}年)\n{summary_text}",
+        key=f"snap_{unique_key}_overview",
+        fig=fig,
+        data_summary=dynamics_data,
+    )
+
+    # --- 象限別拡大図 ---
+    if quadrant_figs:
+        with st.expander("象限別 拡大図", expanded=False):
+            # 2列レイアウト
+            cols = st.columns(2)
+            quadrant_order = ['成長リーダー', '新興クラスタ', '成熟クラスタ', 'ニッチ/衰退']
+            for i, qname in enumerate(quadrant_order):
+                if qname in quadrant_figs:
+                    with cols[i % 2]:
+                        st.plotly_chart(quadrant_figs[qname], use_container_width=True)
+
+                        # 象限内クラスタの一覧テーブル
+                        q_items = [d for d in dynamics_data['clusters'] if d['quadrant'] == qname]
+                        if q_items:
+                            import pandas as pd
+                            df_q = pd.DataFrame(q_items)[['label', 'cumulative_count', 'cagr', 'share']]
+                            df_q.columns = ['クラスタ', '累積件数', 'CAGR', 'シェア']
+                            df_q['CAGR'] = df_q['CAGR'].apply(lambda x: f"{x:.1%}")
+                            df_q['シェア'] = df_q['シェア'].apply(lambda x: f"{x:.1%}")
+                            st.dataframe(df_q, use_container_width=True, hide_index=True)
+
+    return dynamics_data
+
+def update_fig_layout(fig, title, height=1000, width=800, show_axes=False, show_legend=True):
+    """Plotlyのレイアウトを統一的に更新する (APOLLO Standard 配色固定)"""
     # Sanitize title to remove implicit/explicit HTML tags (e.g. <b>)
     if isinstance(title, str):
         title = re.sub(r'<[^>]+>', '', title)
 
     layout_params = dict(
-        template=theme_config["plotly_template"],
-        title=dict(text=title, font=dict(size=18, color=theme_config["text_color"], family="Helvetica Neue", weight="normal")),
-        paper_bgcolor=theme_config["bg_color"],
-        plot_bgcolor=theme_config["bg_color"],
-        font=dict(color=theme_config["text_color"], family="Helvetica Neue"),
+        template=APOLLO_TEMPLATE,
+        title=dict(text=title, font=dict(size=18, color=APOLLO_TEXT, family="Helvetica Neue", weight="normal")),
+        paper_bgcolor=APOLLO_BG,
+        plot_bgcolor=APOLLO_BG,
+        font=dict(color=APOLLO_TEXT, family="Helvetica Neue"),
         height=height,
         width=width,
         margin=dict(l=20, r=20, t=60, b=20),
@@ -1019,126 +1165,33 @@ def update_fig_layout(fig, title, height=1000, width=800, theme_config=None, sho
     return fig
 
 # ==================================================================
-# --- 5. 高度なテキスト処理 (Explorer logic port) ---
+# --- 5. 高度なテキスト処理 — patiroha委譲 ---
 # ==================================================================
-import unicodedata
-
-# 正規表現フィルター定義 (Explorerと同等)
-_ngram_rows = [
-    ("参照符号付き要素", r"[一-龥ぁ-んァ-ンA-Za-z0-9／\-＋・]+?(?:部|層|面|体|板|孔|溝|片|部材|要素|機構|装置|手段|電極|端子|領域|基板|回路|材料|工程)\s*[（(]\s*[0-9０-９A-Za-z]+[A-Za-z]?\s*[）)]", "regex", 1),
-    ("参照符号付き要素", r"(?:上記|前記)?[一-龥ぁ-んァ-ンA-Za-z0-9／\-＋・]+?(?:部|層|面|体|板|孔|溝|片|部材|要素|機構|装置|手段|電極|端子|領域|基板|回路|材料|工程)\s*[0-9０-９A-Za-z]+[A-Za-z]?", "regex", 1),
-    ("参照符号付き要素", r"[A-Z]+[0-9]+", "regex", 1),
-    ("見出し・章句","一実施形態において","literal",1), ("見出し・章句","他の実施形態において","literal",1), ("見出し・章句","別の実施形態において","literal",1),
-    ("見出し・章句","本明細書において","literal",1), ("見出し・章句","本明細書では","literal",1), ("見出し・章句","本発明の一側面","literal",1),
-    ("見出し・章句","一実施例において","literal",1), ("見出し・章句","他の実施例において","literal",1), ("見出し・章句","好ましい態様として","literal",2),
-    ("見出し・章句","好適には","literal",2), ("見出し・章句","用語の定義","literal",2), ("見出し・章句","図示しない","literal",2),
-    ("図表参照", r"図[ 　]*[０-９0-9]+に示す", "regex", 1), ("図表参照", r"表[ 　]*[０-９0-9]+に示す", "regex", 1),
-    ("図表参照", r"式[ 　]*[０-９0-9]+に示す", "regex", 1), ("図表参照", r"請求項[ 　]*[０-９0-9]+", "regex", 1),
-    ("図表参照", r"(?:【|\[)\s*[０-９0-9]{4,5}\s*(?:】|\])", "regex", 1), ("図表参照", r"[（(][０-９0-9]+[）)]", "regex", 2),
-    ("図表参照", r"第\s*[０-９0-9]+の?実施形態", "regex", 2), ("図表参照", r"段落\s*[０-９0-9]+", "regex", 2),
-    ("図表参照", r"図[ 　]*[０-９0-9]+[A-Za-z]?", "regex", 2), ("定義導入", r"以下、[^、。]+を[^、。]+と称する", "regex", 1),
-    ("定義導入", r"以下、[^、。]+を[^、。]+という", "regex", 1), ("機能句","してもよい","literal",1), ("機能句","であってもよい","literal",1),
-    ("機能句","することができる","literal",1), ("機能句","行うことができる","literal",1), ("機能句","に限定されない","literal",1),
-    ("機能句","に限られない","literal",1), ("機能句","一例として","literal",2), ("機能句","例示的には","literal",2),
-    ("参照句","前述のとおり","literal",2), ("参照句","前述の通り","literal",2), ("参照句","後述するように","literal",2),
-    ("参照句","後述のとおり","literal",2), ("範囲表現", r"少なくとも(?:一|１)つ", "regex", 2), ("範囲表現", "少なくとも一部", "literal", 2),
-    ("範囲表現", r"複数の(?:実施形態|構成|要素)", "regex", 3), ("課題句", r"(?:上記|前記)の?課題", "regex", 1),
-    ("接続・論理","一方で","literal",3), ("接続・論理","他方で","literal",3), ("接続・論理","すなわち","literal",3)
-]
-_ngram_compiled = []
-for cat, pat, ptype, pri in _ngram_rows:
-    if ptype == "regex":
-        _ngram_compiled.append((cat, re.compile(pat), ptype, pri))
-    else:
-        _ngram_compiled.append((cat, pat, ptype, pri))
 
 def normalize_text(text):
-    if not isinstance(text, str): text = "" if pd.isna(text) else str(text)
-    text = unicodedata.normalize("NFKC", text)
-    text = text.replace("µ", "μ")
-    text = re.sub(r"\s+", " ", text)
-    return text
+    """テキスト正規化 (patiroha委譲)"""
+    return patiroha.normalize_text(text)
 
 def apply_ngram_filters(text):
-    for cat, pat, ptype, pri in _ngram_compiled:
-        if ptype == "literal":
-            if pat in text: text = text.replace(pat, "")
-        else:
-            text = pat.sub("", text)
-    return text
+    """N-gramフィルタ適用 (patiroha委譲)"""
+    return patiroha.apply_ngram_filters(text)
 
-@st.cache_resource
 def load_tokenizer():
-    return Tokenizer()
+    """トークナイザ読み込み — patirohaが内部管理するため不要"""
+    pass
 
 def extract_keywords(text, tokenizer=None, stopwords=None, top_n=None, clean_html=False):
     """
-    テキストから特徴語（名詞・複合名詞）を抽出する実用版関数 (Explorerロジック準拠)
+    テキストから特徴語（名詞・複合名詞）を抽出する (patiroha委譲)
     Args:
         text (str): 対象テキスト
-        tokenizer: Janome Tokenizerインスタンス (Noneの場合は内部でキャッシュされたものを使用)
+        tokenizer: 未使用 (後方互換性のため維持)
         stopwords (list/set): ストップワードのリスト
-        top_n: 未使用 (互換性のため維持)
+        top_n: 未使用 (後方互換性のため維持)
         clean_html (bool): Trueの場合、HTML/XMLタグを除去する (NPL推奨)
     Returns:
         list: 抽出されたキーワードのリスト
     """
-    if not text: return []
-    if stopwords is None: stopwords = get_patent_stopwords() # Default to patent
-    if tokenizer is None: tokenizer = load_tokenizer() # Use cached tokenizer
-    
-    # Pre-processing
-    if clean_html:
-        text = re.sub(r'<[^>]+>', ' ', text) # Strip HTML tags
-
-    text = normalize_text(text)
-    text = apply_ngram_filters(text)
-    text = re.sub(r'【.*?】', '', text)
-    text = re.sub(r'[!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~]', ' ', text)
-
-    words = []
-    
-    # 1. Japanese Morphological Analysis (Compound Nouns)
-    if tokenizer:
-        tokens = tokenizer.tokenize(text)
-        compound_word = ''
-        
-        for token in tokens:
-            pos = token.part_of_speech.split(',')[0]
-            if pos == '名詞':
-                compound_word += token.surface
-            else:
-                if (len(compound_word) > 1 and
-                    compound_word not in stopwords and
-                    not re.fullmatch(r'[\d０-９]+', compound_word) and
-                    not re.fullmatch(r'(図|表|式|第)[\d０-９]+.*', compound_word) and
-                    not re.match(r'^(上記|前記|本開示|当該|該)', compound_word) and
-                    not re.search(r'[0-9０-９]+[)）]?$', compound_word) and
-                    not re.match(r'[0-9０-９]+[a-zA-Zａ-ｚＡ-Ｚ]', compound_word) and
-                    # ひらがな1文字+記号のようなゴミを除去
-                    not re.fullmatch(r'[ぁ-ん]', compound_word)):
-                    words.append(compound_word)
-                compound_word = ''
-        
-        # Last word
-        if (len(compound_word) > 1 and
-            compound_word not in stopwords and
-            not re.fullmatch(r'[\d０-９]+', compound_word) and
-            not re.fullmatch(r'(図|表|式|第)[\d０-９]+.*', compound_word) and
-            not re.match(r'^(上記|前記|本開示|当該|該)', compound_word) and
-            not re.search(r'[0-9０-９]+[)）]?$', compound_word) and
-            not re.match(r'[0-9０-９]+[a-zA-Zａ-ｚＡ-Ｚ]', compound_word)):
-            words.append(compound_word)
-
-    # 2. English Fallback (Regex based) - Only if no Japanese keywords found or text is English-heavy
-    # 日本語特許でも英単語（"AI", "IoT"）は上記ロジックで名詞として拾われるケースが多いが、
-    # 念のため、キーワードがゼロの場合や、明らかに英語テキストの場合の補完
-    if not words and re.search(r'[a-zA-Z]', text):
-         # Extract 3+ letter words, ensure lowercase check against stopwords
-         skips = set([w.lower() for w in stopwords])
-         candidates = re.findall(r'\b[a-zA-Z]{3,}\b', text)
-         for w in candidates:
-             if w.lower() not in skips:
-                 words.append(w)
-
-    return words
+    if stopwords is None:
+        stopwords = patiroha.get_stopwords()
+    return patiroha.extract_keywords(text, stopwords=stopwords, clean_html=clean_html)

@@ -25,10 +25,11 @@ from scipy.spatial import ConvexHull
 # 描画用
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
-import japanize_matplotlib
 import utils
+import utils_ai
+import patiroha
+utils.configure_matplotlib_font()
 
-# 警告を非表示
 warnings.filterwarnings('ignore')
 
 # ==================================================================
@@ -48,7 +49,7 @@ if FONT_PATH:
 # --- 2. ページ設定 ---
 # ==================================================================
 st.set_page_config(
-    page_title="APOLLO | MEGA",
+    page_title="APOLLO CAPCOM | MEGA",
     page_icon="📈",
     layout="wide"
 )
@@ -64,11 +65,10 @@ def load_tokenizer_mega():
 
 t = load_tokenizer_mega()
 
-# ストップワード定義
 if "stopwords" in st.session_state and st.session_state["stopwords"]:
     stopwords = st.session_state["stopwords"]
 else:
-    stopwords = utils.get_stopwords()
+    stopwords = patiroha.get_stopwords()
 
 _ngram_rows = [
     ("参照符号付き要素", r"[一-龥ぁ-んァ-ンA-Za-z0-9／\-＋・]+?(?:部|層|面|体|板|孔|溝|片|部材|要素|機構|装置|手段|電極|端子|領域|基板|回路|材料|工程)\s*[（(]\s*[0-9０-９A-Za-z]+[A-Za-z]?\s*[）)]", "regex", 1),
@@ -147,7 +147,7 @@ def extract_compound_nouns(text, stopwords_list):
         words.append(compound_word)
     return words
 
-def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
+def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_key=None):
     if not words:
         st.subheader(title)
         st.warning("キーワードが見つからなかったため、表示をスキップしました。")
@@ -167,14 +167,45 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
         ax.set_title(title, fontsize=20)
         ax.axis('off')
         st.pyplot(fig)
-        
+
         st.markdown(f"**上位キーワード (Top {top_n})**")
         list_data = { "キーワード": [], "出現頻度": [] }
         for word, freq in word_freq.most_common(top_n):
             list_data["キーワード"].append(word)
             list_data["出現頻度"].append(freq)
         st.dataframe(pd.DataFrame(list_data), height=200)
-        
+
+        if capcom_key:
+            try:
+                import capcom
+                if capcom.is_active():
+                    import io
+                    wc_data = {
+                        "metadata": {"module": "MEGA", "title": title, "top_n": top_n},
+                        "word_frequencies": {w: c for w, c in word_freq.most_common(100)}
+                    }
+                    capcom.save_data(f"{capcom_key}_wordcloud.json", wc_data)
+                    buf = io.BytesIO()
+                    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+                    buf.seek(0)
+                    capcom.save_snapshot_image(f"{capcom_key}_wordcloud", buf.read())
+            except Exception:
+                pass
+
+        if capcom_key:
+            utils.render_snapshot_button(
+                title=f"ワードクラウド: {title}",
+                description=f"TF-IDFワードクラウド（上位{top_n}語）",
+                key=f"{capcom_key}_wordcloud",
+                fig=fig,
+                data_summary={
+                    "module": "MEGA",
+                    "type": "wordcloud",
+                    "title": title,
+                    "top_words": [{"word": w, "freq": c} for w, c in word_freq.most_common(top_n)]
+                }
+            )
+
     except Exception as e:
         st.error(f"ワードクラウドの描画に失敗しました: {e}")
         if font_path is None:
@@ -285,13 +316,7 @@ def convert_df_to_csv(df):
 utils.render_sidebar()
 
 st.title("📈 MEGA")
-st.markdown("技術動態（マクロ）と技術ポートフォリオ（ミクロ）を分析します。")
-
-col_theme, col_dummy = st.columns([1, 3])
-with col_theme:
-    selected_theme = st.selectbox("表示テーマ:", ["APOLLO Standard", "Modern Presentation"], key="mega_theme_selector")
-theme_config = utils.get_theme_config(selected_theme)
-st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
+st.markdown("CAGR×活動量の4象限プロットで出願人・技術分野の成長ポジションを特定し、軌跡追跡でトレンドの変遷を読み解きます。")
 
 # ==================================================================
 # --- 8. データロード & 初期化 ---
@@ -322,7 +347,6 @@ tab_b, tab_c, tab_d = st.tabs([
     "Data Export"
 ])
 
-# --- A. 動態分析 (PULSE) ---
 with tab_b:
     st.subheader("分析パラメータ")
     col1, col2 = st.columns(2)
@@ -349,14 +373,13 @@ with tab_b:
                 min_patents_threshold = int(min_patents)
 
                 pivot_df = _prepare_momentum_data(df_main, axis_col)
-                st.session_state.mega_pivot_df = pivot_df 
+                st.session_state.mega_pivot_df = pivot_df
                 if pivot_df.empty:
                     st.error(f"エラー: 分析軸 ({axis_label}) の有効なデータがありません。")
                     st.stop()
 
                 x_present, y_present, bubble_present = _calculate_metrics(pivot_df, cagr_end_year, y_axis_years, current_year, past_offset=0)
-                
-                # 件数が多い順にソート
+
                 options_with_counts = [(f"{name} ({int(count)}件)", name) for name, count in bubble_present.sort_values(ascending=False).items()]
                 st.session_state.mega_highlight_options = options_with_counts
 
@@ -389,12 +412,12 @@ with tab_b:
                 df_result['Group_Auto'] = df_result.apply(assign_relative_label, axis=1)
                 st.session_state.df_momentum_result = df_result.copy()
                 st.session_state.mega_axis_label = axis_label
+                st.session_state.mega_axis_col = axis_col
                 st.session_state.mega_past_offset = past_offset
                 st.session_state.mega_y_axis_years = y_axis_years
 
                 df_filtered = df_result[df_result['Group_Auto'] != 'N/A']
-                
-                # 件数が多い順にソート
+
                 drilldown_options = [('(分析対象を選択)', '(分析対象を選択)')] + [
                     (f"{name} ({int(row['Bubble_Present'])}件)", name) 
                     for name, row in df_filtered.sort_values('Bubble_Present', ascending=False).iterrows()
@@ -405,7 +428,6 @@ with tab_b:
             except Exception as e:
                 st.error(f"エラー: {e}")
 
-    # --- ラベル編集 & 描画 (PULSE) ---
     st.subheader("ラベル編集")
     base_color_map = {'リーダー (Leaders)': '#28a745', '新興・高ポテンシャル (Emerging)': '#ffc107', '成熟・既存勢力 (Established)': '#007bff', '衰退・ニッチ (Declining/Niche)': '#6c757d', 'N/A': '#ced4da'}
 
@@ -429,11 +451,10 @@ with tab_b:
         xaxis_title_label = f"過去の勢い (CAGR, {cagr_start}-{cagr_end}年内の活動期間)"
         
         fig = go.Figure()
-        
-        # 軌跡描画
+
         if highlight_targets:
             highlight_values = [t[1] for t in highlight_targets]
-            palette = theme_config["color_sequence"]
+            palette = utils.APOLLO_COLORS
             pivot_df = st.session_state.mega_pivot_df
             max_bubble = df_to_plot['Bubble_Present'].max()
             
@@ -458,7 +479,6 @@ with tab_b:
                     fig.add_trace(go.Scatter(x=traj_x, y=traj_y, mode='lines', line=dict(color=base_color, width=1), opacity=0.5, showlegend=False, hoverinfo='skip'))
                     fig.add_trace(go.Scatter(x=traj_x, y=traj_y, mode='markers+text', name=target, marker=dict(size=traj_s, color=traj_c, line=dict(width=1, color='white')), text=traj_t, textposition="top center", textfont=dict(size=10, color=base_color)))
         else:
-            # 通常モード
             df_filt = df_to_plot[df_to_plot['Group_Custom'] != 'N/A'].copy()
             if not df_filt.empty:
                 df_filt['Y_Present_Plot'] = df_filt['Y_Present'].replace(0, 0.1)
@@ -480,7 +500,7 @@ with tab_b:
         fig.add_vline(x=st.session_state.mega_x_threshold, line_width=1, line_dash="dash", line_color="gray")
         fig.add_hline(y=st.session_state.mega_y_threshold, line_width=1, line_dash="dash", line_color="gray")
         
-        utils.update_fig_layout(fig, "MEGA 動態分析マップ", height=800, theme_config=theme_config, show_axes=True, show_legend=False)
+        utils.update_fig_layout(fig, "MEGA 動態分析マップ", height=800, show_axes=True, show_legend=False)
         fig.update_layout(
             xaxis_title=f"← 勢い減速 | {xaxis_title_label} | 勢い加速 → (十字線: {st.session_state.mega_x_threshold:.1%})",
             yaxis_title="← 活動鈍化 | 現在の活動量 | 活動活発 →",
@@ -493,14 +513,92 @@ with tab_b:
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
         st.session_state.df_momentum_export = df_to_plot.copy()
 
+        _pulse_summary = f"動態分析マップ: {axis_label}軸\n"
+        _group_counts = df_to_plot['Group_Auto'].value_counts().to_dict()
+        for _g, _c in _group_counts.items():
+            _pulse_summary += f"  {_g}: {_c}件\n"
+        _pulse_snap_data = {
+            'module': 'MEGA',
+            'type': 'pulse_4quadrant',
+            'chart_data': _pulse_summary + "\n" + df_to_plot[['X_Present', 'Y_Present', 'Bubble_Present', 'Group_Auto']].head(50).to_string(),
+        }
+        utils.render_snapshot_button(
+            title=f"MEGA PULSE: {axis_label}軸 動態分析マップ",
+            description=f"CAGR×活動量の4象限で{axis_label}を分類した動態分析マップ。",
+            key="mega_pulse_snap",
+            fig=fig,
+            data_summary=_pulse_snap_data
+        )
 
-# --- C. ドリルダウン分析 (TELESCOPE) ---
+        _meta_pulse = utils_ai.build_common_metadata(df_main=df_main, col_map=col_map)
+        _meta_pulse['分析軸'] = axis_label
+        _meta_pulse['CAGR計算期間'] = f"{int(st.session_state.get('cagr_start_year_min', 2000))}年～{int(st.session_state.get('cagr_end_year_val', datetime.datetime.now().year))}年"
+        _meta_pulse['活動量算出期間'] = f"直近{st.session_state.get('mega_y_axis_years', 5)}年"
+        _meta_pulse['最小特許件数フィルタ'] = int(min_patents)
+        _meta_pulse['CAGR閾値'] = f"{st.session_state.get('mega_x_threshold', 0):.1%}"
+        _meta_pulse['活動量閾値'] = f"{st.session_state.get('mega_y_threshold', 0):.1f}"
+        _meta_pulse['象限別件数'] = {str(k): int(v) for k, v in _group_counts.items()}
+        _meta_pulse['分析対象数'] = len(df_to_plot)
+
+        _pulse_data_str = df_to_plot[['X_Present', 'Y_Present', 'Bubble_Present', 'Group_Auto']].sort_values('Bubble_Present', ascending=False).head(30).to_string()
+        _pulse_prompt = utils_ai.generate_ai_insight_prompt(
+            role="特許戦略・ポートフォリオ分析の専門家として、CAGR×活動量の4象限動態分析マップを戦略的に分析してください。",
+            context="""\
+散布図による動態分析マップ（PULSE）を表示しています。
+- X軸: CAGR（成長率）— 過去の出願勢い
+- Y軸: 現在の活動量（直近N年の出願件数）— 対数スケール
+- バブルサイズ: 総出願件数
+- 4象限: リーダー(右上)/新興(右下)/成熟(左上)/衰退(左下)
+- 十字線: 平均値で区切り""",
+            data_summary=_pulse_data_str,
+            instructions="""\
+以下の観点で分析してください:
+1. **象限分布**: 各象限のプレイヤー分布パターンと市場構造の評価
+2. **リーダー分析**: リーダー象限の特徴と今後の展望
+3. **新興勢力**: 高成長率プレイヤーの特定と将来性評価
+4. **成熟・衰退**: 既存勢力の動向と衰退リスクの評価
+5. **戦略提言**: ポートフォリオ全体のバランスと推奨アクション
+
+各主張には必ず具体的な数値（CAGR値、活動量、件数等）を1つ以上含めてください。""",
+            metadata=_meta_pulse,
+            constraints="CAGRは単純な比率であり、出願戦略の変更や規制変更等の外部要因も考慮すること。",
+            output_format="Markdown形式。見出し付きの構造化された分析レポート。"
+        )
+        utils_ai.render_ai_insight_button(_pulse_prompt, "mega_pulse_insight")
+
+        try:
+            import capcom
+            if capcom.is_active():
+                entities = []
+                for _, row in df_to_plot.iterrows():
+                    entities.append({
+                        "name": str(row.get('X_Present', row.name if isinstance(row.name, str) else '')),
+                        "cagr": round(float(row.get('cagr', 0)), 4) if pd.notna(row.get('cagr')) else 0,
+                        "activity": int(row.get('Y_Present', 0)),
+                        "total": int(row.get('Bubble_Present', 0)),
+                        "quadrant": str(row.get('Group_Auto', ''))
+                    })
+                mega_json = {
+                    "metadata": {
+                        "module": "MEGA",
+                        "mode": "PULSE",
+                        "axis": axis_label,
+                        "total_entities": len(entities)
+                    },
+                    "entities": entities,
+                    "quadrant_summary": {str(k): int(v) for k, v in _group_counts.items()}
+                }
+                capcom.save_data("mega_momentum.json", mega_json)
+                capcom.save_patents_csv()
+        except Exception as e:
+            pass
+
+
 with tab_c:
     st.subheader("分析対象の選択")
     drilldown_options = st.session_state.get("mega_drilldown_options", [('(分析対象を選択)', '(分析対象を選択)')])
     drilldown_target = st.selectbox("ドリルダウン対象:", options=drilldown_options, format_func=lambda x: x[0], key="drill_target")[1]
 
-    # --- クラスタリング設定 ---
     st.subheader("クラスタリング設定 (ドリルダウン用)")
     
     col1, col2, col3 = st.columns(3)
@@ -541,15 +639,17 @@ with tab_c:
                     df_plot['year'] = df_filtered['year'].values
                     df_plot[col_map['title']] = df_filtered[col_map['title']].values
                     if col_map['abstract']: df_plot[col_map['abstract']] = df_filtered[col_map['abstract']].values
-                    
-                    label_map = {}
-                    for cid in sorted(df_plot['cluster_id'].unique()):
-                        if cid == -1: label_map[cid] = "ノイズ"
-                        else:
-                            vecs = tfidf[(df_plot['cluster_id'] == cid).values]
-                            mean_vector = np.asarray(vecs.mean(axis=0)).flatten()
-                            top_words = _get_top_words_filtered(mean_vector, feature_names, stopwords, top_n=int(drill_label_top_n))
-                            label_map[cid] = f"[{cid}] {top_words}"
+
+                    mega_drill_texts = (
+                        df_plot[col_map['title']].fillna('') + ' ' +
+                        df_plot[col_map.get('abstract', '')].fillna('') if col_map.get('abstract') else df_plot[col_map['title']].fillna('')
+                    )
+                    label_map = patiroha.auto_label(
+                        mega_drill_texts,
+                        df_plot['cluster_id'].values,
+                        method='c-tfidf',
+                        top_n=int(drill_label_top_n),
+                    )
                     
                     df_plot['label'] = df_plot['cluster_id'].map(label_map)
                     st.session_state.df_drilldown = df_plot
@@ -561,7 +661,6 @@ with tab_c:
                     import traceback
                     st.exception(traceback.format_exc())
 
-    # --- 描画 ---
     if "df_drilldown" in st.session_state:
         df_d = st.session_state.df_drilldown.copy()
         
@@ -598,8 +697,7 @@ with tab_c:
             title_s = f" ({date_filter})"
 
         fig = go.Figure()
-        
-        # 密度マップ
+
         if map_mode == "密度マップ (Density)" and not df_in.empty:
             colors = [[0, "rgba(255,255,255,0)"], [0.1, "rgba(225,245,254,0.3)"], [1, "rgba(2,119,189,0.9)"]]
             fig.add_trace(go.Histogram2dContour(
@@ -610,9 +708,8 @@ with tab_c:
                 hoverinfo='skip'
             ))
 
-        # クラスタ領域
         if map_mode == "クラスタ領域 (Clusters)" and not df_in.empty:
-            colors = theme_config["color_sequence"]
+            colors = utils.APOLLO_COLORS
             u_cls = sorted(df_in['cluster_id'].unique())
             for i, cid in enumerate(u_cls):
                 if cid == -1: continue
@@ -626,13 +723,11 @@ with tab_c:
                         fig.add_trace(go.Scatter(x=h_pts[:,0], y=h_pts[:,1], mode='lines', fill='toself', fillcolor=col, opacity=0.1, line=dict(color=col, width=2), showlegend=False, hoverinfo='skip'))
                     except: pass
 
-        # Ghost (非表示/背景)
         if not df_out.empty:
             fig.add_trace(go.Scattergl(x=df_out['x'], y=df_out['y'], mode='markers', marker=dict(color='#cccccc', size=3, opacity=0.5), name='期間外', hoverinfo='skip'))
 
-        # フォーカス (散布図)
         m_line = dict(width=1, color='white') if map_mode == "密度マップ (Density)" else dict(width=0)
-        colorscale = theme_config["color_sequence"] if isinstance(theme_config["color_sequence"], str) else 'turbo'
+        colorscale = utils.APOLLO_COLORS if isinstance(utils.APOLLO_COLORS, str) else 'turbo'
         
         fig.add_trace(go.Scattergl(
             x=df_in['x'], y=df_in['y'], mode='markers', 
@@ -640,10 +735,9 @@ with tab_c:
             hovertext=df_in['label'] + "<br>" + df_in[col_map['title']], name='期間内'
         ))
 
-        # ラベル
         if show_label:
             u_cls = sorted(df_in['cluster_id'].unique())
-            colors = theme_config["color_sequence"]
+            colors = utils.APOLLO_COLORS
             all_cls = sorted(df_d['cluster_id'].unique())
             
             for cid in u_cls:
@@ -659,7 +753,7 @@ with tab_c:
                 
                 fig.add_annotation(x=mx, y=my, text=label_txt, showarrow=False, font=dict(size=10, color='black'), bgcolor='rgba(255,255,255,0.8)', bordercolor=b_col, borderwidth=2, borderpad=4)
 
-        utils.update_fig_layout(fig, f"技術ポートフォリオ: {st.session_state.drilldown_target_name}{title_s}", height=1000, width=800, theme_config=theme_config, show_axes=False)
+        utils.update_fig_layout(fig, f"技術ポートフォリオ: {st.session_state.drilldown_target_name}{title_s}", height=1000, width=800, show_axes=False)
         st.plotly_chart(fig, use_container_width=True, config={
             'editable': True,
             'edits': {
@@ -674,15 +768,91 @@ with tab_c:
         })
         st.session_state.df_drilldown_export = df_d
 
+        _drill_cluster_info = ""
+        if 'sbert_sub_cluster_map_auto' in st.session_state:
+            for _cid, _lbl in st.session_state.sbert_sub_cluster_map_auto.items():
+                _cnt = len(df_d[df_d['cluster_id'] == _cid]) if 'cluster_id' in df_d.columns else 0
+                _drill_cluster_info += f"  Cluster {_cid} ({_lbl}): {_cnt}件\n"
+        _drill_snap_data = {
+            'module': 'MEGA',
+            'type': 'telescope_drilldown',
+            'chart_data': f"ドリルダウン対象: {st.session_state.get('drilldown_target_name', 'N/A')}\n{_drill_cluster_info}",
+        }
+        utils.render_snapshot_button(
+            title=f"MEGA TELESCOPE: {st.session_state.get('drilldown_target_name', 'N/A')}",
+            description=f"ドリルダウン対象の技術ポートフォリオマップ（UMAP+HDBSCAN）。",
+            key="mega_telescope_snap",
+            fig=fig,
+            data_summary=_drill_snap_data
+        )
+
+        _meta_drill = utils_ai.build_common_metadata(df_main=df_main, col_map=col_map)
+        _meta_drill['ドリルダウン対象'] = st.session_state.get('drilldown_target_name', 'N/A')
+        _meta_drill['クラスタ数'] = len(st.session_state.get('sbert_sub_cluster_map_auto', {}))
+        _meta_drill['分析対象件数'] = len(df_d) if 'df_d' in dir() else 0
+
+        _drill_prompt = utils_ai.generate_ai_insight_prompt(
+            role="技術戦略・特許ランドスケープの専門家として、ドリルダウン分析による技術クラスタの構造を分析してください。",
+            context="""\
+UMAP+HDBSCANによるクラスタリングマップを表示しています。
+特定の出願人/IPCの技術ポートフォリオを細分化し、各クラスタがどのような技術テーマに対応するかを可視化しています。""",
+            data_summary=_drill_cluster_info,
+            instructions="""\
+以下の観点で分析してください:
+1. **技術ポートフォリオ構造**: 主要クラスタの特徴と技術テーマの多様性
+2. **注力領域**: 最大クラスタの技術的意味と事業との関連
+3. **新規領域**: 小規模クラスタに潜む新技術・新規事業の可能性
+4. **クラスタ間関係**: 技術テーマの関連性・統合可能性
+5. **戦略提言**: ポートフォリオの強み・弱み・今後の方向性
+
+各主張には必ず具体的な数値を1つ以上含めてください。""",
+            metadata=_meta_drill,
+            constraints="クラスタラベルはTF-IDF自動生成の場合があり、実際の技術内容と完全には一致しない可能性がある。",
+            output_format="Markdown形式。見出し付きの構造化された分析レポート。"
+        )
+        utils_ai.render_ai_insight_button(_drill_prompt, "mega_telescope_insight")
+
+        try:
+            import capcom
+            if capcom.is_active() and 'cluster_id' in df_d.columns:
+                drill_clusters_json = []
+                for _cid in sorted(df_d['cluster_id'].unique()):
+                    _grp = df_d[df_d['cluster_id'] == _cid]
+                    _label = st.session_state.sbert_sub_cluster_map_auto.get(_cid, str(_cid))
+                    _reps = []
+                    if embeddings is not None:
+                        _reps = utils.get_cluster_representatives(
+                            _grp, embeddings, df_main, col_map,
+                            n=3, title_col=col_map['title'],
+                            abstract_col=col_map['abstract']
+                        )
+                    drill_clusters_json.append({
+                        "cluster_id": int(_cid),
+                        "label": _label,
+                        "count": len(_grp),
+                        "representatives": _reps
+                    })
+                mega_drill_json = {
+                    "metadata": {
+                        "module": "MEGA",
+                        "mode": "TELESCOPE",
+                        "drilldown_target": st.session_state.get('drilldown_target_name', 'N/A'),
+                        "n_clusters": len(drill_clusters_json)
+                    },
+                    "clusters": drill_clusters_json
+                }
+                capcom.save_data("mega_drilldown.json", mega_drill_json)
+                capcom.save_patents_csv()
+        except Exception as e:
+            pass
+
         st.subheader("クラスタ・ラベル編集")
         st.markdown("AIを活用してクラスタのラベルを自動提案できます。")
-        # MEGA用のキーprefix: mega_drill_labels_map
         if "mega_drill_labels_map" not in st.session_state:
              st.session_state.mega_drill_labels_map = st.session_state.sbert_sub_cluster_map_auto.copy()
         
         utils.render_ai_label_assistant(df_d, 'cluster_id', "mega_drill_labels_map", col_map, tfidf_matrix, feature_names, widget_key_prefix="mega_drill_label")
 
-        # 手動編集UI
         st.markdown("**手動編集**")
         if "mega_drill_labels_map_original" not in st.session_state:
              st.session_state.mega_drill_labels_map_original = st.session_state.mega_drill_labels_map.copy()
@@ -701,8 +871,8 @@ with tab_c:
         
         col_tm1, col_tm2 = st.columns(2)
         with col_tm1:
-            cooc_top_n = st.slider("共起: 上位単語数", 30, 100, 50, key="mega_cooc_top_n")
-            cooc_threshold = st.slider("共起: Jaccard係数 閾値", 0.01, 0.3, 0.05, 0.01, key="mega_cooc_threshold")
+            cooc_top_n = st.slider("共起: 上位単語数", 30, 100, 70, key="mega_cooc_top_n")
+            cooc_threshold = st.slider("共起: Jaccard係数 閾値", 0.01, 0.3, 0.03, 0.01, key="mega_cooc_threshold")
         
         if st.button("テキスト分析を実行", key="mega_run_text_mining"):
             with st.spinner("分析中..."):
@@ -717,8 +887,8 @@ with tab_c:
                 if not words: st.warning("有効なキーワードなし")
                 else:
                     st.markdown("##### 1. ワードクラウド")
-                    generate_wordcloud_and_list(words, f"対象: {st.session_state.drilldown_target_name}{title_s}", 30, FONT_PATH)
-                    
+                    generate_wordcloud_and_list(words, f"対象: {st.session_state.drilldown_target_name}{title_s}", 30, FONT_PATH, capcom_key="mega_drill")
+
                     st.markdown("##### 2. 共起ネットワーク")
                     word_freq = Counter(words)
                     top_words = [w for w, c in word_freq.most_common(cooc_top_n)]
@@ -762,11 +932,10 @@ with tab_c:
                             marker=dict(showscale=True, colorscale='YlGnBu', size=node_size, color=node_size, line_width=2)
                         )
                         fig_net = go.Figure(data=[edge_trace, node_trace], layout=go.Layout(title='共起ネットワーク', showlegend=False, hovermode='closest', margin=dict(b=20,l=5,r=5,t=40), xaxis=dict(showgrid=False, zeroline=False, showticklabels=False), yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
-                        utils.update_fig_layout(fig_net, '共起ネットワーク', theme_config=theme_config, show_axes=False)
+                        utils.update_fig_layout(fig_net, '共起ネットワーク', show_axes=False)
                         fig_net.update_xaxes(visible=False); fig_net.update_yaxes(visible=False)
                         st.plotly_chart(fig_net, use_container_width=True)
 
-# --- D. エクスポート ---
 with tab_d:
     st.subheader("データエクスポート")
     if "df_momentum_export" in st.session_state:

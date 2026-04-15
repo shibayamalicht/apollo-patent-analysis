@@ -8,6 +8,7 @@ import numpy as np
 import re
 import utils
 import utils_ai
+import patiroha
 import networkx as nx
 from collections import Counter
 from itertools import combinations
@@ -17,17 +18,12 @@ import networkx.algorithms.community as community
 # ==================================================================
 # --- ページ設定 ---
 # ==================================================================
-st.set_page_config(page_title="APOLLO | NEBULA", page_icon="🌌", layout="wide")
+st.set_page_config(page_title="APOLLO CAPCOM | NEBULA", page_icon="🌌", layout="wide")
 st.session_state['current_page'] = 'NEBULA'
 utils.render_sidebar()
 
-# テーマ設定
-theme_config = utils.get_theme_config("APOLLO Standard")
-st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
-
 st.title("🌌 NEBULA")
-st.markdown("##### Network Exploration of Business, Users, Law, and Academia (Environmental Analysis)")
-st.markdown("特許情報だけでなく、論文・ニュース・政策文書までを含めた「環境分析」を行うモジュールです。社会トレンドや市場の期待を統合し、特許データとのギャップやシナジーを可視化します。")
+st.markdown("論文・ニュース・政策文書と特許を統合した環境分析。Hype Cycle・学術ランドスケープ・成長キーワードで、技術と社会のギャップを可視化します。")
 
 # ==================================================================
 # --- データ準備 ---
@@ -46,7 +42,7 @@ if 'df_npl' in st.session_state and st.session_state.df_npl is not None:
     df_npl = st.session_state.df_npl.copy()
     
 if df_npl is not None:
-    debug_news = df_npl[df_npl['data_sub_type'] == 'Business']
+    news_data = df_npl[df_npl['data_sub_type'] == 'Business']
 
 # ==================================================================
 # --- Helper Functions ---
@@ -54,11 +50,11 @@ if df_npl is not None:
 
 def update_fig_layout_local(fig, title, height=500):
     fig.update_layout(
-        template=theme_config["plotly_template"],
-        title=dict(text=title, font=dict(size=18, color=theme_config["text_color"])),
-        paper_bgcolor=theme_config["bg_color"],
-        plot_bgcolor=theme_config["bg_color"],
-        font=dict(color=theme_config["text_color"]),
+        template=utils.APOLLO_TEMPLATE,
+        title=dict(text=title, font=dict(size=18, color=utils.APOLLO_TEXT)),
+        paper_bgcolor=utils.APOLLO_BG,
+        plot_bgcolor=utils.APOLLO_BG,
+        font=dict(color=utils.APOLLO_TEXT),
         height=height,
         margin=dict(l=20, r=20, t=60, b=20)
     )
@@ -69,7 +65,7 @@ def render_network(df_target, title, top_n=50, threshold=0.05, height=600):
     Generate and render a co-occurrence network chart.
     Returns fig, net_stats for snapshot consolidation.
     """
-    # 固定キーワードを優先し、存在しない場合は旧カラムを使用
+    # 固定キーワードを優先し、無ければ explorer_keywords を使用
     tgt_col = 'explorer_keywords_fixed' if 'explorer_keywords_fixed' in df_target.columns else 'explorer_keywords'
     
     if tgt_col not in df_target.columns:
@@ -330,10 +326,9 @@ else:
             xaxis='x'
         ))
     elif not df_npl_filtered.empty:
-         # デバッグ: コンテンツは存在するがcounts_nが空？
-         debug_n_count = len(df_npl_filtered[df_npl_filtered['data_sub_type'] == 'Business'])
-         if debug_n_count > 0:
-             st.warning(f"⚠️ News data exists ({debug_n_count} items) but could not be plotted. Check if 'Date' column was parsed correctly in Mission Control.")
+         news_count = len(df_npl_filtered[df_npl_filtered['data_sub_type'] == 'Business'])
+         if news_count > 0:
+             st.warning(f"⚠️ News data exists ({news_count} items) but could not be plotted. Check if 'Date' column was parsed correctly in Mission Control.")
 
     # ベースレイアウトを先に適用
     fig_hype = update_fig_layout_local(fig_hype, "Hype Cycle Analysis", height=450)
@@ -372,11 +367,25 @@ else:
     utils.render_snapshot_button(
         title="NEBULA: Hype Cycle (Trends)",
         description="Comparative timeline of Patents, Academic, and Business News.",
-        # module="NEBULA", # Removed invalid arg
         fig=fig_hype,
         data_summary={"type": "trend_chart", "stats": hype_stats, "module": "NEBULA"},
-        key="nebula_hype" # Renamed from key_suffix
+        key="nebula_hype"
     )
+
+    # CAPCOM data/ JSON出力（ハイプサイクル）
+    try:
+        import capcom
+        if capcom.is_active():
+            # 各トレンドのキーを文字列化（JSONシリアライズ対応）
+            hype_json = {
+                "metadata": {"module": "NEBULA", "type": "hype_cycle"},
+                "patent_trend": {str(k): int(v) for k, v in hype_stats.get("patent_trend", {}).items()},
+                "academic_trend": {str(k): int(v) for k, v in hype_stats.get("academic_trend", {}).items()},
+                "news_trend": {str(k): int(v) for k, v in hype_stats.get("news_trend", {}).items()}
+            }
+            capcom.save_data("nebula_hype_cycle.json", hype_json)
+    except Exception as e:
+        pass
 
 st.markdown("---")
 
@@ -441,17 +450,39 @@ else:
     utils.render_snapshot_button(
         title="NEBULA: Macro Context (Policy & Market)",
         description="List of Policy Regulations and Market Reports.",
-        # module="NEBULA", # Removed invalid arg
-        fig=None, # No image, just data
+        fig=None,
         data_summary={
-            "type": "macro_list", 
-            "items": macro_items, 
+            "type": "macro_list",
+            "items": macro_items,
             "module": "NEBULA",
-            "domain": "Policy/Market", # Explicit Domain
-            "representatives_raw": macro_items # Use same list for citation logic
+            "domain": "Policy/Market",
+            "representatives_raw": macro_items
         },
-        key="nebula_macro" # Renamed from key_suffix
+        key="nebula_macro"
     )
+
+    # CAPCOM data/ JSON出力（マクロイベント）
+    try:
+        import capcom
+        if capcom.is_active():
+            # macro_itemsから不要なキーを除外してJSON用に整形
+            macro_json_items = []
+            for item in macro_items:
+                macro_json_items.append({
+                    "date": item.get("date", ""),
+                    "year": item.get("year", ""),
+                    "type": item.get("type", ""),
+                    "title": item.get("title", ""),
+                    "source": item.get("source", ""),
+                    "content": item.get("content", "")[:300]  # 長文は300文字で切る
+                })
+            macro_json = {
+                "metadata": {"module": "NEBULA", "type": "macro_events", "count": len(macro_json_items)},
+                "items": macro_json_items
+            }
+            capcom.save_data("nebula_macro_events.json", macro_json)
+    except Exception as e:
+        pass
 
 
 st.markdown("---")
@@ -578,7 +609,7 @@ def extract_reps_generic(df_source, stats_growth, stats_net, col_map, domain_lab
         return reps
 
     except Exception as e:
-        print(f"Error extracting reps for {domain_label}: {e}")
+        pass
         return []
 
 
@@ -590,37 +621,22 @@ with tab_pat:
     
     # キーワード未計算時の安全性確保 (統一ロジック使用)
     if 'explorer_keywords_fixed' not in df_main_filtered.columns:
-        st.info("キーワードを計算中 (Unified Logic)...")
-        # 'text_for_sbert' の存在確認、なければ再構築
-        if 'text_for_sbert' not in df_main_filtered.columns:
-             # 再構築のためにカラムマップをロード
-             col_map = st.session_state.col_map
-             t_col = col_map.get('title')
-             a_col = col_map.get('abstract')
-             c_col = col_map.get('claim')
-             
-             if t_col and t_col in df_main_filtered.columns:
-                 df_main_filtered['text_for_sbert'] = (
-                     df_main_filtered[t_col].fillna('') + ' ' + 
-                     df_main_filtered[a_col].fillna('') if a_col in df_main_filtered.columns else '' + ' ' + 
-                     df_main_filtered[c_col].fillna('') if c_col in df_main_filtered.columns else ''
-                 )
-             else:
-                 # フォールバック: 全カラムを連結
-                 df_main_filtered['text_for_sbert'] = df_main_filtered.astype(str).agg(' '.join, axis=1)
-
-        # 特許ネットワーク用に特許ストップワードを使用
-        sw_base = set(utils.get_patent_stopwords())
-        if 'stopwords' in st.session_state and st.session_state['stopwords']:
-             sw_base = sw_base | set(st.session_state['stopwords'])
-        sw_patent = list(sw_base)
-
         if 'explorer_keywords' in df_main_filtered.columns:
-             df_main_filtered['explorer_keywords_fixed'] = df_main_filtered['explorer_keywords']
+            df_main_filtered['explorer_keywords_fixed'] = df_main_filtered['explorer_keywords']
         else:
-             df_main_filtered['explorer_keywords_fixed'] = df_main_filtered['text_for_sbert'].apply(
-                 lambda x: utils.extract_keywords(x, stopwords=sw_patent)
-             )
+            with st.spinner("キーワードを計算中..."):
+                col_map = st.session_state.get('col_map', {})
+                t_col = col_map.get('title', '')
+                a_col = col_map.get('abstract', '')
+                if t_col and t_col in df_main_filtered.columns:
+                    texts = df_main_filtered[t_col].fillna('')
+                    if a_col and a_col in df_main_filtered.columns:
+                        texts = texts + ' ' + df_main_filtered[a_col].fillna('')
+                    sw = patiroha.get_stopwords()
+                    df_main_filtered['explorer_keywords_fixed'] = texts.apply(
+                        lambda x: patiroha.extract_keywords(x, stopwords=sw))
+                else:
+                    df_main_filtered['explorer_keywords_fixed'] = [[] for _ in range(len(df_main_filtered))]
 
     # 1. ランキングマップ
     fig_growth_p, stats_growth_p = render_growth_ranking(
@@ -635,8 +651,8 @@ with tab_pat:
     st.write("企業の技術実装、製品化に近い用語の関係性を可視化します。")
     
     cp1, cp2 = st.columns(2)
-    with cp1: top_n_p = st.slider("ノード数 (Patent)", 20, 100, 60, key="net_p_n")
-    with cp2: th_p = st.slider("共起閾値 (Patent)", 0.01, 0.3, 0.05, 0.01, key="net_p_th")
+    with cp1: top_n_p = st.slider("ノード数 (Patent)", 20, 100, 70, key="net_p_n")
+    with cp2: th_p = st.slider("共起閾値 (Patent)", 0.01, 0.3, 0.03, 0.01, key="net_p_th")
     
     fig_net_p, stats_net_p = render_network(df_main_filtered, "特許ネットワーク (Patent)", top_n_p, th_p)
 
@@ -721,15 +737,15 @@ with tab_aca:
         else:
             # キーワード確保
             if 'explorer_keywords_fixed' not in df_aca.columns:
-                sw_base = set(utils.get_npl_stopwords())
-                if 'stopwords' in st.session_state and st.session_state['stopwords']:
-                     sw_base = sw_base | set(st.session_state['stopwords'])
-                sw_npl = list(sw_base)
-
-                df_aca['temp_text'] = df_aca['unified_title'].fillna('') + ' ' + df_aca['unified_content'].fillna('')
-                df_aca['explorer_keywords_fixed'] = df_aca['temp_text'].apply(
-                    lambda x: utils.extract_keywords(x, stopwords=sw_npl, clean_html=True)
-                )
+                if 'explorer_keywords' in df_aca.columns:
+                    df_aca['explorer_keywords_fixed'] = df_aca['explorer_keywords']
+                else:
+                    with st.spinner("キーワードを計算中 (Academic)..."):
+                        sw = patiroha.get_stopwords("npl")
+                        df_aca['temp_text'] = df_aca['unified_title'].fillna('') + ' ' + df_aca['unified_content'].fillna('')
+                        df_aca['explorer_keywords_fixed'] = df_aca['temp_text'].apply(
+                            lambda x: patiroha.extract_keywords(x, stopwords=sw, clean_html=True)
+                        )
 
             fig_growth_a, stats_growth_a = render_growth_ranking(df_aca, "Academic", "aca", keywords_col='explorer_keywords_fixed')
             
@@ -738,8 +754,8 @@ with tab_aca:
             st.write("研究段階の技術用語、基礎研究のトレンド関係性を可視化します。")
     
             ca1, ca2 = st.columns(2)
-            with ca1: top_n_a = st.slider("ノード数 (Academic)", 20, 100, 50, key="net_a_n")
-            with ca2: th_a = st.slider("共起閾値 (Academic)", 0.01, 0.3, 0.05, 0.01, key="net_a_th")
+            with ca1: top_n_a = st.slider("ノード数 (Academic)", 20, 100, 70, key="net_a_n")
+            with ca2: th_a = st.slider("共起閾値 (Academic)", 0.01, 0.3, 0.03, 0.01, key="net_a_th")
             
             fig_net_a, stats_net_a = render_network(df_aca, "論文ネットワーク (Academic)", top_n_a, th_a)
             
@@ -812,7 +828,7 @@ with tab_news:
     if df_npl_filtered.empty:
         st.info("News/Marketデータがアップロードされていません (NPLデータなし)。")
     else:
-        # 以前のコードで確認された通り、Newsには 'Business' を使用
+        # Newsには 'Business' を使用
         df_news = df_npl_filtered[df_npl_filtered['data_sub_type'] == 'Business'].copy()
         
         if df_news.empty:
@@ -820,15 +836,15 @@ with tab_news:
         else:
             # キーワードの存在確認
             if 'explorer_keywords_fixed' not in df_news.columns:
-                sw_base = set(utils.get_npl_stopwords())
-                if 'stopwords' in st.session_state and st.session_state['stopwords']:
-                     sw_base = sw_base | set(st.session_state['stopwords'])
-                sw_npl = list(sw_base)
-
-                df_news['temp_text'] = df_news['unified_title'].fillna('') + ' ' + df_news['unified_content'].fillna('')
-                df_news['explorer_keywords_fixed'] = df_news['temp_text'].apply(
-                    lambda x: utils.extract_keywords(x, stopwords=sw_npl, clean_html=True)
-                )
+                if 'explorer_keywords' in df_news.columns:
+                    df_news['explorer_keywords_fixed'] = df_news['explorer_keywords']
+                else:
+                    with st.spinner("キーワードを計算中 (News)..."):
+                        sw = patiroha.get_stopwords("npl")
+                        df_news['temp_text'] = df_news['unified_title'].fillna('') + ' ' + df_news['unified_content'].fillna('')
+                        df_news['explorer_keywords_fixed'] = df_news['temp_text'].apply(
+                            lambda x: patiroha.extract_keywords(x, stopwords=sw, clean_html=True)
+                        )
     
             fig_growth_n, stats_growth_n = render_growth_ranking(df_news, "News", "news", keywords_col='explorer_keywords_fixed')
             
@@ -837,8 +853,8 @@ with tab_news:
             st.write("市場動向、ニュース、プレスリリース等における用語の関係性を可視化します。") 
     
             cn1, cn2 = st.columns(2)
-            with cn1: top_n_n = st.slider("ノード数 (News)", 20, 100, 50, key="net_n_n")
-            with cn2: th_n = st.slider("共起閾値 (News)", 0.01, 0.3, 0.05, 0.01, key="net_n_th")
+            with cn1: top_n_n = st.slider("ノード数 (News)", 20, 100, 70, key="net_n_n")
+            with cn2: th_n = st.slider("共起閾値 (News)", 0.01, 0.3, 0.03, 0.01, key="net_n_th")
             
             fig_net_n, stats_net_n = render_network(df_news, "ニュース共起ネットワーク (News)", top_n_n, th_n)
             
@@ -902,4 +918,366 @@ with tab_news:
                  utils_ai.render_ai_insight_button(prompt_n, "nebula_insight_news")
 
 
-# リクエストにより "About this analysis" セクションを削除
+# ==================================================================
+# --- 学術ランドスケープ (Academic Landscape) ---
+# ==================================================================
+st.markdown("---")
+st.markdown("### 🔬 学術ランドスケープ (Academic Landscape)")
+st.markdown("学術論文のセマンティック・クラスタリングを行い、研究テーマの全体像を可視化します。")
+
+# Academic論文のみ抽出
+if df_npl is not None and not df_npl.empty:
+    df_academic = df_npl[df_npl.get('data_sub_type', pd.Series()) == 'Academic'].copy()
+
+    if len(df_academic) >= 10:
+        # --- パラメータ設定 ---
+        st.markdown("##### パラメータ設定")
+        n_papers = len(df_academic)
+
+        # データサイズに応じたデフォルト値（Saturn Vの知見を反映）
+        # 小規模(〜100件): 細かいクラスタを検出 → min_cs=5, min_s=3
+        # 中規模(100〜500件): バランス → min_cs=10, min_s=5
+        # 大規模(500件〜): 大きなテーマを抽出 → min_cs=15, min_s=10
+        if n_papers < 100:
+            default_min_cs, default_min_s = 5, 3
+        elif n_papers < 500:
+            default_min_cs, default_min_s = 10, 5
+        else:
+            default_min_cs, default_min_s = 15, 10
+
+        col_p1, col_p2, col_p3 = st.columns(3)
+        with col_p1:
+            acad_min_cluster = st.slider(
+                "最小クラスタサイズ", 3, 50, default_min_cs, key="acad_min_cs",
+                help=f"論文{n_papers}件に対する推奨値: {default_min_cs}。小さいほど細かく分割、大きいほど大テーマにまとまる")
+        with col_p2:
+            acad_min_samples = st.slider(
+                "最小サンプル数", 2, 30, default_min_s, key="acad_min_samp",
+                help="クラスタのコアポイント判定閾値。小さいほどノイズが減るが、不安定なクラスタも生まれやすい")
+        with col_p3:
+            acad_label_top_n = st.slider("ラベル語数", 2, 5, 3, key="acad_label_n")
+
+        # SBERTベクトルがキャッシュ済みかどうかで処理を分岐
+        has_cached_vectors = 'nebula_academic_embeddings' in st.session_state and st.session_state['nebula_academic_embeddings'] is not None
+
+        btn_label = "🔄 クラスタリング再計算（パラメータ変更）" if has_cached_vectors else "🚀 学術ランドスケープを構築"
+        if has_cached_vectors:
+            st.caption("💡 SBERTベクトルはキャッシュ済み。パラメータ変更時はクラスタリングのみ再計算します。")
+
+        if st.button(btn_label, key="nebula_academic_landscape_btn"):
+            # SBERT: キャッシュがなければ計算、あればスキップ
+            if has_cached_vectors:
+                academic_vectors = st.session_state['nebula_academic_embeddings']
+            else:
+                with st.spinner("SBERTベクトル化中...（初回のみ）"):
+                    embedder = patiroha.SBERTEmbedder()
+                    academic_vectors = embedder.encode(
+                        df_academic,
+                        text_columns=['unified_title', 'unified_content'],
+                        column_weights={'unified_title': 2},
+                        normalize_embeddings=True,
+                    )
+                    st.session_state['nebula_academic_embeddings'] = academic_vectors
+
+            with st.spinner("UMAP + HDBSCAN クラスタリング中..."):
+                landscape = patiroha.build_landscape(
+                    academic_vectors,
+                    method='hdbscan',
+                    min_cluster_size=acad_min_cluster,
+                    min_samples=acad_min_samples,
+                )
+                st.session_state['nebula_academic_landscape'] = landscape
+
+                df_academic['acad_cluster'] = landscape.labels
+                df_academic['acad_umap_x'] = landscape.coords[:, 0]
+                df_academic['acad_umap_y'] = landscape.coords[:, 1]
+
+                texts = (df_academic['unified_title'].fillna('') + ' ' +
+                        df_academic['unified_content'].fillna(''))
+                labels_map = patiroha.auto_label(
+                    texts, landscape.labels,
+                    stopwords=patiroha.get_stopwords("npl"),
+                    method='c-tfidf', top_n=acad_label_top_n)
+                st.session_state['nebula_academic_labels_map'] = labels_map
+                st.session_state['nebula_academic_labels_map_original'] = labels_map.copy()
+                df_academic['acad_cluster_label'] = df_academic['acad_cluster'].map(labels_map)
+                st.session_state['df_nebula_academic'] = df_academic
+                # TF-IDFキャッシュをリセット（再構築させる）
+                for k in ['nebula_academic_tfidf', 'nebula_academic_feature_names']:
+                    if k in st.session_state:
+                        del st.session_state[k]
+                st.success(f"✅ {landscape.n_clusters}クラスタを検出（ノイズ: {landscape.noise_count}件）")
+                st.rerun()
+
+        # --- 結果表示（Saturn V風） ---
+        if 'df_nebula_academic' in st.session_state:
+            df_acad = st.session_state['df_nebula_academic']
+            labels_map = st.session_state.get('nebula_academic_labels_map', {})
+            landscape_result = st.session_state.get('nebula_academic_landscape')
+
+            # 表示モード切替
+            acad_display_mode = st.radio(
+                "表示モード:", ["Scatter", "Density", "Convex Hull"],
+                horizontal=True, key="acad_display_mode"
+            )
+
+            fig_acad = go.Figure()
+
+            df_clustered = df_acad[df_acad['acad_cluster'] != -1]
+            df_noise = df_acad[df_acad['acad_cluster'] == -1]
+
+            if acad_display_mode == "Density":
+                # 密度ヒートマップ
+                fig_acad.add_trace(go.Histogram2dContour(
+                    x=df_clustered['acad_umap_x'], y=df_clustered['acad_umap_y'],
+                    colorscale='Blues', showscale=True,
+                    contours=dict(showlabels=False),
+                    ncontours=20, name='密度',
+                ))
+                # クラスタ重心にラベル
+                for cid, label in labels_map.items():
+                    if cid == -1:
+                        continue
+                    df_c = df_clustered[df_clustered['acad_cluster'] == cid]
+                    if df_c.empty:
+                        continue
+                    cx, cy = df_c['acad_umap_x'].mean(), df_c['acad_umap_y'].mean()
+                    fig_acad.add_annotation(x=cx, y=cy, text=label, showarrow=False,
+                        font=dict(size=10, color='#003366'), bgcolor='rgba(255,255,255,0.7)')
+
+            elif acad_display_mode == "Convex Hull":
+                from scipy.spatial import ConvexHull
+                colors = px.colors.qualitative.Set2
+                for idx, (cid, label) in enumerate(sorted(labels_map.items())):
+                    if cid == -1:
+                        continue
+                    df_c = df_clustered[df_clustered['acad_cluster'] == cid]
+                    if len(df_c) < 3:
+                        continue
+                    color = colors[idx % len(colors)]
+                    # 散布図
+                    fig_acad.add_trace(go.Scatter(
+                        x=df_c['acad_umap_x'], y=df_c['acad_umap_y'],
+                        mode='markers', marker=dict(size=5, color=color, opacity=0.6),
+                        name=label,
+                        hovertemplate='<b>%{customdata[0]}</b><br>%{customdata[1]}<extra>' + label + '</extra>',
+                        customdata=df_c[['unified_title', 'unified_source']].values,
+                    ))
+                    # 凸包
+                    try:
+                        points = df_c[['acad_umap_x', 'acad_umap_y']].values
+                        hull = ConvexHull(points)
+                        hull_x = [points[v, 0] for v in hull.vertices] + [points[hull.vertices[0], 0]]
+                        hull_y = [points[v, 1] for v in hull.vertices] + [points[hull.vertices[0], 1]]
+                        fig_acad.add_trace(go.Scatter(
+                            x=hull_x, y=hull_y, mode='lines',
+                            line=dict(color=color, width=2), showlegend=False,
+                            fill='toself', fillcolor=color.replace(')', ',0.08)').replace('rgb', 'rgba'),
+                        ))
+                    except Exception:
+                        pass
+
+            else:
+                # Scatter（デフォルト）
+                colors = px.colors.qualitative.Set2
+                for idx, (cid, label) in enumerate(sorted(labels_map.items())):
+                    if cid == -1:
+                        continue
+                    df_c = df_clustered[df_clustered['acad_cluster'] == cid]
+                    if df_c.empty:
+                        continue
+                    color = colors[idx % len(colors)]
+                    fig_acad.add_trace(go.Scatter(
+                        x=df_c['acad_umap_x'], y=df_c['acad_umap_y'],
+                        mode='markers', marker=dict(size=6, color=color, opacity=0.7),
+                        name=label,
+                        hovertemplate='<b>%{customdata[0]}</b><br>%{customdata[1]}<br>%{customdata[2]}<extra>' + label + '</extra>',
+                        customdata=df_c[['unified_title', 'unified_source', 'year']].fillna('').values,
+                    ))
+
+            # ノイズ点（全モード共通）
+            if len(df_noise) > 0:
+                fig_acad.add_trace(go.Scatter(
+                    x=df_noise['acad_umap_x'], y=df_noise['acad_umap_y'],
+                    mode='markers', marker=dict(size=3, color='lightgray', opacity=0.3),
+                    name=f'ノイズ ({len(df_noise)}件)',
+                    hovertemplate='<b>%{customdata[0]}</b><extra>ノイズ</extra>',
+                    customdata=df_noise[['unified_title']].values,
+                ))
+
+            # クラスタ重心ラベル（Scatter/Convex Hullモード）
+            if acad_display_mode != "Density":
+                for cid, label in labels_map.items():
+                    if cid == -1:
+                        continue
+                    df_c = df_clustered[df_clustered['acad_cluster'] == cid]
+                    if df_c.empty:
+                        continue
+                    cx, cy = df_c['acad_umap_x'].mean(), df_c['acad_umap_y'].mean()
+                    fig_acad.add_annotation(
+                        x=cx, y=cy, text=label, showarrow=False,
+                        font=dict(size=9, color='#333'), bgcolor='rgba(255,255,255,0.8)',
+                        bordercolor='#ccc', borderwidth=1, borderpad=2,
+                    )
+
+            fig_acad.update_layout(
+                title=f'学術論文ランドスケープ ({landscape_result.n_clusters if landscape_result else "?"}クラスタ / ノイズ {len(df_noise)}件)',
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),
+                plot_bgcolor='white', height=700,
+                legend=dict(orientation='v', yanchor='top', y=1, xanchor='left', x=1.02),
+            )
+
+            st.plotly_chart(fig_acad, use_container_width=True)
+
+            # スナップショット
+            utils.render_snapshot_button(
+                title="NEBULA 学術論文ランドスケープ",
+                description=f"学術論文{len(df_acad)}件, {landscape_result.n_clusters if landscape_result else '?'}クラスタ, ノイズ{len(df_noise)}件",
+                key="snap_nebula_academic_landscape",
+                fig=fig_acad,
+                data_summary={
+                    'type': 'academic_landscape',
+                    'total_papers': len(df_acad),
+                    'n_clusters': landscape_result.n_clusters if landscape_result else 0,
+                    'noise_count': len(df_noise),
+                    'clusters': [{'id': int(cid), 'label': lbl, 'count': len(df_acad[df_acad['acad_cluster'] == cid])}
+                                 for cid, lbl in labels_map.items() if cid != -1],
+                },
+            )
+
+            # --- ラベル編集 + AIアシスト ---
+            st.markdown("#### クラスタラベル編集")
+
+            # 学術テキスト用TF-IDF（AIラベルアシスト・ラベル編集に必要）
+            if 'nebula_academic_tfidf' not in st.session_state:
+                acad_texts = (df_acad['unified_title'].fillna('') + ' ' +
+                              df_acad['unified_content'].fillna('')).tolist()
+                _tfidf_mat, _feat_names = patiroha.build_tfidf(
+                    acad_texts, stopwords=patiroha.get_stopwords("npl"),
+                    min_df=2, max_df=0.90)
+                st.session_state['nebula_academic_tfidf'] = _tfidf_mat
+                st.session_state['nebula_academic_feature_names'] = _feat_names
+
+            acad_tfidf = st.session_state['nebula_academic_tfidf']
+            acad_features = st.session_state['nebula_academic_feature_names']
+
+            # col_map互換: 学術データ用のカラムマッピング
+            acad_col_map = {
+                'title': 'unified_title',
+                'abstract': 'unified_content',
+                'applicant': 'unified_source',
+            }
+
+            # AIラベルサジェスト
+            utils.render_ai_label_assistant(
+                df_acad, 'acad_cluster', 'nebula_academic_labels_map',
+                acad_col_map, acad_tfidf, acad_features,
+                widget_key_prefix="nebula_acad_label"
+            )
+
+            # オリジナルラベルの保存（初回のみ）
+            if 'nebula_academic_labels_map_original' not in st.session_state:
+                st.session_state['nebula_academic_labels_map_original'] = labels_map.copy()
+
+            # 手動ラベル編集UI
+            label_widgets = utils.create_label_editor_ui(
+                st.session_state['nebula_academic_labels_map_original'],
+                st.session_state['nebula_academic_labels_map'],
+                "nebula_acad_label"
+            )
+            if label_widgets:
+                for cid, val in label_widgets.items():
+                    labels_map[cid] = val
+                df_acad['acad_cluster_label'] = df_acad['acad_cluster'].map(labels_map)
+                st.session_state['nebula_academic_labels_map'] = labels_map
+                st.session_state['df_nebula_academic'] = df_acad
+
+            # クラスタ動態マップ
+            dyn_data = None
+            if 'year' in df_acad.columns and df_acad['year'].notna().sum() > 0:
+                dyn_data = utils.render_cluster_dynamics_section(
+                    df_acad, 'acad_cluster', labels_map,
+                    year_col='year', cagr_window=3,
+                    unique_key='nebula_acad_dynamics',
+                    module_name='NEBULA Academic',
+                )
+
+            # --- 空間分析（重心計算 + 近接関係）---
+            import utils_spatial
+            acad_spatial_info = utils_spatial.generate_spatial_cluster_summary(
+                df_acad, 'acad_cluster', 'acad_umap_x', 'acad_umap_y',
+                label_map=labels_map
+            )
+            if acad_spatial_info and acad_spatial_info != "空間データなし":
+                with st.expander("🗺️ クラスタ空間配置（近接関係）", expanded=False):
+                    st.markdown(acad_spatial_info)
+
+            # CAPCOM出力（空間分析・重心座標・代表論文を含む）
+            try:
+                import capcom
+                if capcom.is_active():
+                    landscape_result = st.session_state.get('nebula_academic_landscape')
+                    acad_embeddings = st.session_state.get('nebula_academic_embeddings')
+                    cluster_export = []
+                    for cid, label in labels_map.items():
+                        if cid == -1:
+                            continue
+                        df_c = df_acad[df_acad['acad_cluster'] == cid]
+                        if df_c.empty:
+                            continue
+
+                        # 重心座標
+                        cx = float(df_c['acad_umap_x'].mean())
+                        cy = float(df_c['acad_umap_y'].mean())
+
+                        # 代表論文（重心に近い上位5件）
+                        reps = []
+                        if acad_embeddings is not None and len(df_c) > 0:
+                            try:
+                                c_indices = df_c.index.tolist()
+                                c_vecs = acad_embeddings[c_indices]
+                                reps_result = patiroha.find_representatives(c_vecs, df_c, n=min(5, len(df_c)),
+                                    title_col='unified_title', abstract_col='unified_content',
+                                    applicant_col='unified_source', year_col='year')
+                                for r in reps_result:
+                                    reps.append({
+                                        'title': r.title[:150],
+                                        'source': r.applicant or '',
+                                        'year': r.year or '',
+                                        'score': round(r.score, 4),
+                                    })
+                            except Exception:
+                                # フォールバック: 先頭5件
+                                for _, row in df_c.head(5).iterrows():
+                                    reps.append({
+                                        'title': str(row.get('unified_title', ''))[:150],
+                                        'source': str(row.get('unified_source', '')),
+                                        'year': str(row.get('year', '')),
+                                    })
+
+                        cluster_export.append({
+                            'cluster_id': int(cid),
+                            'label': label,
+                            'count': len(df_c),
+                            'centroid': [round(cx, 4), round(cy, 4)],
+                            'representative_papers': reps,
+                        })
+
+                    export_data = {
+                        'type': 'nebula_academic_landscape',
+                        'total_papers': len(df_acad),
+                        'n_clusters': landscape_result.n_clusters if landscape_result else 0,
+                        'noise_count': landscape_result.noise_count if landscape_result else 0,
+                        'clusters': cluster_export,
+                        'spatial_context': acad_spatial_info if acad_spatial_info else "",
+                    }
+                    if dyn_data:
+                        export_data['cluster_dynamics'] = dyn_data
+                    capcom.save_data('nebula_academic_clusters', export_data)
+            except Exception:
+                pass
+    else:
+        st.info(f"学術論文が{len(df_academic)}件のみです（最低10件必要）。")
+else:
+    st.info("NPLデータ（Academic）が読み込まれていません。Mission ControlからNPLデータをインポートしてください。")

@@ -17,6 +17,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import utils
 import utils_ai
 import utils_spatial
+import patiroha
 from umap import UMAP
 import hdbscan
 from wordcloud import WordCloud
@@ -28,7 +29,7 @@ import matplotlib.font_manager as fm
 warnings.filterwarnings('ignore')
 
 # ページ設定
-st.set_page_config(page_title="APOLLO | EAGLE", page_icon="🦅", layout="wide")
+st.set_page_config(page_title="APOLLO CAPCOM | EAGLE", page_icon="🦅", layout="wide")
 
 st.session_state['current_page'] = 'EAGLE'
 
@@ -43,12 +44,8 @@ if FONT_PATH:
 # サイドバー
 utils.render_sidebar()
 
-# テーマ設定
-theme_config = utils.get_theme_config("APOLLO Standard")
-st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
-
 st.title("🦅 EAGLE")
-st.markdown("**Explorer of Aggregated Global Landscapes & Elevations**：SBERT（文脈・意味）に基づいた、インタラクティブな技術マップ分析モジュールです。")
+st.markdown("投げ縄ツールで技術マップ上の任意の領域を手動選択し、独自のクラスタを構築・分析します。")
 
 # ==================================================================
 # --- テキスト処理設定 ---
@@ -61,7 +58,7 @@ t = load_tokenizer_eagle()
 if "stopwords" in st.session_state and st.session_state["stopwords"]:
     stopwords = st.session_state["stopwords"]
 else:
-    stopwords = utils.get_stopwords()
+    stopwords = patiroha.get_stopwords()
 
 _ngram_rows = [
     ("参照符号付き要素", r"[一-龥ぁ-んァ-ンA-Za-z0-9／\-＋・]+?(?:部|層|面|体|板|孔|溝|片|部材|要素|機構|装置|手段|電極|端子|領域|基板|回路|材料|工程)\s*[（(]\s*[0-9０-９A-Za-z]+[A-Za-z]?\s*[）)]", "regex", 1),
@@ -133,7 +130,7 @@ def extract_compound_nouns(text, stopwords_list):
         words.append(compound_word)
     return words
 
-def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
+def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_key=None):
     if not words: return None
     word_freq = Counter(words)
     try:
@@ -148,6 +145,39 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
         ax.set_title(title, fontsize=20)
         ax.axis('off')
         st.pyplot(fig)
+
+        # CAPCOM: ワードクラウドデータ保存
+        if capcom_key:
+            try:
+                import capcom
+                if capcom.is_active():
+                    import io
+                    wc_data = {
+                        "metadata": {"module": "EAGLE", "title": title, "top_n": top_n},
+                        "word_frequencies": {w: c for w, c in word_freq.most_common(100)}
+                    }
+                    capcom.save_data(f"{capcom_key}_wordcloud.json", wc_data)
+                    buf = io.BytesIO()
+                    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+                    buf.seek(0)
+                    capcom.save_snapshot_image(f"{capcom_key}_wordcloud", buf.read())
+            except Exception:
+                pass
+
+        # VOYAGERスナップショットボタン
+        if capcom_key:
+            utils.render_snapshot_button(
+                title=f"ワードクラウド: {title}",
+                description=f"TF-IDFワードクラウド（上位{top_n}語）",
+                key=f"{capcom_key}_wordcloud",
+                fig=fig,
+                data_summary={
+                    "module": "EAGLE",
+                    "type": "wordcloud",
+                    "title": title,
+                    "top_words": [{"word": w, "freq": c} for w, c in word_freq.most_common(top_n)]
+                }
+            )
     except Exception as e:
         st.error(f"ワードクラウドの描画に失敗しました: {e}")
 
@@ -252,18 +282,24 @@ if 'characteristic_words' not in st.session_state.df_eagle.columns:
 if 'hover_text' not in st.session_state.df_eagle.columns or 'characteristic_words' not in st.session_state.df_eagle['hover_text'].iloc[0]:
     st.session_state.df_eagle['hover_text'] = update_hover_text_eagle(st.session_state.df_eagle, col_map)
 
-# ヘルパー: ラベル生成
+# ヘルパー: ラベル生成（単一クラスタ用、投げ縄選択時に使用）
 def generate_label_for_cluster(df_sub, tfidf_mat, feat_names, top_n=3):
-    if df_sub.empty: return "Empty"
-    indices = df_sub.index
-    vecs = tfidf_mat[indices]
-    mean_vec = np.array(vecs.mean(axis=0)).flatten()
-    top_indices = np.argsort(mean_vec)[::-1][:top_n]
-    return ", ".join([feat_names[i] for i in top_indices])
+    """単一クラスタのラベルを生成する。patiroha.auto_labelのc-TF-IDFと同等。"""
+    if df_sub.empty:
+        return "Empty"
+    texts = (df_sub[col_map.get('title', '')].fillna('') + ' ' +
+             df_sub[col_map.get('abstract', '')].fillna(''))
+    # 全件を同一クラスタ(0)として扱い、c-TF-IDFでラベル生成
+    import numpy as np
+    dummy_labels = np.zeros(len(df_sub), dtype=int)
+    label_map = patiroha.auto_label(texts, dummy_labels, method='c-tfidf', top_n=top_n)
+    # "[0] term1, term2, term3" から "[0] " を除去して返す
+    raw = label_map.get(0, "Empty")
+    return raw.split("] ", 1)[-1] if "] " in raw else raw
 
 # ヘルパー: Utilsを使用してレイアウト更新
 def update_fig_eagle(fig, title, show_legend=False):
-    utils.update_fig_layout(fig, title, height=1000, theme_config=theme_config, show_axes=False, show_legend=show_legend)
+    utils.update_fig_layout(fig, title, height=1000, show_axes=False, show_legend=show_legend)
     fig.update_xaxes(visible=False)
     fig.update_yaxes(visible=False)
     if not show_legend:
@@ -419,7 +455,7 @@ if not df_ghost.empty:
 
 # 3. フォーカスポイント (クラスタリング対象)
 uniq = sorted(df_focus['eagle_cluster'].unique())
-color_seq = theme_config["color_sequence"]
+color_seq = utils.APOLLO_COLORS
 
 is_applicant_filtered = "ALL" not in selected_apps
 
@@ -540,6 +576,13 @@ if is_editing:
                 sub_df = st.session_state.df_eagle.loc[selected_indices]
                 lbl = generate_label_for_cluster(sub_df, tfidf_matrix, feature_names)
                 st.session_state.eagle_labels_map[new_id] = f"[{new_id}] {lbl}"
+                # CAPCOM: patents.csvにeagle_cluster列を更新
+                try:
+                    import capcom
+                    if capcom.is_active():
+                        capcom.save_patents_csv()
+                except Exception:
+                    pass
                 st.success(f"ID {new_id} を作成しました！")
                 st.rerun()
 
@@ -556,6 +599,13 @@ if is_editing:
                 st.session_state.df_eagle.loc[st.session_state.df_eagle['eagle_cluster'] == del_target_id, 'eagle_cluster'] = -1
                 if del_target_id in st.session_state.eagle_labels_map:
                     del st.session_state.eagle_labels_map[del_target_id]
+                # CAPCOM: patents.csvにeagle_cluster列を更新
+                try:
+                    import capcom
+                    if capcom.is_active():
+                        capcom.save_patents_csv()
+                except Exception:
+                    pass
                 st.success(f"ID {del_target_id} を削除しました")
                 st.rerun()
 
@@ -642,12 +692,76 @@ else:
 
 
 
+    # --- Snapshot: メインランドスケープ ---
+    utils.render_snapshot_button(
+        title="EAGLE: メインランドスケープ",
+        description="SBERT+UMAPによる技術ランドスケープ（手動クラスタリング）。",
+        key="eagle_main_snap",
+        fig=fig_lasso,
+        data_summary=snap_data
+    )
+
     main_prompt = utils_ai.generate_ai_insight_prompt(
         insight_role, insight_context, snap_data, insight_instruction,
         extra_content=f"\n# 空間配置情報 (Spatial Context)\n{spatial_info}"
     )
     utils_ai.render_ai_insight_button(main_prompt, "eagle_main_insight")
 
+    # CAPCOM data/ JSON出力（EAGLE クラスタ）
+    try:
+        import capcom
+        if capcom.is_active():
+            eagle_clusters_json = []
+            cluster_counts_eagle = df_focus['eagle_cluster'].value_counts()
+            for cid in sorted(df_focus['eagle_cluster'].unique()):
+                if cid == -1:
+                    continue
+                label = st.session_state.eagle_labels_map.get(cid, f"Cluster {cid}")
+                count = int(cluster_counts_eagle.get(cid, 0))
+                cid_mask = df_focus['eagle_cluster'] == cid
+                cx = float(df_focus.loc[cid_mask, 'umap_x'].mean()) if cid_mask.any() else 0
+                cy = float(df_focus.loc[cid_mask, 'umap_y'].mean()) if cid_mask.any() else 0
+                reps_raw = cluster_reps.get(cid, []) if 'cluster_reps' in dir() and cid in cluster_reps else []
+                eagle_clusters_json.append({
+                    "cluster_id": int(cid),
+                    "label": label,
+                    "count": count,
+                    "centroid": [round(cx, 4), round(cy, 4)],
+                    "representative_patents": reps_raw
+                })
+            noise_count = int((df_focus['eagle_cluster'] == -1).sum()) if -1 in df_focus['eagle_cluster'].values else 0
+            eagle_json = {
+                "metadata": {
+                    "module": "EAGLE",
+                    "mode": "manual_lasso",
+                    "n_clusters": len(eagle_clusters_json),
+                    "noise_count": noise_count,
+                    "total_patents": len(df_focus)
+                },
+                "clusters": eagle_clusters_json,
+                "spatial_context": spatial_info if 'spatial_info' in dir() else ""
+            }
+            capcom.save_data("eagle_clusters.json", eagle_json)
+    except Exception as e:
+        pass
+
+    # --- クラスタ動態マップ ---
+    if 'eagle_cluster' in df_focus.columns and 'year' in df_focus.columns:
+        eagle_labels = st.session_state.get('eagle_labels_map', {})
+        if eagle_labels and df_focus['eagle_cluster'].nunique() > 1:
+            dyn_data = utils.render_cluster_dynamics_section(
+                df_focus, 'eagle_cluster', eagle_labels,
+                year_col='year', cagr_window=5,
+                unique_key='eagle_dynamics',
+                module_name='EAGLE',
+            )
+            if dyn_data:
+                try:
+                    import capcom
+                    if capcom.is_active():
+                        capcom.save_data('eagle_cluster_dynamics', {'cluster_dynamics': dyn_data})
+                except Exception:
+                    pass
 
 # --- ラベルエディタ ---
 st.markdown("---")
@@ -807,19 +921,18 @@ if drilldown_target_id != "NONE":
                         df_subset['drill_cluster'] = -1
                         drill_labels_map[-1] = "未分類"
 
-                    # Generate labels for Auto mode or Initial state
+                    # patiroha.auto_label で c-TF-IDF ラベリング（EAGLEドリルダウン）
                     if drill_method == "自動 (HDBSCAN)":
-                        for cid in sorted(df_subset['drill_cluster'].unique()):
-                            if cid == -1:
-                                drill_labels_map[cid] = "ノイズ"
-                                continue
-                            idxs = df_subset[df_subset['drill_cluster'] == cid].index
-                            tfidf_pos = [subset_indices_pd.get_loc(i) for i in idxs if i in subset_indices_pd]
-                            if tfidf_pos:
-                                mean_vec = np.array(subset_tfidf[tfidf_pos].mean(axis=0)).flatten()
-                                top_idx = np.argsort(mean_vec)[::-1][:int(drill_label_top_n_w)]
-                                label = ", ".join([feature_names[i] for i in top_idx])
-                                drill_labels_map[cid] = f"[{cid}] {label}"
+                        drill_texts = (
+                            df_subset[col_map['title']].fillna('') + ' ' +
+                            df_subset[col_map['abstract']].fillna('')
+                        )
+                        drill_labels_map = patiroha.auto_label(
+                            drill_texts,
+                            df_subset['drill_cluster'].values,
+                            method='c-tfidf',
+                            top_n=int(drill_label_top_n_w),
+                        )
                     
                     df_subset['drill_cluster_label'] = df_subset['drill_cluster'].map(drill_labels_map)
                     
@@ -883,7 +996,7 @@ if drilldown_target_id != "NONE":
                 fig_drill.add_trace(go.Histogram2dContour(**contour_d))
                 
             if drill_map_mode == "クラスタ領域 (Clusters)":
-                color_sequence = theme_config["color_sequence"]
+                color_sequence = utils.APOLLO_COLORS
                 unique_clusters_d = sorted(df_drill_plot['drill_cluster'].unique())
                 for i, cid in enumerate(unique_clusters_d):
                     if cid == -1: continue
@@ -909,7 +1022,7 @@ if drilldown_target_id != "NONE":
             # Lasso in Plotly returns selected points indices. 
             
             uniq_d = sorted(df_drill_plot['drill_cluster'].unique())
-            color_sequence = theme_config["color_sequence"]
+            color_sequence = utils.APOLLO_COLORS
             
             for i, cid in enumerate(uniq_d):
                  d_sub = df_drill_plot[df_drill_plot['drill_cluster'] == cid]
@@ -927,7 +1040,7 @@ if drilldown_target_id != "NONE":
 
             annotations_drill = []
             if drill_show_labels_chk:
-                color_sequence = theme_config["color_sequence"]
+                color_sequence = utils.APOLLO_COLORS
                 sorted_unique_cids_d = sorted(df_drill_plot['drill_cluster'].unique())
                 
                 for cid, grp in df_drill_plot[df_drill_plot['drill_cluster'] != -1].groupby('drill_cluster'):
@@ -943,7 +1056,7 @@ if drilldown_target_id != "NONE":
                         bgcolor='rgba(255,255,255,0.8)', bordercolor=border_color, borderwidth=2, borderpad=4
                     ))
             fig_drill.update_layout(annotations=annotations_drill)
-            utils.update_fig_layout(fig_drill, f'EAGLE 詳細: {st.session_state.eagle_drill_base_label}', height=1000, theme_config=theme_config)
+            utils.update_fig_layout(fig_drill, f'EAGLE 詳細: {st.session_state.eagle_drill_base_label}', height=1000)
             fig_drill.update_layout(dragmode='lasso', clickmode='event+select', showlegend=False) # Enable Lasso
             
             selection_drill = st.plotly_chart(fig_drill, use_container_width=True, on_select="rerun", config={'editable': False})
@@ -1007,13 +1120,22 @@ if drilldown_target_id != "NONE":
 
 
 
+            # --- Snapshot: ドリルダウンマップ ---
+            utils.render_snapshot_button(
+                title="EAGLE: ドリルダウンマップ",
+                description="選択クラスタの詳細分析マップ（サブクラスタリング）。",
+                key="eagle_drill_snap",
+                fig=fig_drill,
+                data_summary=snap_data_d
+            )
+
             drill_prompt = utils_ai.generate_ai_insight_prompt(
                 drill_insight_role, drill_insight_context, snap_data_d, drill_insight_instruction,
                 extra_content=f"\n# 空間配置情報 (Spatial Context)\n{d_spatial_info}"
             )
             utils_ai.render_ai_insight_button(drill_prompt, "eagle_drill_insight")
 
-            
+
             # --- Manual Lasso Logic for Drill-down ---
             s_indices_d = []
             if selection_drill and "selection" in selection_drill:
@@ -1032,20 +1154,10 @@ if drilldown_target_id != "NONE":
                     if st.button("選択範囲を新規サブクラスタにする", key="eagle_drill_apply_lasso"):
                         st.session_state.eagle_drilldown_result.loc[s_indices_d, 'drill_cluster'] = new_id_d
                         
-                        # Generate Label
-                        # Need original tfidf/sbert context. We have 'df_drill' but need 'tfidf_matrix' indices.
-                        # s_indices_d contains original dataframe indices (df_eagle indices)
+                        # c-TF-IDF でサブクラスタのラベルを生成
                         sub_df_d = st.session_state.eagle_drilldown_result.loc[s_indices_d]
-                        subset_indices_pd = pd.Index(st.session_state.eagle_drilldown_result.index)
-                        
-                        # We need global TFIDF indices
-                        tfidf_pos = [df_main.index.get_loc(i) for i in s_indices_d if i in df_main.index]
-                        
-                        if tfidf_pos:
-                            mean_vec = np.array(tfidf_matrix[tfidf_pos].mean(axis=0)).flatten()
-                            top_idx = np.argsort(mean_vec)[::-1][:3] # Default top 3
-                            lbl = ", ".join([feature_names[i] for i in top_idx])
-                            st.session_state.eagle_drill_labels_map[new_id_d] = f"[{new_id_d}] {lbl}"
+                        lbl = generate_label_for_cluster(sub_df_d, tfidf_matrix, feature_names, top_n=3)
+                        st.session_state.eagle_drill_labels_map[new_id_d] = f"[{new_id_d}] {lbl}"
                         
                         # Update labels map and column
                         st.session_state.eagle_drilldown_result['drill_cluster_label'] = st.session_state.eagle_drilldown_result['drill_cluster'].map(st.session_state.eagle_drill_labels_map)
@@ -1070,8 +1182,8 @@ if drilldown_target_id != "NONE":
             st.subheader("クラスタ・テキスト分析 (Text Mining)")
             col_tm1, col_tm2 = st.columns(2)
             with col_tm1:
-                cooc_top_n = st.slider("共起: 上位単語数", 30, 100, 50, key="eagle_cooc_top_n")
-                cooc_threshold = st.slider("共起: Jaccard係数 閾値", 0.01, 0.3, 0.05, 0.01, key="eagle_cooc_threshold")
+                cooc_top_n = st.slider("共起: 上位単語数", 30, 100, 70, key="eagle_cooc_top_n")
+                cooc_threshold = st.slider("共起: Jaccard係数 閾値", 0.01, 0.3, 0.03, 0.01, key="eagle_cooc_threshold")
             
             if st.button("テキスト分析を実行", key="eagle_run_text_mining"):
                 with st.spinner("分析中..."):
@@ -1084,7 +1196,7 @@ if drilldown_target_id != "NONE":
                     if not words: st.warning("有効なキーワードなし")
                     else:
                         st.markdown("##### 1. ワードクラウド")
-                        generate_wordcloud_and_list(words, f"クラスタ: {st.session_state.eagle_drill_base_label}", 30, FONT_PATH)
+                        generate_wordcloud_and_list(words, f"クラスタ: {st.session_state.eagle_drill_base_label}", 30, FONT_PATH, capcom_key="eagle_drill")
                         
                         st.markdown("##### 2. 共起ネットワーク")
                         word_freq = Counter(words)
@@ -1127,7 +1239,7 @@ if drilldown_target_id != "NONE":
                                 marker=dict(showscale=True, colorscale='YlGnBu', size=node_size, color=node_size, line_width=2)
                             )
                             fig_net = go.Figure(data=[edge_trace, node_trace], layout=go.Layout(title='共起ネットワーク', showlegend=False, hovermode='closest', margin=dict(b=20,l=5,r=5,t=40), xaxis=dict(showgrid=False, zeroline=False, showticklabels=False), yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
-                            utils.update_fig_layout(fig_net, '共起ネットワーク', theme_config=theme_config, show_axes=False)
+                            utils.update_fig_layout(fig_net, '共起ネットワーク', show_axes=False)
                             fig_net.update_xaxes(visible=False); fig_net.update_yaxes(visible=False)
                             st.plotly_chart(fig_net, use_container_width=True)
                             
@@ -1190,14 +1302,14 @@ if drilldown_target_id != "NONE":
                 if df_s.empty: st.warning("データなし")
                 else:
                     yc = df_s['year'].value_counts().sort_index().reindex(range(s_year, e_year+1), fill_value=0)
-                    fig1 = px.bar(x=yc.index, y=yc.values, labels={'x':'年', 'y':'件数'}, color_discrete_sequence=[theme_config["color_sequence"][0]])
-                    utils.update_fig_layout(fig1, '出願推移', theme_config=theme_config, show_axes=True)
+                    fig1 = px.bar(x=yc.index, y=yc.values, labels={'x':'年', 'y':'件数'}, color_discrete_sequence=[utils.APOLLO_COLORS[0]])
+                    utils.update_fig_layout(fig1, '出願推移', show_axes=True)
                     st.plotly_chart(fig1, use_container_width=True)
                     
                     if 'applicant_main' in df_s.columns:
                         ac = df_s['applicant_main'].explode().value_counts().head(n_apps).sort_values(ascending=True)
-                        fig2 = px.bar(x=ac.values, y=ac.index, orientation='h', labels={'x':'件数', 'y':'出願人'}, color_discrete_sequence=[theme_config["color_sequence"][1]])
-                        utils.update_fig_layout(fig2, '出願人ランキング', height=max(600, len(ac)*30), theme_config=theme_config, show_axes=True)
+                        fig2 = px.bar(x=ac.values, y=ac.index, orientation='h', labels={'x':'件数', 'y':'出願人'}, color_discrete_sequence=[utils.APOLLO_COLORS[1]])
+                        utils.update_fig_layout(fig2, '出願人ランキング', height=max(600, len(ac)*30), show_axes=True)
                         st.plotly_chart(fig2, use_container_width=True)
 
         with tab_drill_export:

@@ -15,12 +15,14 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import euclidean_distances
 import utils
+import utils_ai
+import patiroha
 
 # ==================================================================
 # --- 1. ページ設定 ---
 # ==================================================================
 st.set_page_config(
-    page_title="APOLLO | CORE", 
+    page_title="APOLLO CAPCOM | CORE", 
     page_icon="💡", 
     layout="wide"
 )
@@ -47,7 +49,7 @@ t = load_tokenizer_core()
 if "stopwords" in st.session_state and st.session_state["stopwords"]:
     STOP_WORDS = st.session_state["stopwords"]
 else:
-    STOP_WORDS = utils.get_stopwords()
+    STOP_WORDS = patiroha.get_stopwords()
 
 @st.cache_data
 def _core_text_preprocessor(text):
@@ -181,14 +183,9 @@ class CoreLogicParser:
 
     def to_regex_string(self, node):
         # Helper to convert a Node back to regex string if it contains only OR/Literal
-        if isinstance(node, RegexNode): 
-            # Pattern inside RegexNode is already compiled or string? 
-            # In our class, it's compiled. We need the source string. 
-            # Implementation trick: Store source pattern in RegexNode
+        if isinstance(node, RegexNode):
             if hasattr(node, 'pattern') and node.pattern: return node.pattern.pattern
-            # If it was constructed blindly? 
-            # Let's modifying RegexNode to store source.
-            return "" 
+            return ""
         if isinstance(node, OrNode):
             parts = [self.to_regex_string(c) for c in node.children]
             return r'(?:' + '|'.join(parts) + r')'
@@ -196,7 +193,6 @@ class CoreLogicParser:
              raise ValueError("Cannot use AND (*) inside a NEAR/ADJ condition. Use OR (+) only.")
         return ""
 
-# Patch RegexNode to store source for recursion
 class RegexNode(LogicNode):
     def __init__(self, pattern): 
         self.source = pattern
@@ -210,7 +206,6 @@ def parse_core_rule(rule_str):
         parser = CoreLogicParser()
         return parser.parse(rule_str)
     except Exception as e:
-        # st.error(f"Rule Parse Error: {e}") # Suppress during cache
         return None
 
 @st.cache_data
@@ -237,13 +232,7 @@ def convert_df_to_csv_core(df): return df.to_csv(encoding='utf-8-sig').encode('u
 utils.render_sidebar()
 
 st.title("💡 CORE")
-st.markdown("Contextual Operator & Rule Engine: **論理式ベースの特許分類ツール**です。")
-
-col_theme, _ = st.columns([1, 3])
-with col_theme:
-    selected_theme = st.selectbox("表示テーマ:", ["APOLLO Standard", "Modern Presentation"], key="core_theme_selector")
-theme_config = utils.get_theme_config(selected_theme)
-st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
+st.markdown("AND/OR/NEAR/ADJ論理式で特許を分類し、分類軸間のクロス集計で技術ポートフォリオの構造を明らかにします。")
 
 if not st.session_state.get("preprocess_done", False):
     st.error("分析データがありません。"); st.stop()
@@ -522,7 +511,15 @@ elif current_phase.startswith("フェーズ 3"):
                     
                     csv_core = convert_df_to_csv_core(df_res)
                     st.download_button("分類結果CSVをダウンロード", csv_core, "CORE_classified.csv", "text/csv")
-                    
+
+                    # CAPCOM: patents.csv更新（CORE分類列を追加）
+                    try:
+                        import capcom
+                        if capcom.is_active():
+                            capcom.save_patents_csv()
+                    except Exception:
+                        pass
+
                 except Exception as e: st.error(f"エラー: {e}")
 
     st.markdown("---")
@@ -605,7 +602,7 @@ elif current_phase.startswith("フェーズ 3"):
 """
                             st.session_state.core_reanalyze_result = p_re
                 except Exception as e: st.error(f"エラー: {e}")
-        
+
         if st.session_state.core_reanalyze_result:
             st.success("再分析プロンプトを生成しました。"); st.code(st.session_state.core_reanalyze_result, language='markdown')
 
@@ -767,7 +764,7 @@ elif current_phase.startswith("フェーズ 4"):
                         ct_long = ct_final.reset_index().melt(id_vars='Y', var_name='X', value_name='Count')
                         ct_long = ct_long[ct_long['Count'] > 0] 
                         
-                        atlas_colors = theme_config["color_sequence"]
+                        atlas_colors = utils.APOLLO_COLORS
                         
                         fig = px.scatter(
                             ct_long, x='X', y='Y', size='Count', color='Y',
@@ -814,7 +811,6 @@ elif current_phase.startswith("フェーズ 4"):
                          note = ""
 
                     # Construct Data Summary for VOYAGER
-                    # Construct Data Summary for VOYAGER
                     snap_data = {
                         'module': 'CORE',
                         'type': 'matrix',
@@ -831,14 +827,88 @@ elif current_phase.startswith("フェーズ 4"):
                     utils.render_snapshot_button(
                         title=f"CORE Map ({selected_app_label}): {x_ax} vs {y_ax}",
                         description=f"COREマトリクス分析: {x_ax} (X) × {y_ax} (Y)。対象: {selected_app_label}。",
-                        key=f"core_snap_{x_ax}_{y_ax}_{selected_app_label}", 
+                        key=f"core_snap_{x_ax}_{y_ax}_{selected_app_label}",
                         fig=fig,
                         data_summary=snap_data
                     )
 
+                    # --- AI Insight: 分類結果の戦略的解釈 ---
+                    _meta_core = utils_ai.build_common_metadata(df_main=df_main, df_filtered=df_c, col_map=col_map)
+                    _meta_core['分析対象'] = selected_app_label
+                    _meta_core['X軸'] = x_ax
+                    _meta_core['Y軸'] = y_ax
+                    _meta_core['グラフタイプ'] = chart_type
+                    _meta_core['マトリクスサイズ'] = f"{ct_final.shape[0]}行 × {ct_final.shape[1]}列"
+                    _meta_core['合計件数'] = int(ct_final.sum().sum())
+                    # 分類ルール一覧
+                    _rules_info = {}
+                    for _ax_name, _ax_rules in st.session_state.core_classification_rules.items():
+                        _rules_info[_ax_name] = {cat: d.get('rule', '') for cat, d in _ax_rules.items()}
+                    _meta_core['分類ルール'] = _rules_info
+                    # 各カテゴリのヒット件数
+                    for _ax_name in [x_ax, y_ax]:
+                        if _ax_name in st.session_state.core_classification_rules:
+                            _cat_counts = ct_final.sum(axis=1 if _ax_name == y_ax else 0).to_dict()
+                            _meta_core[f'{_ax_name}別件数'] = {str(k): int(v) for k, v in _cat_counts.items()}
+
+                    _core_prompt = utils_ai.generate_ai_insight_prompt(
+                        role="特許分類・技術戦略の専門家として、ルールベース分類によるクロス集計結果を戦略的に分析してください。",
+                        context=f"""\
+{chart_type}によるクロス集計マトリクスを表示しています。
+- X軸: {x_ax}
+- Y軸: {y_ax}
+- 対象: {selected_app_label}
+各セルの値は該当する特許の件数を示します。""",
+                        data_summary=matrix_csv,
+                        instructions="""\
+以下の観点で分析してください:
+1. **注力領域**: 件数の集中パターンから、注力している技術-課題の組み合わせを特定
+2. **空白領域**: 件数がゼロまたは少ないセルの意味（未開拓 or 不要な組み合わせ）
+3. **バランス**: 分類間の件数のばらつきと「その他」比率の評価
+4. **競合比較示唆**: 出願人別分析の場合、各社の技術ポートフォリオ特性の違い
+5. **戦略提言**: データから導かれる研究開発・知財戦略の方向性
+
+各主張には必ず具体的な数値を1つ以上含めてください。""",
+                        metadata=_meta_core,
+                        constraints="分類ルールの定義（論理式）を考慮し、カテゴリの意味を正確に理解した上で分析すること。",
+                        output_format="Markdown形式。見出し付きの構造化された分析レポート。"
+                    )
+                    utils_ai.render_ai_insight_button(_core_prompt, f"core_matrix_insight_{x_ax}_{y_ax}_{selected_app_label}")
 
 
                 render_core_chart(df_target, "main_display")
+
+                # CAPCOM data/ JSON出力（CORE分類結果）
+                try:
+                    import capcom
+                    if capcom.is_active():
+                        # ルール情報の構造化
+                        rules_json = {}
+                        for ax_name, ax_cats in st.session_state.core_classification_rules.items():
+                            rules_json[ax_name] = {}
+                            for cat_name, cat_info in ax_cats.items():
+                                rules_json[ax_name][cat_name] = {
+                                    "rule": cat_info.get('rule', ''),
+                                    "definition": cat_info.get('definition', ''),
+                                    "count": int((df_c[ax_name] == cat_name).sum()) if ax_name in df_c.columns else 0
+                                }
+                            # 「その他」カテゴリの件数
+                            if ax_name in df_c.columns:
+                                other_count = int((df_c[ax_name] == 'その他').sum())
+                                if other_count > 0:
+                                    rules_json[ax_name]['その他'] = {"rule": "(未分類)", "definition": "いずれのルールにもマッチしなかった特許", "count": other_count}
+
+                        core_json = {
+                            "metadata": {
+                                "module": "CORE",
+                                "total_patents": len(df_c),
+                                "axes": list(rules_json.keys())
+                            },
+                            "rules": rules_json
+                        }
+                        capcom.save_data("core_classification.json", core_json)
+                except Exception as e:
+                    pass
 
         # CSVダウンロード
         st.markdown("---")

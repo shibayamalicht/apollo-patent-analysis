@@ -19,9 +19,10 @@ import networkx as nx
 from networkx.algorithms import community
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
-import japanize_matplotlib
 import utils
 import utils_ai
+import patiroha
+utils.configure_matplotlib_font()
 
 # ==================================================================
 # --- 1. 設定・ヘルパー関数 ---
@@ -29,7 +30,7 @@ import utils_ai
 warnings.filterwarnings('ignore')
 
 st.set_page_config(
-    page_title="APOLLO | Explorer",
+    page_title="APOLLO CAPCOM | Explorer",
     page_icon="🧭",
     layout="wide"
 )
@@ -50,23 +51,21 @@ if FONT_PATH:
 
 
 
-def update_fig_layout(fig, title, height=600, theme_config=None, show_legend=True):
-    if theme_config:
-        # タイトルのサニタイズ
-        if isinstance(title, str):
-            title = re.sub(r'<[^>]+>', '', title)
+def update_fig_layout(fig, title, height=600, show_legend=True):
+    if isinstance(title, str):
+        title = re.sub(r'<[^>]+>', '', title)
 
-        layout_params = dict(
-            template=theme_config["plotly_template"],
-            title=dict(text=title, font=dict(size=18, color=theme_config["text_color"], weight="normal")),
-            paper_bgcolor=theme_config["bg_color"], plot_bgcolor=theme_config["bg_color"],
-            font=dict(color=theme_config["text_color"], family="Helvetica Neue"),
-            height=height, margin=dict(l=20, r=20, t=60, b=20)
-        )
-        if not show_legend:
-            layout_params['showlegend'] = False
-            
-        fig.update_layout(**layout_params)
+    layout_params = dict(
+        template=utils.APOLLO_TEMPLATE,
+        title=dict(text=title, font=dict(size=18, color=utils.APOLLO_TEXT, weight="normal")),
+        paper_bgcolor=utils.APOLLO_BG, plot_bgcolor=utils.APOLLO_BG,
+        font=dict(color=utils.APOLLO_TEXT, family="Helvetica Neue"),
+        height=height, margin=dict(l=20, r=20, t=60, b=20)
+    )
+    if not show_legend:
+        layout_params['showlegend'] = False
+
+    fig.update_layout(**layout_params)
     return fig
 
 # ==================================================================
@@ -79,7 +78,7 @@ t = load_tokenizer_explorer()
 if "stopwords" in st.session_state and st.session_state["stopwords"]:
     stopwords = st.session_state["stopwords"]
 else:
-    stopwords = utils.get_stopwords()
+    stopwords = patiroha.get_stopwords()
 
 _ngram_rows = [
     ("参照符号付き要素", r"[一-龥ぁ-んァ-ンA-Za-z0-9／\-＋・]+?(?:部|層|面|体|板|孔|溝|片|部材|要素|機構|装置|手段|電極|端子|領域|基板|回路|材料|工程)\s*[（(]\s*[0-9０-９A-Za-z]+[A-Za-z]?\s*[）)]", "regex", 1),
@@ -126,7 +125,7 @@ def apply_ngram_filters(text):
 
 
 
-def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
+def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_key=None):
     if not words: return None
     word_freq = Counter(words)
     try:
@@ -141,6 +140,37 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
         ax.set_title(title, fontsize=20)
         ax.axis('off')
         st.pyplot(fig)
+
+        if capcom_key:
+            try:
+                import capcom
+                if capcom.is_active():
+                    import io
+                    wc_data = {
+                        "metadata": {"module": "Explorer", "title": title, "top_n": top_n},
+                        "word_frequencies": {w: c for w, c in word_freq.most_common(100)}
+                    }
+                    capcom.save_data(f"{capcom_key}_wordcloud.json", wc_data)
+                    buf = io.BytesIO()
+                    fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+                    buf.seek(0)
+                    capcom.save_snapshot_image(f"{capcom_key}_wordcloud", buf.read())
+            except Exception:
+                pass
+
+        if capcom_key:
+            utils.render_snapshot_button(
+                title=f"ワードクラウド: {title}",
+                description=f"TF-IDFワードクラウド（上位{top_n}語）",
+                key=f"{capcom_key}_wordcloud",
+                fig=fig,
+                data_summary={
+                    "module": "Explorer",
+                    "type": "wordcloud",
+                    "title": title,
+                    "top_words": [{"word": w, "freq": c} for w, c in word_freq.most_common(top_n)]
+                }
+            )
     except Exception as e:
         st.error(f"ワードクラウドの描画に失敗しました: {e}")
 
@@ -151,18 +181,12 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None):
 utils.render_sidebar()
 
 st.title("🧭 Explorer")
+st.markdown("キーワード共起ネットワーク・急上昇トレンド・競合比較トルネードチャートで、技術キーワードの戦略的ポジションを分析します。")
 st.markdown("""
 Explorer (戦略的キーワード探索) は、特許文書内の専門用語を抽出し、市場全体のトレンド変遷や競合他社との戦略的差異を多角的に分析するモジュールです。
 急上昇ワードの特定、時系列での技術推移、そして企業間のポジショニング比較を通じて、次の一手となるインサイトを発掘します。
 """)
 
-col_theme, _ = st.columns([1, 3])
-with col_theme:
-    selected_theme = st.selectbox("表示テーマ:", ["APOLLO Standard", "Modern Presentation"], key="exp_theme")
-theme_config = utils.get_theme_config(selected_theme)
-st.markdown(f"<style>{theme_config['css']}</style>", unsafe_allow_html=True)
-
-# データロード
 if not st.session_state.get("preprocess_done", False):
     st.error("分析データがありません。Mission Controlでデータをロードしてください。"); st.stop()
 
@@ -170,7 +194,6 @@ df_main = st.session_state.df_main
 col_map = st.session_state.col_map
 delimiters = st.session_state.delimiters
 
-# 出願人リスト生成
 app_counts = pd.Series()
 if col_map['applicant'] in df_main.columns:
     if 'applicant_main' in df_main.columns:
@@ -183,21 +206,18 @@ if col_map['applicant'] in df_main.columns:
 sorted_applicants = app_counts.index.tolist()
 app_count_dict = app_counts.to_dict()
 
-# 前処理 (Home.pyで作成された 'explorer_keywords' を使用。存在しない場合のみ計算)
 target_col_keywords = 'explorer_keywords'
 if target_col_keywords not in df_main.columns:
     with st.spinner("Explorer: テキスト解析とキーワード抽出を実行中..."):
         df_main['explorer_text'] = df_main[col_map['title']].fillna('') + ' ' + df_main[col_map['abstract']].fillna('')
         df_main[target_col_keywords] = df_main['explorer_text'].apply(
-            lambda x: utils.extract_keywords(x, tokenizer=None, stopwords=stopwords)
+            lambda x: patiroha.extract_keywords(x, stopwords=stopwords)
         )
         st.session_state.df_main = df_main
 
-# explorer_textが無い場合の自己修復
 if 'explorer_text' not in df_main.columns:
     df_main['explorer_text'] = df_main[col_map['title']].fillna('') + ' ' + df_main[col_map['abstract']].fillna('')
 
-# モード選択
 selected_tab = st.radio(
     "分析モードを選択:",
     ["全体俯瞰 (Global Overview)", "トレンド分析 (Trend Analysis)", "競合比較戦略 (Comparative Strategy)", "文脈検索 (Context Search/KWIC)"],
@@ -220,36 +240,35 @@ if selected_tab == "全体俯瞰 (Global Overview)":
         st.warning("有効なキーワードがありません。")
     else:
         st.markdown("##### 1. 全体ワードクラウド")
-        generate_wordcloud_and_list(all_keywords, "全体ワードクラウド", top_n_cloud, FONT_PATH)
+        generate_wordcloud_and_list(all_keywords, "全体ワードクラウド", top_n_cloud, FONT_PATH, capcom_key="explorer_global")
 
         st.markdown("##### 2. 全体共起ネットワーク (技術クラスター)")
         col_net1, col_net2 = st.columns(2)
-        with col_net1: global_net_top_n = st.slider("抽出単語数 (Top N)", 30, 100, 60, key="global_net_n")
-        with col_net2: global_net_threshold = st.slider("共起閾値 (Jaccard)", 0.01, 0.3, 0.05, 0.01, key="global_net_th")
+        with col_net1: global_net_top_n = st.slider("抽出単語数 (Top N)", 30, 100, 70, key="global_net_n")
+        with col_net2: global_net_threshold = st.slider("共起閾値 (Jaccard)", 0.01, 0.3, 0.03, 0.01, key="global_net_th")
 
         with st.spinner("全体ネットワーク計算中..."):
             c_all = Counter(all_keywords)
             top_nodes_global = [w for w, c in c_all.most_common(global_net_top_n)]
-            pair_counts_global = Counter()
-            top_nodes_global = [w for w, c in c_all.most_common(global_net_top_n)]
+            keyword_lists_filtered = [
+                [w for w in kws if w in top_nodes_global]
+                for kws in df_main['explorer_keywords']
+            ]
+            G_global = patiroha.build_cooccurrence_graph(
+                keyword_lists_filtered,
+                top_n=global_net_top_n,
+                threshold=global_net_threshold,
+                similarity="jaccard",
+            )
             pair_counts_global = Counter()
             for kws in df_main['explorer_keywords']:
                 valid_w = [w for w in set(kws) if w in top_nodes_global]
                 if len(valid_w) >= 2:
                     for pair in combinations(sorted(valid_w), 2): pair_counts_global[pair] += 1
-            
-            G_global = nx.Graph()
-            for w in top_nodes_global: G_global.add_node(w, size=c_all[w])
-            for (u, v), c in pair_counts_global.items():
-                weight = c / (c_all[u] + c_all[v] - c)
-                if weight >= global_net_threshold: G_global.add_edge(u, v, weight=weight)
-            G_global.remove_nodes_from(list(nx.isolates(G_global)))
-            
+
             if G_global.number_of_nodes() > 0:
-                communities = community.greedy_modularity_communities(G_global)
-                community_map = {}; pos_global = nx.spring_layout(G_global, k=0.8, seed=42)
-                for i, comm in enumerate(communities):
-                    for node in comm: community_map[node] = i
+                community_map = patiroha.detect_communities(G_global, algorithm="louvain")
+                pos_global = nx.spring_layout(G_global, k=0.8, seed=42)
                 
                 edge_x, edge_y = [], []
                 for edge in G_global.edges():
@@ -271,49 +290,82 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                 )
                 fig_net_g = go.Figure(data=[edge_trace_g, node_trace_g])
                 fig_net_g.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
-                update_fig_layout(fig_net_g, "Global Co-occurrence Network", height=700, theme_config=theme_config)
+                update_fig_layout(fig_net_g, "Global Co-occurrence Network", height=700)
                 st.plotly_chart(fig_net_g, use_container_width=True, config={'editable': False})
-                
-                # --- スナップショット (全体ネットワーク) ---
-                # 1. コミュニティ構造
+
+                hub_keywords = patiroha.get_hub_keywords(G_global, centrality="degree")
+                deg_centrality = {kw: score for kw, score in hub_keywords}
+                from collections import defaultdict
+                _comm_groups = defaultdict(list)
+                for node, cid in community_map.items():
+                    _comm_groups[cid].append(node)
+
+                communities_structured = []
+                for cid in sorted(_comm_groups.keys()):
+                    members = _comm_groups[cid]
+                    hub_node = max(members, key=lambda n: deg_centrality.get(n, 0))
+                    communities_structured.append({
+                        "id": cid,
+                        "size": len(members),
+                        "members": members,
+                        "hub": hub_node,
+                        "hub_centrality": round(deg_centrality.get(hub_node, 0), 4)
+                    })
                 comm_summary = []
-                for i in range(len(communities)):
-                    comm_words = list(communities[i])[:5] 
-                    comm_summary.append(f"Group {i+1}: {', '.join(comm_words)}")
-                
-                # 2. ハブ (次数中心性)
-                deg_centrality = nx.degree_centrality(G_global)
-                sorted_hubs = sorted(deg_centrality.items(), key=lambda x: x[1], reverse=True)[:10]
-                hubs_str = ", ".join([f"{n}({val:.2f})" for n, val in sorted_hubs])
+                for cs in communities_structured:
+                    comm_summary.append(f"Group {cs['id']+1}: {', '.join(cs['members'][:5])}")
 
-                # 3. 最強エッジ
-                sorted_edges = sorted(G_global.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:10]
-                edges_str = ", ".join([f"{u}-{v}" for u, v, d in sorted_edges])
+                hubs_ranked = []
+                for node, cent in sorted(deg_centrality.items(), key=lambda x: x[1], reverse=True):
+                    hubs_ranked.append({
+                        "keyword": node,
+                        "degree_centrality": round(cent, 4),
+                        "frequency": c_all[node],
+                        "community": next((cs["id"] for cs in communities_structured if node in cs["members"]), -1)
+                    })
 
-                # リッチサマリーと統合
-                # ネットワーク文脈用のキーワード中心抽出を使用
-                top_kw_global = [w for w, c in c_all.most_common(20)] # Top 20 for scoring
+                edges_ranked = []
+                for u, v, d in sorted(G_global.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:100]:
+                    edges_ranked.append({
+                        "source": u, "target": v,
+                        "jaccard": round(d['weight'], 4),
+                        "cooccurrence_count": pair_counts_global.get(tuple(sorted([u, v])), 0)
+                    })
+
+                bridge_edges = []
+                for u, v, d in G_global.edges(data=True):
+                    cu = next((cs["id"] for cs in communities_structured if u in cs["members"]), -1)
+                    cv = next((cs["id"] for cs in communities_structured if v in cs["members"]), -1)
+                    if cu != cv and cu >= 0 and cv >= 0:
+                        bridge_edges.append({
+                            "source": u, "target": v,
+                            "communities": [cu, cv],
+                            "jaccard": round(d['weight'], 4)
+                        })
+                bridge_edges.sort(key=lambda x: x['jaccard'], reverse=True)
+
+                top_kw_global = [w for w, c in c_all.most_common(20)]
                 network_reps = utils.get_keyword_centric_representatives(df_main, top_kw_global, n_reps=10)
-                
-                # Format for summary
+
                 rep_lines = ["\n**代表的特許 (ネットワーク中心性ベース):**"]
                 for i, r in enumerate(network_reps):
                      rep_lines.append(f"{i+1}. 【{r['title']}】 ({r['applicant']}) - {r['abstract'][:80]}...")
-                
+
                 snap_data = utils.generate_rich_summary(df_main, title_col=col_map['title'], abstract_col=col_map['abstract'])
                 snap_data['module'] = 'Explorer'
                 snap_data['network_stats'] = {
                     "nodes": G_global.number_of_nodes(),
                     "edges": G_global.number_of_edges(),
-                    "communities": "; ".join(comm_summary),
-                    "hubs": hubs_str,
-                    "edges_list": edges_str
+                    "density": round(nx.density(G_global), 4),
+                    "communities": communities_structured,
+                    "communities_display": "; ".join(comm_summary),
+                    "hubs_ranked": hubs_ranked,
+                    "edges_ranked": edges_ranked,
+                    "bridge_edges": bridge_edges[:20]
                 }
-                # キーワード中心の代表特許を注入
                 if network_reps:
                     snap_data['cluster_summary'] = (snap_data.get('cluster_summary', '') + "\n".join(rep_lines))
 
-                # AIインサイト (全体) - 上部へ移動
                 insight_context_g = f"""
                 **チャートタイプ**: 全体共起ネットワーク (Explorer)
                 **対象データ**: 全データの共起頻度上位 {global_net_top_n} キーワード。
@@ -349,7 +401,6 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                     key="exp_global_snap"
                 )
 
-                # AI Insight Button
                 insight_context_g = f"""
 
                 **チャートタイプ**: 全体共起ネットワーク (Explorer)
@@ -370,6 +421,29 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                 """
                 prompt_g = utils_ai.generate_ai_insight_prompt(insight_role, insight_context_g, snap_data, insight_inst_g)
                 utils_ai.render_ai_insight_button(prompt_g, "exp_global_insight")
+
+                try:
+                    import capcom
+                    if capcom.is_active():
+                        capcom_nw_data = {
+                            "metadata": {
+                                "module": "Explorer",
+                                "mode": "global_network",
+                                "n_nodes": G_global.number_of_nodes(),
+                                "n_edges_total": G_global.number_of_edges(),
+                                "n_edges_exported": len(edges_ranked),
+                                "density": round(nx.density(G_global), 4),
+                                "top_n": global_net_top_n,
+                                "threshold": global_net_threshold
+                            },
+                            "nodes": hubs_ranked,
+                            "edges": edges_ranked,
+                            "communities": communities_structured,
+                            "bridge_edges": bridge_edges[:20]
+                        }
+                        capcom.save_data("explorer_global_network.json", capcom_nw_data)
+                except Exception as e:
+                    pass
 
             else: st.warning("条件に一致する共起関係が見つかりませんでした。")
 
@@ -404,7 +478,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
         min_year = int(df_target['year'].min())
         
         interval_years = st.slider("期間の粒度 (年)", 1, 10, 5, key="ta_interval")
-        
+
         periods = []
         c_end = current_year
         while c_end >= min_year:
@@ -413,8 +487,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
             periods.append((real_start, c_end))
             c_end -= interval_years
             if c_end < min_year: break
-        
-        # 1. 急上昇キーワード
+
         st.markdown(f"##### 1. 急上昇キーワード (Growth Rate)")
         if len(periods) > 1:
             st.caption(f"比較期間: [{periods[0][0]}-{periods[0][1]}] vs [{periods[1][0]}-{periods[1][1]}]")
@@ -436,7 +509,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
             if not df_growth.empty:
                 fig_growth = px.bar(df_growth, x="Growth Rate", y="Keyword", orientation='h', color="Growth Rate", color_continuous_scale="Reds")
                 fig_growth.update_layout(yaxis={'categoryorder':'total ascending'})
-                update_fig_layout(fig_growth, "Growth Rate Top 20", height=500, theme_config=theme_config)
+                update_fig_layout(fig_growth, "Growth Rate Top 20", height=500)
                 st.plotly_chart(fig_growth, use_container_width=True, config={'editable': False})
                 
                 utils.render_snapshot_button(
@@ -449,7 +522,6 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
         else:
             st.warning("比較対象となる過去のデータ期間が不足しています。")
 
-        # 2. 時系列マルチ・ワードクラウド
         st.markdown(f"##### 2. 時系列ワードクラウド (Time-Lapse)")
         cols = st.columns(3)
         for i, (start, end) in enumerate(periods):
@@ -458,29 +530,31 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
                 kws_p = [w for sublist in df_p['explorer_keywords'] for w in sublist]
                 st.markdown(f"**{start} - {end}** ({len(df_p)}件)")
                 if kws_p: generate_wordcloud_and_list(kws_p, f"{start}-{end}", 30, FONT_PATH)
-            
-        # 3. トレンド・ネットワーク
+
         st.markdown(f"##### 3. トレンド・共起ネットワーク (赤=急上昇 / 青=停滞)")
         col_net1, col_net2 = st.columns(2)
-        with col_net1: ta_net_n = st.slider("抽出単語数", 30, 100, 60, key="ta_net_n")
-        with col_net2: ta_net_th = st.slider("共起閾値", 0.01, 0.3, 0.05, 0.01, key="ta_net_th")
+        with col_net1: ta_net_n = st.slider("抽出単語数", 30, 100, 70, key="ta_net_n")
+        with col_net2: ta_net_th = st.slider("共起閾値", 0.01, 0.3, 0.03, 0.01, key="ta_net_th")
         
         all_target_kw = [w for sublist in df_target['explorer_keywords'] for w in sublist]
         c_all = Counter(all_target_kw)
         top_nodes = [w for w, c in c_all.most_common(ta_net_n)]
-        
+
+        keyword_lists_trend = [
+            [w for w in kws if w in top_nodes]
+            for kws in df_target['explorer_keywords']
+        ]
+        G = patiroha.build_cooccurrence_graph(
+            keyword_lists_trend,
+            top_n=ta_net_n,
+            threshold=ta_net_th,
+            similarity="jaccard",
+        )
         pair_counts = Counter()
         for kws in df_target['explorer_keywords']:
             valid_w = [w for w in set(kws) if w in top_nodes]
             if len(valid_w) >= 2:
                 for pair in combinations(sorted(valid_w), 2): pair_counts[pair] += 1
-                
-        G = nx.Graph()
-        for w in top_nodes: G.add_node(w, size=c_all[w])
-        for (u, v), c in pair_counts.items():
-            weight = c / (c_all[u] + c_all[v] - c)
-            if weight >= ta_net_th: G.add_edge(u, v, weight=weight)
-        G.remove_nodes_from(list(nx.isolates(G)))
         
         if G.number_of_nodes() > 0:
             pos = nx.spring_layout(G, k=0.8, seed=42)
@@ -511,47 +585,90 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
             )
             fig_net = go.Figure(data=[edge_trace, node_trace])
             fig_net.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
-            update_fig_layout(fig_net, "Trend Network", height=700, theme_config=theme_config)
+            update_fig_layout(fig_net, "Trend Network", height=700)
             st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
 
-            # --- スナップショット (トレンドネットワーク) ---
-            trend_summary = [f"{n}: Growth {c_rec_net.get(n,0)/(c_pst_net.get(n,0)+1):.2f}" for n in list(G.nodes())[:15]]
-            
-            # ハブとエッジ
-            deg_centrality = nx.degree_centrality(G)
-            sorted_hubs = sorted(deg_centrality.items(), key=lambda x: x[1], reverse=True)[:10]
-            hubs_str = ", ".join([f"{n}({val:.2f})" for n, val in sorted_hubs])
-            
-            sorted_edges = sorted(G.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:10]
-            edges_str = ", ".join([f"{u}-{v}" for u, v, d in sorted_edges])
+            trend_communities = patiroha.detect_communities(G, algorithm="louvain")
+            hub_keywords_trend = patiroha.get_hub_keywords(G, centrality="degree")
+            deg_centrality = {kw: score for kw, score in hub_keywords_trend}
+            trend_community_map = trend_communities
 
-            snap_data = utils.generate_rich_summary(df_target, title_col=col_map['title'], abstract_col=col_map['abstract'])
-            
-            # トレンドネットワーク用のキーワード中心抽出を使用 (成長率=赤色ノードに注目)
-            # Find nodes with high growth rate
+            period_past_str = f"{periods[1][0]}-{periods[1][1]}" if len(periods) > 1 else "N/A"
+            period_recent_str = f"{periods[0][0]}-{periods[0][1]}"
+
+            emerging_keywords = []
+            declining_keywords = []
+            for node in G.nodes():
+                past_c = c_pst_net.get(node, 0)
+                recent_c = c_rec_net.get(node, 0)
+                gr = (recent_c - past_c) / (past_c + 1)
+                entry = {
+                    "keyword": node,
+                    "growth_rate": round(gr, 3),
+                    "past_count": past_c,
+                    "recent_count": recent_c,
+                    "community": trend_community_map.get(node, -1),
+                    "degree_centrality": round(deg_centrality.get(node, 0), 4)
+                }
+                if gr >= 0:
+                    emerging_keywords.append(entry)
+                else:
+                    declining_keywords.append(entry)
+            emerging_keywords.sort(key=lambda x: x['growth_rate'], reverse=True)
+            declining_keywords.sort(key=lambda x: x['growth_rate'])
+
+            trend_edges_ranked = []
+            for u, v, d in sorted(G.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:100]:
+                trend_edges_ranked.append({
+                    "source": u, "target": v,
+                    "jaccard": round(d['weight'], 4),
+                    "cooccurrence_count": pair_counts.get(tuple(sorted([u, v])), 0)
+                })
+
+            from collections import defaultdict
+            _trend_groups = defaultdict(list)
+            for node, cid in trend_community_map.items():
+                _trend_groups[cid].append(node)
+            trend_communities_structured = []
+            for cid in sorted(_trend_groups.keys()):
+                members = _trend_groups[cid]
+                hub_node = max(members, key=lambda n: deg_centrality.get(n, 0))
+                trend_communities_structured.append({
+                    "id": cid, "size": len(members), "members": members,
+                    "hub": hub_node, "hub_centrality": round(deg_centrality.get(hub_node, 0), 4)
+                })
+
             growth_nodes = sorted([n for n in G.nodes()], key=lambda n: c_rec_net.get(n, 0) - c_pst_net.get(n, 0), reverse=True)[:15]
             trend_reps = utils.get_keyword_centric_representatives(df_target, growth_nodes, n_reps=10)
-            
+
             rep_lines_t = ["\n**代表的特許 (成長領域・キーワードベース):**"]
             for i, r in enumerate(trend_reps):
                  rep_lines_t.append(f"{i+1}. 【{r['title']}】 ({r['applicant']}) - {r['abstract'][:80]}...")
-            
+
+            snap_data = utils.generate_rich_summary(df_target, title_col=col_map['title'], abstract_col=col_map['abstract'])
             snap_data['module'] = 'Explorer'
             snap_data['network_stats'] = {
                 "nodes": G.number_of_nodes(),
                 "edges": G.number_of_edges(),
-                "hubs": hubs_str,
-                "edges_list": edges_str,
+                "density": round(nx.density(G), 4),
+                "communities": trend_communities_structured,
+                "hubs_ranked": [e for e in emerging_keywords + declining_keywords],
+                "edges_ranked": trend_edges_ranked,
                 "notes": "Nodes colored by Growth Rate (Red=High, Blue=Low)."
+            }
+            snap_data['trend_analysis'] = {
+                "period_past": period_past_str,
+                "period_recent": period_recent_str,
+                "emerging_keywords": emerging_keywords,
+                "declining_keywords": declining_keywords
             }
             if trend_reps:
                 snap_data['cluster_summary'] = (snap_data.get('cluster_summary', '') + "\n".join(rep_lines_t))
 
-             # AIインサイト (トレンド) - 上部へ移動
             insight_context_t = f"""
             **チャートタイプ**: トレンド・共起ネットワーク (成長率)
             **対象データ**: 時系列比較による急上昇キーワードを含む共起ネットワーク。
-            **手法**: 期間比較による成長率(Growth Rate)の算出。
+            **手法**: 期間比較による成長率(Growth Rate)の算出。比較期間: [{period_past_str}] vs [{period_recent_str}]
             **視覚的エンコーディング**:
             - **赤色ノード**: 高成長（萌芽）技術。
             - **青色ノード**: 低成長/減少（陳腐化）技術。
@@ -582,30 +699,35 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
                 data_summary=snap_data,
                 key="exp_trend_snap"
             )
-            
-            # AI Insight Button
-            insight_context_t = f"""
 
-            **チャートタイプ**: トレンド・共起ネットワーク (成長率)
-            **対象データ**: 時系列比較による急上昇キーワードを含む共起ネットワーク。
-            **手法**: 期間比較による成長率(Growth Rate)の算出。
-            **視覚的エンコーディング**:
-            - **赤色ノード**: 高成長（萌芽）技術。
-            - **青色ノード**: 低成長/減少（陳腐化）技術。
-            - **エッジ**: 共起関係。
-            **目的**: 技術ネットワークのどこで新しい技術が生まれているか（萌芽領域）を特定すること。
-            """
-            insight_role = "あなたは技術トレンドの専門家です。共起ネットワークから技術体系を読み解きます。"
-            insight_inst_t = """
-            ネットワーク図の成長率（Growth）情報を元に分析してください：
-            1. **萌芽技術**: 赤く表示されている（成長率が高い）キーワードは、どの技術領域（コミュニティ）に出現していますか？
-            2. **技術の陳腐化**: 青く表示されている（成長率が低い）キーワードは、どのような技術ですか？
-            3. **シフト**: 既存のハブ技術から、新しい成長技術へのシフトや融合の兆しは見えますか？
-            """
-            # Add specific network stats for prompt
-            snap_data['trend_network_summary'] = trend_summary
             prompt_t = utils_ai.generate_ai_insight_prompt(insight_role, insight_context_t, snap_data, insight_inst_t)
             utils_ai.render_ai_insight_button(prompt_t, "exp_trend_insight")
+
+            try:
+                import capcom
+                if capcom.is_active():
+                    capcom_trend_data = {
+                        "metadata": {
+                            "module": "Explorer",
+                            "mode": "trend_network",
+                            "target": target_filter,
+                            "n_nodes": G.number_of_nodes(),
+                            "n_edges_total": G.number_of_edges(),
+                            "n_edges_exported": len(trend_edges_ranked),
+                            "density": round(nx.density(G), 4),
+                            "top_n": ta_net_n,
+                            "threshold": ta_net_th,
+                            "period_past": period_past_str,
+                            "period_recent": period_recent_str
+                        },
+                        "emerging_keywords": emerging_keywords,
+                        "declining_keywords": declining_keywords,
+                        "communities": trend_communities_structured,
+                        "edges": trend_edges_ranked
+                    }
+                    capcom.save_data("explorer_trend.json", capcom_trend_data)
+            except Exception as e:
+                pass
 
 
 # ==================================================================
@@ -643,7 +765,6 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
         c_my = Counter(words_my)
         c_tgt = Counter(words_target)
         
-        # 1. トルネードチャート
         st.markdown("##### 1. キーワード出現頻度比較 (Tornado Chart)")
         all_keys = set(list(c_my.keys()) + list(c_tgt.keys()))
         valid_keys = [k for k in all_keys if (c_my[k] + c_tgt[k]) >= 3]
@@ -665,8 +786,8 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
             tick_text = [str(int(abs(v))) for v in tick_vals]
 
             fig_tornado = go.Figure()
-            fig_tornado.add_trace(go.Bar(y=df_tornado["Keyword"], x=df_tornado["My Count"], orientation='h', name=my_comp, marker_color=theme_config["color_sequence"][0]))
-            fig_tornado.add_trace(go.Bar(y=df_tornado["Keyword"], x=df_tornado["Competitor Count"], orientation='h', name=target_comp, marker_color=theme_config["color_sequence"][1]))
+            fig_tornado.add_trace(go.Bar(y=df_tornado["Keyword"], x=df_tornado["My Count"], orientation='h', name=my_comp, marker_color=utils.APOLLO_COLORS[0]))
+            fig_tornado.add_trace(go.Bar(y=df_tornado["Keyword"], x=df_tornado["Competitor Count"], orientation='h', name=target_comp, marker_color=utils.APOLLO_COLORS[1]))
             
             fig_tornado.update_layout(
                 barmode='relative', bargap=0.1, 
@@ -680,7 +801,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
                 legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5),
                 margin=dict(r=150, l=20, b=100)
             )
-            update_fig_layout(fig_tornado, "Tornado Chart", height=800, theme_config=theme_config)
+            update_fig_layout(fig_tornado, "Tornado Chart", height=800)
             st.plotly_chart(fig_tornado, use_container_width=True, config={'editable': False})
             st.info("左側 (青系) が自社、右側 (赤/オレンジ系) が競合の出現数を示します。")
             
@@ -692,7 +813,6 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
                 key="exp_tornado_snap"
             )
 
-        # 2. ワードクラウド
         st.markdown("##### 2. 企業別ワードクラウド")
         c_wc1, c_wc2 = st.columns(2)
         with c_wc1:
@@ -701,35 +821,37 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
         with c_wc2:
             st.markdown(f"**{target_comp}**")
             if words_target: generate_wordcloud_and_list(words_target, target_comp, 30, FONT_PATH)
-            
-        # 3. 支配率ネットワーク
+
         st.markdown(f"##### 3. 支配率ネットワーク (青=自社優勢 / 赤=競合優勢)")
         col_cs1, col_cs2 = st.columns(2)
-        with col_cs1: cs_net_n = st.slider("抽出単語数", 30, 100, 60, key="cs_net_n")
-        with col_cs2: cs_net_th = st.slider("共起閾値", 0.01, 0.3, 0.05, 0.01, key="cs_net_th")
+        with col_cs1: cs_net_n = st.slider("抽出単語数", 30, 100, 70, key="cs_net_n")
+        with col_cs2: cs_net_th = st.slider("共起閾値", 0.01, 0.3, 0.03, 0.01, key="cs_net_th")
         
         combined_keywords = words_my + words_target
         c_combined = Counter(combined_keywords)
         top_nodes = [w for w, c in c_combined.most_common(cs_net_n)]
-        
+
         if 'applicant_main' in df_main.columns:
             mask_2 = df_main['applicant_main'].apply(lambda x: isinstance(x, list) and (my_comp in x or target_comp in x))
         else:
             mask_2 = df_main[col_map['applicant']].fillna('').str.contains(re.escape(my_comp) + "|" + re.escape(target_comp))
         df_2 = df_main[mask_2]
-        
+
+        keyword_lists_comp = [
+            [w for w in kws if w in top_nodes]
+            for kws in df_2['explorer_keywords']
+        ]
+        G = patiroha.build_cooccurrence_graph(
+            keyword_lists_comp,
+            top_n=cs_net_n,
+            threshold=cs_net_th,
+            similarity="jaccard",
+        )
         pair_counts = Counter()
         for kws in df_2['explorer_keywords']:
             valid_w = [w for w in set(kws) if w in top_nodes]
             if len(valid_w) >= 2:
                 for pair in combinations(sorted(valid_w), 2): pair_counts[pair] += 1
-                
-        G = nx.Graph()
-        for w in top_nodes: G.add_node(w, size=c_combined[w])
-        for (u, v), c in pair_counts.items():
-            weight = c / (c_combined[u] + c_combined[v] - c)
-            if weight >= cs_net_th: G.add_edge(u, v, weight=weight)
-        G.remove_nodes_from(list(nx.isolates(G)))
         
         if G.number_of_nodes() > 0:
             pos = nx.spring_layout(G, k=0.8, seed=42)
@@ -755,46 +877,84 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
             )
             fig_net = go.Figure(data=[edge_trace, node_trace])
             fig_net.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
-            update_fig_layout(fig_net, "Dominance Network", height=700, theme_config=theme_config)
+            update_fig_layout(fig_net, "Dominance Network", height=700)
             st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
 
-            # --- スナップショット (支配率ネットワーク) ---
-            dom_summary = []
-            for n in list(G.nodes())[:20]: # Top nodes
-                m = c_my[n]; t = c_tgt[n]
-                dom_val = m/(m+t) if (m+t)>0 else 0.5
-                dom_summary.append(f"{n}: {my_comp}={m}, {target_comp}={t} (Dom={dom_val:.2f})")
+            dom_communities = patiroha.detect_communities(G, algorithm="louvain")
+            hub_keywords_dom = patiroha.get_hub_keywords(G, centrality="degree")
+            deg_centrality = {kw: score for kw, score in hub_keywords_dom}
+            dom_community_map = dom_communities
 
-            # ハブとエッジ情報の抽出
-            deg_centrality = nx.degree_centrality(G)
-            sorted_hubs = sorted(deg_centrality.items(), key=lambda x: x[1], reverse=True)[:10]
-            hubs_str = ", ".join([f"{n}({val:.2f})" for n, val in sorted_hubs])
-            
-            sorted_edges = sorted(G.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:10]
-            edges_str = ", ".join([f"{u}-{v}" for u, v, d in sorted_edges])
+            dom_keywords = []
+            my_exclusive = []
+            target_exclusive = []
+            contested = []
+            for node in G.nodes():
+                m = c_my[node]; t_val = c_tgt[node]
+                dom_val = m / (m + t_val) if (m + t_val) > 0 else 0.5
+                entry = {
+                    "keyword": node,
+                    "my_count": m,
+                    "target_count": t_val,
+                    "dominance": round(dom_val, 3),
+                    "community": dom_community_map.get(node, -1),
+                    "degree_centrality": round(deg_centrality.get(node, 0), 4)
+                }
+                dom_keywords.append(entry)
+                if t_val == 0 and m > 0:
+                    my_exclusive.append(node)
+                elif m == 0 and t_val > 0:
+                    target_exclusive.append(node)
+                elif 0.4 <= dom_val <= 0.6:
+                    contested.append(node)
+
+            dom_edges_ranked = []
+            for u, v, d in sorted(G.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:100]:
+                dom_edges_ranked.append({
+                    "source": u, "target": v,
+                    "jaccard": round(d['weight'], 4),
+                    "cooccurrence_count": pair_counts.get(tuple(sorted([u, v])), 0)
+                })
+
+            _dom_groups = defaultdict(list)
+            for node, cid in dom_community_map.items():
+                _dom_groups[cid].append(node)
+            dom_communities_structured = []
+            for cid in sorted(_dom_groups.keys()):
+                members = _dom_groups[cid]
+                hub_node = max(members, key=lambda n: deg_centrality.get(n, 0))
+                dom_communities_structured.append({
+                    "id": cid, "size": len(members), "members": members,
+                    "hub": hub_node, "hub_centrality": round(deg_centrality.get(hub_node, 0), 4)
+                })
+
+            dom_reps = utils.get_keyword_centric_representatives(df_2, list(G.nodes()), n_reps=10)
+            rep_lines_d = ["\n**代表的特許 (支配率ネットワーク・キーワードベース):**"]
+            for i, r in enumerate(dom_reps):
+                 rep_lines_d.append(f"{i+1}. 【{r['title']}】 ({r['applicant']}) - {r['abstract'][:80]}...")
 
             snap_data = utils.generate_rich_summary(df_2, title_col=col_map['title'], abstract_col=col_map['abstract'])
             snap_data['module'] = 'Explorer'
             snap_data['network_stats'] = {
                 "nodes": G.number_of_nodes(),
                 "edges": G.number_of_edges(),
-                "hubs": hubs_str,
-                "edges_list": edges_str,
+                "density": round(nx.density(G), 4),
+                "communities": dom_communities_structured,
+                "hubs_ranked": sorted(dom_keywords, key=lambda x: x['degree_centrality'], reverse=True),
+                "edges_ranked": dom_edges_ranked,
                 "notes": f"Dominance: {my_comp} vs {target_comp}. Blue favorable to {my_comp}, Red favorable to {target_comp}."
             }
-            
-            # 支配率分析のためのキーワード中心の代表特許抽出
-            # 戦略: 全体の上位ノードに基づいて、競合状況（主戦場）を把握する
-            dom_reps = utils.get_keyword_centric_representatives(df_2, list(G.nodes()), n_reps=10)
-            rep_lines_d = ["\n**代表的特許 (支配率ネットワーク・キーワードベース):**"]
-            for i, r in enumerate(dom_reps):
-                 rep_lines_d.append(f"{i+1}. 【{r['title']}】 ({r['applicant']}) - {r['abstract'][:80]}...")
-
+            snap_data['dominance_analysis'] = {
+                "my_company": my_comp,
+                "target_company": target_comp,
+                "keywords": dom_keywords,
+                "my_exclusive": my_exclusive,
+                "target_exclusive": target_exclusive,
+                "contested": contested
+            }
             if dom_reps:
                 snap_data['cluster_summary'] = (snap_data.get('cluster_summary', '') + "\n".join(rep_lines_d))
 
-
-             # AI Insight (比較分析) - 設定
             insight_context_c = f"""
             **チャートタイプ**: 支配率共起ネットワーク (Dominance Network)
             **対象データ**: 2社({my_comp} vs {target_comp})の共起ネットワーク比較。
@@ -830,10 +990,35 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
                 key="exp_dom_snap"
             )
 
-            # ネットワーク統計情報を追加
-            snap_data['dominance_summary'] = dom_summary
             prompt_c = utils_ai.generate_ai_insight_prompt(insight_role, insight_context_c, snap_data, insight_inst_c)
             utils_ai.render_ai_insight_button(prompt_c, "exp_dom_insight")
+
+            try:
+                import capcom
+                if capcom.is_active():
+                    capcom_dom_data = {
+                        "metadata": {
+                            "module": "Explorer",
+                            "mode": "dominance_network",
+                            "my_company": my_comp,
+                            "target_company": target_comp,
+                            "n_nodes": G.number_of_nodes(),
+                            "n_edges_total": G.number_of_edges(),
+                            "n_edges_exported": len(dom_edges_ranked),
+                            "density": round(nx.density(G), 4),
+                            "top_n": cs_net_n,
+                            "threshold": cs_net_th
+                        },
+                        "keywords": dom_keywords,
+                        "my_exclusive": my_exclusive,
+                        "target_exclusive": target_exclusive,
+                        "contested": contested,
+                        "communities": dom_communities_structured,
+                        "edges": dom_edges_ranked
+                    }
+                    capcom.save_data("explorer_dominance.json", capcom_dom_data)
+            except Exception as e:
+                pass
 
 
 # ==================================================================

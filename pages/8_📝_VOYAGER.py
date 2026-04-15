@@ -1,173 +1,59 @@
 import streamlit as st
 import pandas as pd
 import os
+import json
+import datetime
 import utils
 import matplotlib.pyplot as plt
-import japanize_matplotlib
-import pdf_generator
+utils.configure_matplotlib_font()
+import google.generativeai as genai
 
-# ライブラリの動的インポート (エラーハンドリング用)
-try:
-    import google.generativeai as genai
-except ImportError:
-    genai = None
 
 # ==================================================================
-# --- クラス定義: LLM Client ---
+# --- LLMClient (Gemini API) ---
 # ==================================================================
 class LLMClient:
-    def __init__(self, provider, api_key, model_name=None):
-        self.provider = provider
-        self.api_key = api_key
-        self.model_name = model_name
-        self.error_msg = None
+    """Gemini API クライアント（VOYAGER レポート生成用）"""
 
-        if not self.api_key:
-            self.error_msg = "API Keyが設定されていません。"
-            return
+    def __init__(self, api_key, model_name="gemini-2.5-flash"):
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel(model_name)
 
-        if self.provider == "Google Gemini":
-            if genai is None:
-                self.error_msg = "google-generativeai ライブラリがインストールされていません。"
-            else:
-                genai.configure(api_key=self.api_key)
-                if not self.model_name: self.model_name = "gemini-1.5-pro"
-        else:
-            self.error_msg = f"未サポートのプロバイダ: {self.provider}"
-
-    def generate_text(self, system_prompt, user_prompt, images=None):
-        if self.error_msg:
-            raise ValueError(self.error_msg)
-
-        import time
-        import re
-        import io
-        from PIL import Image
-
-        max_retries = 3
-        last_error = None
-
+    def generate_text(self, system_prompt, user_prompt, max_retries=3):
+        """テキスト生成（レートリミット対応）"""
+        import time as _time
         for attempt in range(max_retries):
             try:
-                if self.provider == "Google Gemini":
-                    model = genai.GenerativeModel(self.model_name)
-                    # Gemini 1.5 Pro以降のモデル対応
-                    full_prompt = f"【System Instructions】\n{system_prompt}\n\n【User Request】\n{user_prompt}"
-                    
-                    if images and isinstance(images, list) and len(images) > 0:
-                        content_parts = [full_prompt]
-                        for img_bytes in images:
-                            try:
-                                if img_bytes:
-                                    pil_img = Image.open(io.BytesIO(img_bytes))
-                                    content_parts.append(pil_img)
-                            except Exception as e:
-                                print(f"Image load error in LLMClient: {e}")
-                        
-                        response = model.generate_content(content_parts)
-                    else:
-                        response = model.generate_content(full_prompt)
-                        
-                    return response.text
-
+                response = self.model.generate_content(
+                    f"{system_prompt}\n\n{user_prompt}",
+                    generation_config=genai.GenerationConfig(
+                        temperature=0.7,
+                        max_output_tokens=65536,
+                    ),
+                )
+                return response.text
             except Exception as e:
-                error_str = str(e)
-                last_error = e
-                        # レート制限 (429) またはクォータ超過のチェック
-                if "429" in error_str or "Quota exceeded" in error_str or "Resource has been exhausted" in error_str:
-                    if attempt < max_retries - 1:
-                        wait_time = 60 # 安全なデフォルト値
-                        # エラーメッセージから待機時間をパース
-                        match = re.search(r'retry in (\d+(\.\d+)?)s', error_str)
-                        if match:
-                            wait_time = float(match.group(1)) + 10 # 10秒のバッファを追加
-                        
-                        st.toast(f"⏳ レート制限に達しました。{int(wait_time)}秒後に再試行します... ({attempt+1}/{max_retries})", icon="⚠️")
-                        
-                        # 待機中にプログレスバーを使用するか、単純にスリープ
-                        with st.empty():
-                            for i in range(int(wait_time), 0, -1):
-                                st.write(f"⚠️ API制限に達しました。再試行まであと {i} 秒待機中...")
-                                time.sleep(1)
-                        continue
-                
-                # リトライ不可能なエラーまたは最大試行回数に到達
-                break
-        
-        raise RuntimeError(f"LLM Generation Failed: {last_error}")
+                if '429' in str(e) and attempt < max_retries - 1:
+                    wait = 60
+                    _time.sleep(wait)
+                    continue
+                raise
+
 
 # ==================================================================
 # --- ページ設定 ---
 # ==================================================================
-st.set_page_config(page_title="APOLLO | VOYAGER", page_icon="📝", layout="wide")
+st.set_page_config(page_title="APOLLO CAPCOM | VOYAGER", page_icon="📝", layout="wide")
 utils.render_sidebar()
 
 st.title("📝 VOYAGER")
-st.markdown("##### Visual Output & Yield Analysis Generator for Executive Review")
+st.markdown("スナップショットを収集し、Gemini AIが戦略レポートの骨格を自動生成します。")
 
 st.markdown("""
-**VOYAGER** は、分析データからレポートを自動生成するAIアシスタントです。
-**Google Gemini** の力を借りて、複雑な特許マップからレポートを作成します。
+**VOYAGER** は、分析結果を収集し戦略レポートを生成するためのモジュールです。
+スナップショットを選択し、プロンプトをプレビューして外部AIに送信するか、
+Gemini APIでレポートの骨格を自動生成できます。
 """)
-
-# ==================================================================
-# --- サイドバー設定 (LLM設定) ---
-# ==================================================================
-
-with st.expander("⚙️ AIエンジン設定 (API Key)", expanded=True):
-    col_key, col_model = st.columns([2, 1])
-    
-    # プロバイダはGoogle Geminiに固定
-    llm_provider = "Google Gemini"
-    
-    # APIキー処理
-    # 1. Secrets/Envの確認
-    api_key_env = None
-    env_key_name = "GOOGLE_API_KEY"
-    
-    # 1. OS環境変数から取得 (Hugging Face Spaces / Docker等でクラッシュしないよう優先)
-    api_key_env = os.environ.get(env_key_name)
-
-    # 2. st.secretsから取得 (Local Streamlit等、ファイルがある場合)
-    # Hugging Face Spaces (SPACE_IDがある環境) では secrets.toml は通常作成されないため、
-    # 明示的にスキップして不要なエラーログ (No secrets found) を回避する
-    is_hf_space = os.environ.get("SPACE_ID") is not None
-
-    if not api_key_env and not is_hf_space:
-        try:
-            # st.secretsへのアクセス自体がエラーになる場合があるため、getを使用し、全例外をキャッチ
-            api_key_env = st.secrets.get(env_key_name)
-        except BaseException:
-            # secrets.tomlが存在しない、またはアクセスできない場合は無視
-            pass
-    
-    # セキュアキー処理ロジック
-    key_status_msg = ""
-    default_input_value = ""
-    
-    if api_key_env:
-        placeholder_text = "システムキー設定済み（空欄のままで使用可能）"
-    else:
-        placeholder_text = "AIza..."
-
-    with col_key:
-        api_key_input = st.text_input(
-            "Google API Key", 
-            type="password", 
-            value="", # NEVER populate this with the secret
-            placeholder=placeholder_text,
-            help="Google AI Studioで取得したAPIキーを入力してください。システムキー設定済みの場合は空欄でOKです。"
-        )
-    
-    # 最終キー選択
-    final_api_key = api_key_input if api_key_input else api_key_env
-
-    with col_model:
-        # モデル選択
-        model_options = [
-            "gemini-2.5-flash"
-        ]
-        llm_model = st.selectbox("Model", model_options, key="voyager_model")
 
 
 # ==================================================================
@@ -265,19 +151,10 @@ with col_obj:
 report_placeholder = st.empty()
 generated_report = ""
 
+
 with col_act:
     st.write("")
-    
-    # 分析深度の選択
-    report_mode = st.radio(
-        "分析の深さ (Analysis Depth):",
-        ["Standard Analysis (標準)", "Strategic Deep Dive (詳細・戦略的)", "Market Intelligence (市場統合分析)"],
-        horizontal=False,
-        help="Standard: 要点を絞ったエグゼクティブサマリー形式。\nDeep Dive: 詳細な考察、シナリオ分析、将来予測を含む長文の戦略レポート形式。"
-    )
-    
-    st.write("")
-    
+
     # バリデーション
     missing_items_common = []
     if len(snapshots) == 0:
@@ -285,21 +162,13 @@ with col_act:
     if len(mission_objective) <= 5:
         missing_items_common.append("Mission Objective (5文字以上の目的記述)")
 
-    missing_items_gen = missing_items_common.copy()
-    if not final_api_key:
-        missing_items_gen.append("API Key (Google API Key)")
-
     is_ready_preview = len(missing_items_common) == 0
-    is_ready_gen = len(missing_items_gen) == 0
-    
-    if not is_ready_gen:
-        if not is_ready_preview:
-             st.warning(f"⚠️ プレビュー・生成には以下が必要です: {', '.join(missing_items_common)}")
-        elif not final_api_key:
-             st.info("ℹ️ API Keyが未設定のため、レポート生成はできませんが、「プロンプト・プレビュー」は利用可能です。")
+
+    if not is_ready_preview:
+        st.warning(f"⚠️ 以下が必要です: {', '.join(missing_items_common)}")
 
     # --- プロンプト構築ヘルパー ---
-    def build_voyager_prompts(objective, current_snapshots, mode):
+    def build_voyager_prompts(objective, current_snapshots):
         # 1. コンテキスト構築
         c_str = f"## Mission Objective\n{objective}\n\n## Collected Evidence (Snapshots)\n"
         for i, snap in enumerate(current_snapshots):
@@ -311,12 +180,14 @@ with col_act:
             if snap.get('images') and len(snap['images']) > 1:
                 c_str += f"- [Visual Reference Note]: This evidence consists of multiple images. Refer to [Evidence {i+1}-1] for the first chart (e.g. Growth/Ranking) and [Evidence {i+1}-2] for the second (e.g. Network).\n"
 
-            # --- 構造化データ処理 (v5.1 High-Res) ---
+            # --- 構造化データ処理 ---
             
             # リストアーティファクトの再帰的クリーナー (['a', 'b'] -> "a, b")
             def clean_data_for_prompt(data, key=None):
                 # カスタムフォーマットが必要な特別なリストは平滑化しない
-                if key in ['representatives', 'items', 'top_growing_keywords'] and isinstance(data, list):
+                if key in ['representatives', 'items', 'top_growing_keywords',
+                           'emerging_keywords', 'declining_keywords',
+                           'hubs_ranked', 'edges_ranked', 'communities', 'bridge_edges'] and isinstance(data, list):
                      return data
                      
                 if isinstance(data, dict):
@@ -381,15 +252,76 @@ with col_act:
                 if 'network_stats' in data_sum:
                     ns = data_sum['network_stats']
                     c_str += f"- [Network Structure Analysis]\n"
-                    
+
                     def clean_join(val):
                         if isinstance(val, list):
-                            return ", ".join([str(x) for x in val if x])
+                            # 構造化リスト対応: dictの場合はキー情報を抽出
+                            parts = []
+                            for x in val:
+                                if isinstance(x, dict):
+                                    # hubs_ranked形式: keyword + centrality
+                                    if 'keyword' in x:
+                                        parts.append(f"{x['keyword']}({x.get('degree_centrality', '')})")
+                                    # edges_ranked形式: source-target + jaccard
+                                    elif 'source' in x and 'target' in x:
+                                        parts.append(f"{x['source']}-{x['target']}(J={x.get('jaccard', '')})")
+                                    # communities形式: id + members
+                                    elif 'members' in x:
+                                        members_str = ', '.join(x['members'][:5])
+                                        parts.append(f"Group {x.get('id', '?')+1}: {members_str}")
+                                    else:
+                                        parts.append(str(x))
+                                elif x is not None:
+                                    parts.append(str(x))
+                            return ", ".join(parts)
                         return str(val)
 
-                    if 'hubs' in ns: c_str += f"  - Top Hubs (Centrality): {clean_join(ns['hubs'])}\n"
-                    if 'edges' in ns: c_str += f"  - Strongest Connections: {clean_join(ns['edges'])}\n"
-                    if 'communities' in ns: c_str += f"  - Community Groups: {clean_join(ns['communities'])}\n"
+                    # ノード数・エッジ数・密度
+                    if 'nodes' in ns:
+                        c_str += f"  - Nodes: {ns['nodes']}, Edges: {ns.get('edges', 'N/A')}"
+                        if 'density' in ns:
+                            c_str += f", Density: {ns['density']}"
+                        c_str += "\n"
+                    # ハブ
+                    if 'hubs_ranked' in ns:
+                        top_hubs = ns['hubs_ranked'][:10] if isinstance(ns['hubs_ranked'], list) else ns['hubs_ranked']
+                        c_str += f"  - Top Hubs (Centrality): {clean_join(top_hubs)}\n"
+                    elif 'hubs' in ns:
+                        c_str += f"  - Top Hubs (Centrality): {clean_join(ns['hubs'])}\n"
+                    # エッジ
+                    if 'edges_ranked' in ns:
+                        top_edges = ns['edges_ranked'][:10] if isinstance(ns['edges_ranked'], list) else ns['edges_ranked']
+                        c_str += f"  - Strongest Connections: {clean_join(top_edges)}\n"
+                    elif 'edges' in ns:
+                        c_str += f"  - Strongest Connections: {clean_join(ns['edges'])}\n"
+                    # コミュニティ
+                    if 'communities' in ns:
+                        c_str += f"  - Community Groups: {clean_join(ns['communities'])}\n"
+                    # ブリッジエッジ
+                    if 'bridge_edges' in ns and ns['bridge_edges']:
+                        bridges = ns['bridge_edges'][:5] if isinstance(ns['bridge_edges'], list) else ns['bridge_edges']
+                        c_str += f"  - Bridge Edges (Cross-Community): {clean_join(bridges)}\n"
+
+                # トレンド分析データ（Explorer強化版）
+                if 'trend_analysis' in data_sum:
+                    ta = data_sum['trend_analysis']
+                    c_str += f"- [Trend Analysis]\n"
+                    c_str += f"  - Period: {ta.get('period_past', 'N/A')} vs {ta.get('period_recent', 'N/A')}\n"
+                    if 'emerging_keywords' in ta:
+                        top_emerging = ta['emerging_keywords'][:10]
+                        for ek in top_emerging:
+                            c_str += f"  - Emerging: {ek.get('keyword', '')} (Growth: {ek.get('growth_rate', '')}, Recent: {ek.get('recent_count', '')})\n"
+
+                # 支配率分析データ（Explorer強化版）
+                if 'dominance_analysis' in data_sum:
+                    da = data_sum['dominance_analysis']
+                    c_str += f"- [Dominance Analysis: {da.get('my_company', '')} vs {da.get('target_company', '')}]\n"
+                    if da.get('my_exclusive'):
+                        c_str += f"  - My Exclusive Keywords: {', '.join(da['my_exclusive'][:10])}\n"
+                    if da.get('target_exclusive'):
+                        c_str += f"  - Competitor Exclusive: {', '.join(da['target_exclusive'][:10])}\n"
+                    if da.get('contested'):
+                        c_str += f"  - Contested (0.4-0.6): {', '.join(da['contested'][:10])}\n"
                 
 
                 if 'cluster_summary' in data_sum:
@@ -403,7 +335,7 @@ with col_act:
                 if 'error' in data_sum:
                      c_str += f"- [Note] Data extraction partial error: {data_sum['error']}\n"
                 
-                # --- NEBULA統合スナップショット処理 (v5.3) ---
+                # --- NEBULA統合スナップショット処理 ---
                 if data_sum.get('type') == 'trend_network_consolidated':
                     c_str += f"- [Consolidated Analysis Data]\n"
                     
@@ -439,7 +371,7 @@ with col_act:
                 # レガシー文字列
                 c_str += f"- Data Summary: {data_sum}\n"
         
-        # 2. システムプロンプト選択 (2段階アーキテクチャ v6.0)
+        # 2. システムプロンプト選択
         
         # --- 共通ルール ---
         common_evidence_rules = """
@@ -592,8 +524,7 @@ with col_act:
                     # 画像の収集
                     if snap.get('images'): module_images.extend(snap['images'])
                     elif snap.get('image'): module_images.append(snap['image'])
-                
-                # タスク追加
+
                 tasks.append({
                     'id_label': f"Module Analysis: {module_name}",
                     'content': module_content,
@@ -609,16 +540,13 @@ with col_act:
         
         return strategist_sys_base, phase1_tasks, analyst_system_prompt
 
-    col_btn_1, col_btn_2 = st.columns([1, 1])
+    if st.button("📜 Preview Prompts", help="AIに送るプロンプト構成を確認します。コピーして外部AIに送信できます。", disabled=not is_ready_preview):
+        strat_sys, p1_tasks, analyst_sys = build_voyager_prompts(mission_objective, snapshots)
 
-    with col_btn_1:
-        if st.button("📜 Preview Prompts (APIなし)", help="AIに送るプロンプト構成を確認します。APIは消費しません。", disabled=not is_ready_preview):
-            strat_sys, p1_tasks, analyst_sys = build_voyager_prompts(mission_objective, snapshots, report_mode)
-            
-            # 手動利用用にフォーマットされたデータを準備
-            
-            # Phase 2 テンプレート
-            p2_template = f"""【System Instructions】
+        # 手動利用用にフォーマットされたデータを準備
+
+        # Phase 2 テンプレート
+        p2_template = f"""【System Instructions】
 {strat_sys.format(objective=mission_objective)}
 
 【User Request】
@@ -626,227 +554,625 @@ with col_act:
 
 [ここにPhase 1で得られた分析結果（インサイト）を全て貼り付けてください...]
 """
-            
-            # Phase 1 フルプロンプト (タスク反復)
-            p1_full_prompts = []
-            for task in p1_tasks:
-                # タスク固有の指示があれば追加
-                sys_combined = analyst_sys
-                if task['system_prompt_add']:
-                    sys_combined += f"\n\n(Specific Focus: {task['system_prompt_add']})"
-                    
-                p1_full = f"""【System Instructions】
+
+        # Phase 1 フルプロンプト (タスク反復)
+        p1_full_prompts = []
+        for task in p1_tasks:
+            # タスク固有の指示があれば追加
+            sys_combined = analyst_sys
+            if task['system_prompt_add']:
+                sys_combined += f"\n\n(Specific Focus: {task['system_prompt_add']})"
+
+            p1_full = f"""【System Instructions】
 {sys_combined}
 
 【User Request】
 {task['content']}"""
-                p1_full_prompts.append({'label': task['id_label'], 'text': p1_full})
+            p1_full_prompts.append({'label': task['id_label'], 'text': p1_full})
 
-            st.session_state['voyager_prompt_preview_data'] = {
-                'p2_template': p2_template,
-                'p1_full_prompts': p1_full_prompts
-            }
-            st.toast("実用コピー用プロンプトを生成しました！下の画面で確認してください。", icon="📋")
+        st.session_state['voyager_prompt_preview_data'] = {
+            'p2_template': p2_template,
+            'p1_full_prompts': p1_full_prompts
+        }
+        st.toast("プロンプトを生成しました！下の画面で確認してください。", icon="📋")
 
-    with col_btn_2:
-        if st.button("🚀 Analyze & Generate Report (2-Stage)", type="primary", disabled=not is_ready_gen):
-            
-            # --- 2段階生成プロセス (v6.0) ---
-            strat_sys_template, p1_tasks, analyst_sys_base = build_voyager_prompts(mission_objective, snapshots, report_mode)
-            
-            progress_bar = st.progress(0, text="分析を開始しています...")
-            status_text = st.empty()
-            
-            collected_insights = []
-            
-            try:
-                client = LLMClient(llm_provider, final_api_key, llm_model)
-                
-                # --- Phase 1: 分析官 (The Analyst) - 順次処理 ---
-                total_tasks = len(p1_tasks)
-                
-                for i, task in enumerate(p1_tasks):
-                    status_text.markdown(f"**[フェーズ1: 分析官]** 分析タスクを実行中 {i+1}/{total_tasks}: {task['id_label']}...")
-                    
-                    # システムプロンプト準備
-                    current_sys = analyst_sys_base
-                    if task['system_prompt_add']:
-                        current_sys += f"\n\n(IMPORTANT: {task['system_prompt_add']})"
-                    
-                    # LLM呼び出し
-                    insight = client.generate_text(current_sys, task['content'], images=task['images'])
-                    collected_insights.append(f"### Insight from {task['id_label']}\n{insight}")
-                    
-                    # 進捗更新
-                    progress_bar.progress((i + 1) / (total_tasks + 1))
-                
-                # --- Phase 2: 戦略官 (The Strategist) - 統合 ---
-                status_text.markdown(f"**[フェーズ2: 戦略官]** 最終レポートを統合執筆中...")
-                
-                # Phase 2 ユーザーコンテンツ構築
-                phase2_user_content = f"以下は、{total_tasks}件の分析タスクからの報告書 (Analyst Reports) です。これらを統合し、最終レポートを作成してください。\n\n" + "\n\n".join(collected_insights)
-                
-                phase2_sys = strat_sys_template.format(objective=mission_objective)
-                
-                final_report = client.generate_text(phase2_sys, phase2_user_content)
-                
-                st.session_state['last_report'] = final_report
-                progress_bar.progress(1.0)
-                status_text.success("分析完了！")
-                st.rerun()
+# --- プロンプトプレビュー表示 ---
+if 'voyager_prompt_preview_data' in st.session_state:
+    preview = st.session_state['voyager_prompt_preview_data']
+    st.markdown("---")
+    st.markdown("### 📜 Prompt Preview")
+    st.markdown("以下のプロンプトをコピーして外部AI（ChatGPT/Claude等）に送信できます。")
 
-            except Exception as e:
-                st.error(f"Error during generation: {e}")
+    tab_p1, tab_p2 = st.tabs(["Phase 1: Analyst (モジュール別分析)", "Phase 2: Strategist (統合レポート)"])
 
-    # プロンプトプレビューエリア
-    if 'voyager_prompt_preview_data' in st.session_state:
-        data = st.session_state['voyager_prompt_preview_data']
-        
-        # 旧データスキーマの安全性チェック
-        if 'p1_full_prompts' not in data:
-            del st.session_state['voyager_prompt_preview_data']
-            st.rerun()
-            
-        with st.container(border=True):
-            st.markdown("### 📜 プロンプト確認ウィンドウ (手動分析用)")
-            st.info("APIキーがない場合や、ChatGPT/Claudeで手動分析したい場合に利用してください。")
-            
-            tab1, tab2 = st.tabs(["Phase 1: Analyst (Individual)", "Phase 2: Strategist (Synthesis)"])
-            
-            with tab1:
-                st.markdown("### 手順1: 各スナップショットの分析 (Analyst)")
-                st.caption("以下のプロンプトを順番にコピーし、**「該当する画像」を添付して** AIに送信してください。Consolidatedスナップショットは「Growth」と「Network」に分割されています。")
-                
-                for i, item in enumerate(data['p1_full_prompts']):
-                    with st.expander(f"{item['label']} 用プロンプト", expanded=(i==0)):
-                        st.code(item['text'], language='markdown')
-                        st.caption(f"※ ここで {item['label']} の画像をアップロードしてください。")
+    with tab_p1:
+        for i, p in enumerate(preview.get('p1_full_prompts', [])):
+            with st.expander(f"📄 {p['label']}", expanded=(i == 0)):
+                st.code(p['text'], language=None)
 
-            with tab2:
-                st.markdown("### 手順2: レポートの統合・執筆 (Strategist)")
-                st.caption("手順1で得られた全てのインサイトを、以下のプロンプトの末尾（プレースホルダー部分）に貼り付け、AIに送信してください。")
-                st.code(data['p2_template'], language='markdown')
-            
-            if st.button("プレビューを閉じる", key="close_preview"):
-                del st.session_state['voyager_prompt_preview_data']
-                st.rerun()
+    with tab_p2:
+        st.code(preview.get('p2_template', ''), language=None)
 
-# レポート表示
-if 'last_report' in st.session_state:
-    generated_report = st.session_state['last_report']
-    with report_placeholder.container():
-        st.markdown("### 📝 Analysis Report")
-        
-        # 1. 画像付きレポートのパースとレンダリング
-        import re
-        import unicodedata
-        
-        last_idx = 0
-        # [[Evidence 1, 5]] などをサポート
-        # Regex captures the content "1, 5" or "１，５" inside the brackets
-        evidence_pattern = r'\[{1,2}Evidence\s*[:：]?\s*([^\]]+)\]{1,2}'
-        
-        for match in re.finditer(evidence_pattern, generated_report, flags=re.IGNORECASE):
-            # タグ前のテキスト
-            text_segment = generated_report[last_idx:match.start()]
-            
-            # サニタイズ: 引用符(>)を削除
-            cleaned_segment = re.sub(r'^\s*>\s?', '', text_segment, flags=re.MULTILINE)
-            
-            if cleaned_segment.strip(): 
-                st.markdown(cleaned_segment)
-            
-            # タグ内のIDをパース
-            ids_str = match.group(1)
-            # 正規化 (全角->半角など)
-            ids_str = unicodedata.normalize('NFKC', ids_str)
-            
-            # カンマまたは読点で分割
-            ids_str = ids_str.replace('、', ',')
-            raw_ids = [x.strip() for x in ids_str.split(',')]
-            
-            # タグで見つかった証拠画像をレンダリング
-            for raw_id in raw_ids:
-                e_num, e_sub = None, None
-                
-                # 厳密なパースを使用
-                # Matches "1" or "1-2"
-                m_id = re.match(r'^(\d+)(?:-(\d+))?$', raw_id)
-                if m_id:
-                     e_num = m_id.group(1)
-                     e_sub = m_id.group(2)
-                
-                if e_num:
-                    ev_id = int(e_num) - 1
-                    if 0 <= ev_id < len(snapshots):
-                        snap = snapshots[ev_id]
-                        # スタイリッシュなコンテナを使用
-                        with st.container(border=True):
-                            # キャプション
-                            cap_suffix = f" ({e_sub})" if e_sub else ""
-                            st.caption(f"Evidence {ev_id + 1}{cap_suffix}: {snap['title']}")
-                            
-                            # 画像選択ロジック
-                            target_image = None
-                            if e_sub:
-                                try:
-                                    sub_id = int(e_sub) - 1
-                                    if snap.get('images') and 0 <= sub_id < len(snap['images']):
-                                        target_image = snap['images'][sub_id]
-                                except: pass
-                            else:
-                                target_image = snap.get('image')
-                                
-                            if target_image:
-                                c1, c2 = st.columns([4, 1])
-                                with c1: st.image(target_image, use_container_width=True)
-                            else:
-                                st.warning("(No Image)")
-                            
-                            st.caption(snap.get('description', ''))
-            
-            last_idx = match.end()
-            
-        # Remaining Text
-        if last_idx < len(generated_report):
-            st.markdown(generated_report[last_idx:])
+# ==================================================================
+# --- VOYAGER レポート生成 (Gemini API) — col_act の外に配置 ---
+# ==================================================================
+st.markdown("---")
+st.markdown("### 🤖 VOYAGER レポート生成 (Gemini API)")
+st.markdown("収集したエビデンスからGemini APIでレポートの骨格を自動生成します。")
 
-        # 2. コピー機能
-        st.markdown("---")
-        with st.expander("📋 レポート本文をコピー (Markdown)", expanded=False):
-            st.code(generated_report, language="markdown")
-            st.info("右上のコピーボタンでテキストをクリップボードにコピーできます。画像は「右クリック→画像をコピー」で取得してください。")
+col_gem1, col_gem2 = st.columns([2, 1])
+with col_gem1:
+    gemini_key = st.text_input("Gemini API Key:", type="password", key="voyager_gemini_key",
+                               help="Google AI Studio で取得できます: https://aistudio.google.com/apikey")
+with col_gem2:
+    report_mode = st.selectbox("レポートモード:",
+        ["標準分析 (Standard)", "詳細戦略 (Strategic Deep Dive)", "市場統合分析 (Market Intelligence)"],
+        key="voyager_report_mode")
 
-        # 3. PDF Download
-        st.markdown("---")
-        col_pdf, _ = st.columns([1, 2])
-        with col_pdf:
-            if pdf_generator.HAS_REPORTLAB:
-                # Generate PDF if not already in session (lazy load for old sessions)
-                if 'last_pdf' not in st.session_state or st.session_state.get('last_pdf_source') != generated_report:
-                     with st.spinner("PDFドキュメントを生成中..."):
-                         # Determine Subtitle based on Mode
-                         subtitle = "MARKET INTELLIGENCE & IP INTELLIGENCE"
-                         if "Standard" in report_mode:
-                             subtitle = "EXECUTIVE SUMMARY REPORT"
-                         elif "Deep Dive" in report_mode:
-                             subtitle = "STRATEGIC DEEP DIVE REPORT"
-                         elif "Market Intelligence" in report_mode:
-                             subtitle = "MARKET INTELLIGENCE & IP INTELLIGENCE"
-                         
-                         pdf_bytes, pdf_err = pdf_generator.generate_pdf(generated_report, snapshots, mission_objective, subtitle=subtitle)
-                         if pdf_bytes:
-                             st.session_state['last_pdf'] = pdf_bytes
-                             st.session_state['last_pdf_source'] = generated_report # Cache invalidation
-                         else:
-                             st.error(f"PDF Generation Failed: {pdf_err}")
-                
-                if 'last_pdf' in st.session_state:
-                    st.download_button(
-                        label="📄 PDFレポートをダウンロード (デザイン版)",
-                        data=st.session_state['last_pdf'],
-                        file_name="VOYAGER_Strategy_Report.pdf",
-                        mime="application/pdf"
-                    )
-            else:
-                st.warning("⚠️ PDF Export is unavailable. Please install `reportlab`.\n`pip install reportlab`")
+if st.button("📝 レポート生成", type="primary", key="voyager_generate_report",
+             disabled=not gemini_key or not snapshots or len(mission_objective) <= 5):
+    try:
+        client = LLMClient(api_key=gemini_key)
+
+        progress = st.progress(0.0)
+        status = st.empty()
+
+        # =============================================
+        # Phase 0: CAPCOMセッションJSONからデータ自動収集
+        # =============================================
+        status.markdown("🔄 **データ収集中...**")
+        capcom_data_context = ""
+        try:
+            import capcom as _capcom_mod
+            if _capcom_mod.is_active():
+                data_summaries = []
+                for fname in sorted(_capcom_mod.list_data_files()):
+                    if not fname.endswith('.json'):
+                        continue
+                    jdata = _capcom_mod.get_data(fname)
+                    if jdata is None:
+                        continue
+                    try:
+                        # 主要フィールドを抽出（全体を送ると巨大すぎるので要約）
+                        summary_parts = [f"\n### {fname}"]
+                        if isinstance(jdata, dict):
+                            for key in ['metadata', 'cagr', 'trend_direction', 'hhi', 'hhi_status',
+                                        'entropy', 'gini', 'quadrant_summary', 'noise_analysis',
+                                        'cluster_dynamics', 'spatial_context', 'type',
+                                        'total_papers', 'n_clusters', 'noise_count',
+                                        'patent_trend', 'academic_trend', 'news_trend']:
+                                if key in jdata:
+                                    val = jdata[key]
+                                    if isinstance(val, (dict, list)):
+                                        val_str = json.dumps(val, ensure_ascii=False, default=str)[:800]
+                                    else:
+                                        val_str = str(val)[:200]
+                                    summary_parts.append(f"- {key}: {val_str}")
+                            # クラスタ一覧（ラベルと件数のみ）
+                            if 'clusters' in jdata and isinstance(jdata['clusters'], list):
+                                cluster_summary = []
+                                for cl in jdata['clusters'][:30]:
+                                    if isinstance(cl, dict):
+                                        lbl = cl.get('label', cl.get('auto_label', f"Cluster {cl.get('cluster_id', '?')}"))
+                                        cnt = cl.get('count', cl.get('size', '?'))
+                                        cluster_summary.append(f"{lbl}({cnt}件)")
+                                if cluster_summary:
+                                    summary_parts.append(f"- clusters: {', '.join(cluster_summary)}")
+                            # 出願人ランキング（上位10）
+                            if 'applicant_ranking' in jdata:
+                                ar = jdata['applicant_ranking']
+                                if isinstance(ar, dict):
+                                    top10 = list(ar.items())[:10]
+                                    summary_parts.append(f"- top_applicants: {top10}")
+                                elif isinstance(ar, list):
+                                    summary_parts.append(f"- top_applicants: {ar[:10]}")
+                            # マクロイベント
+                            if 'items' in jdata and fname.startswith('nebula_macro'):
+                                items = jdata['items'][:10]
+                                for item in items:
+                                    if isinstance(item, dict):
+                                        summary_parts.append(f"  - {item.get('year','?')}: {item.get('title', item.get('unified_title',''))[:80]}")
+                        data_summaries.append('\n'.join(summary_parts))
+                    except Exception:
+                        pass
+
+                if data_summaries:
+                    capcom_data_context = "\n".join(data_summaries)
+                    capcom_data_context = capcom_data_context[:30000]  # データは惜しまず送る
+        except Exception:
+            pass
+
+        # --- モジュール別分析ガイド ---
+        MODULE_ANALYSIS_GUIDE = {
+            'ATLAS': """ATLASは基本統計モジュール。以下を分析せよ:
+- 出願件数の時系列トレンド（成長/停滞/衰退期の特定、変曲点の理由）
+- 出願人ランキング（上位集中度 vs 分散、新規参入者の有無）
+- 市場集中度指標（HHI/Entropy/Giniの3指標を組み合わせた構造分析）
+- IPC分布（技術領域の広がり、ニッチ vs 汎用技術の判別）
+- ライフサイクル（出願人数 vs 出願件数の相関から成長段階を判定）""",
+
+            'Saturn V': """Saturn Vは意味的クラスタリングモジュール。以下を分析せよ:
+- クラスタ全体構造（何個のクラスタに分かれたか、それぞれの技術テーマ）
+- 空間配置（近接クラスタ＝類似技術、孤立クラスタ＝独自技術の解釈）
+- クラスタ動態マップ（X:累積件数×Y:CAGR の4象限—成長リーダー/新興/成熟/ニッチ衰退）
+- ノイズ分析（ノイズ率の解釈、萌芽テーマの候補、時系列集中度、出願人集中度）
+- ドリルダウン結果があればサブクラスタ構造""",
+
+            'EAGLE': """EAGLEは探索的ランドスケープモジュール。以下を分析せよ:
+- 手動クラスタの構成と、Saturn Vの自動クラスタとの差異
+- クラスタ動態マップ（成長/衰退ポジション）
+- 分析者の仮説がデータでどう検証されたか""",
+
+            'MEGA': """MEGAは動態分析モジュール。以下を分析せよ:
+- 4象限分析（CAGR×活動量）: リーダー/新興/成熟/衰退の各象限に誰がいるか
+- 象限間の移動（軌跡追跡があれば）: 過去→現在のポジション変化
+- 境界付近のエンティティ（象限転換の可能性がある注目対象）""",
+
+            'Explorer': """Explorerはキーワード戦略モジュール。以下を分析せよ:
+- 共起ネットワークのコミュニティ構造（技術クラスタとの対応）
+- ハブキーワード（中心性が高い＝技術の中核概念）
+- 急上昇キーワード（成長率が高い＝新興テーマのシグナル）
+- 衰退キーワード（かつての主流技術の退潮）
+- トルネードチャート（競合比較のキーワード優位性）""",
+
+            'CREW': """CREWはネットワーク分析モジュール。以下を分析せよ:
+- 共願ネットワークの密度（協業が活発か孤立的か）
+- 媒介中心性上位者（技術ブローカー＝異分野を橋渡しするキーパーソン）
+- コミュニティ構造（組織間アライアンスの実態）
+- 急上昇スコア（新規参入者 or 活動再開者）""",
+
+            'CORE': """COREはルールベース分類モジュール。以下を分析せよ:
+- 分類軸間のクロス集計結果（どの技術×どの課題の組合せが多い/少ないか）
+- 空白セル（＝ホワイトスペース候補）の戦略的意味
+- 各分類カテゴリの件数分布の偏り""",
+
+            'NEBULA': """NEBULAは環境分析モジュール。以下を分析せよ:
+- Hype Cycle分析（特許・論文・ニュースの時系列ギャップ）
+- 学術ランドスケープ（論文のクラスタ構造と特許クラスタとの対応/乖離）
+- 学術クラスタ動態マップ（研究テーマの成長/成熟ポジション）
+- マクロ環境（政策・市場レポートからの外部要因）
+- 特許-NPLギャップ（研究は盛んだが特許化が遅い領域、またはその逆）
+- 急上昇キーワード比較（特許/論文/ニュースで異なるトレンド）""",
+        }
+
+        # =============================================
+        # Phase 1: Analyst（モジュール別深掘り分析）
+        # =============================================
+        status.markdown("🔄 **Phase 1/3: モジュール別深掘り分析中...**")
+
+        module_groups = {}
+        for snap_idx, snap in enumerate(snapshots):
+            mod = snap.get('module', 'Unknown')
+            if mod not in module_groups:
+                module_groups[mod] = []
+            module_groups[mod].append((snap_idx + 1, snap))  # 1-based index
+
+        analyst_results = {}
+        for idx, (mod, snaps_group) in enumerate(module_groups.items()):
+            progress.progress((idx + 1) / (len(module_groups) + 2))
+
+            evidence_text = ""
+            for eid, s in snaps_group:
+                title = s.get('title', '')
+                desc = s.get('description', '')
+                data = s.get('data_summary', '')
+                if isinstance(data, dict):
+                    data = json.dumps(data, ensure_ascii=False, indent=2, default=str)[:10000]
+                evidence_text += f"\n[[Evidence {eid}]] {title}\n説明: {desc}\nデータ:\n{str(data)[:5000]}\n"
+
+            guide = MODULE_ANALYSIS_GUIDE.get(mod, "提供されたエビデンスを詳細に分析してください。")
+
+            analyst_system = f"""あなたは特許情報分析の専門家（{mod}モジュール担当）です。
+
+## 分析の4層モデル（必ず全層を含めること）
+Layer 1 — 事実 (Fact): データから直接読み取れる数値・集計結果のみ。「〜件」「〜%」など定量表現を使う。
+Layer 2 — 解釈 (Interpretation): 事実に対する技術的・市場的な意味づけ。「〜を示唆する」「〜と解釈できる」。
+Layer 3 — 洞察 (Insight): 複数の事実・解釈を組み合わせた高次の知見。「〜にもかかわらず」「〜と合わせて考えると」。
+Layer 4 — 提言 (Recommendation): 洞察に基づく具体的アクション提案。「〜を検討すべき」「〜への参入を推奨」。
+
+## 出力ルール
+- 各段落がどの層に該当するか、読者が区別できるよう記述する
+- 必ず [[Evidence X]] 形式でエビデンスを引用する（本文中に自然に埋め込む）
+- 具体的な特許タイトル・出願人名・数値を含める
+- **全てのエビデンス（チャート・マップ）を必ず [[Evidence X]] で引用すること**。引用されないエビデンスがあってはならない
+- 2,000〜3,000文字程度で記述する"""
+
+            # CAPCOMデータから該当モジュールのJSONデータを抽出
+            mod_data_section = ""
+            if capcom_data_context:
+                mod_keywords = {
+                    'ATLAS': ['atlas_'],
+                    'Saturn V': ['saturnv_'],
+                    'MEGA': ['mega_'],
+                    'Explorer': ['explorer_'],
+                    'CREW': ['crew_'],
+                    'CORE': ['core_'],
+                    'NEBULA': ['nebula_'],
+                    'EAGLE': ['eagle_'],
+                }
+                kws = mod_keywords.get(mod, [mod.lower()])
+                relevant_lines = []
+                current_file_relevant = False
+                for line in capcom_data_context.split('\n'):
+                    if line.startswith('### '):
+                        current_file_relevant = any(kw in line.lower() for kw in kws)
+                    if current_file_relevant:
+                        relevant_lines.append(line)
+                if relevant_lines:
+                    mod_data_section = f"\n# CAPCOMセッションの分析データ（{mod}関連）\n" + '\n'.join(relevant_lines)
+
+            analyst_prompt = f"""# Mission Objective
+{mission_objective}
+
+# {mod}モジュール 分析ガイド
+{guide}
+
+# エビデンス（{len(snaps_group)}件）
+{evidence_text}
+{mod_data_section}
+
+上記のエビデンスとCAPCOMデータに基づき、{mod}モジュールの分析結果を4層モデルで詳細に記述してください。
+CAPCOMデータにクラスタ動態マップ（cluster_dynamics）、ノイズ分析（noise_analysis）、多様性指標（entropy/gini）、学術クラスタ（nebula_academic_clusters）、空間配置（spatial_context）等がある場合は必ず言及すること。"""
+
+            result = client.generate_text(
+                system_prompt=analyst_system,
+                user_prompt=analyst_prompt,
+            )
+            analyst_results[mod] = result
+
+        # =============================================
+        # Phase 2: Cross-Module Analysis（クロスモジュール分析）
+        # =============================================
+        status.markdown("🔄 **Phase 2/3: クロスモジュール分析中...**")
+        progress.progress(0.8)
+
+        modules_list = list(analyst_results.keys())
+        all_analyst_text = "\n\n".join([f"### {mod}\n{text}" for mod, text in analyst_results.items()])
+
+        cross_system = """あなたは特許情報分析のシニアアナリストです。複数モジュールの分析結果を横断的に照合し、単一モジュールでは見えない知見を導出してください。
+
+## クロスモジュール分析パターン（利用可能なものから最低3つ選択）
+- Saturn Vクラスタ構造 × MEGA成長率 → 高成長・低参入クラスタの特定
+- Explorerバーストキーワード × Saturn Vクラスタラベル → 急上昇テーマの所在特定
+- CREWネットワーク × Saturn Vクラスタ → 誰がどの技術を研究しているか
+- ATLASの時系列ピーク × NEBULAマクロイベント → 政策・市場要因の照合
+- Saturn Vノイズ × NEBULAの学術トレンド → 萌芽技術の学術的裏付け
+- クラスタ動態マップ × MEGA PULSE → クラスタレベルとエンティティレベルの成長対比
+- NEBULA学術クラスタ × Saturn V特許クラスタ → 研究→特許パイプライン分析
+
+## 出力ルール
+- 各パターンごとに「仮説→検証→結論」の構造で記述
+- 必ず [[Evidence X]] で引用
+- 各パターン 300〜500文字
+- 最低3パターン、最大5パターン"""
+
+        cross_prompt = f"""# Mission Objective
+{mission_objective}
+
+# 利用可能モジュール
+{', '.join(modules_list)}
+
+# モジュール別分析結果
+{all_analyst_text[:12000]}
+
+# CAPCOMセッションのデータ要約（全モジュール横断）
+{capcom_data_context[:8000]}
+
+上記のモジュール分析結果とCAPCOMデータに基づき、クロスモジュール分析を実施してください。
+特にクラスタ動態マップ（cluster_dynamics）とノイズ分析（noise_analysis）、学術-特許クロス分析のデータがある場合は必ず使用すること。"""
+
+        cross_result = client.generate_text(
+            system_prompt=cross_system,
+            user_prompt=cross_prompt,
+        )
+
+        # =============================================
+        # Phase 3: Strategic Report（統合戦略レポート）
+        # =============================================
+        status.markdown("🔄 **Phase 3/3: 統合戦略レポート生成中...**")
+        progress.progress(0.9)
+
+        # レポートモード別の構成指示
+        mode_key = st.session_state.get('voyager_report_mode', '標準分析')
+        if '詳細' in mode_key or 'Deep' in mode_key:
+            report_structure = """
+## レポート構成（詳細戦略モード）
+# エグゼクティブサマリー
+Mission Objectiveに対する直接回答。結論→根拠→推奨アクションの順で800文字以内。
+
+# 技術ランドスケープ分析
+- クラスタ全体構造の概観（いくつの技術クラスタがあるか）
+- クラスタ動態マップの解読（成長リーダー/新興/成熟/ニッチ衰退の各象限）
+- ノイズ（萌芽技術）の分析と将来予測
+- ワードクラウド・キーワード構造から見た技術トレンド
+
+# 競争環境分析
+- 主要プレイヤーのポジショニング（MEGA 4象限）
+- 市場集中度の構造（HHI/Entropy/Giniの3指標統合解釈）
+- 発明者・出願人ネットワークのキープレイヤー
+- 新規参入者・急成長者の特定
+
+# 環境分析（NEBULAデータがある場合）
+- Hype Cycle上の現在位置
+- 学術研究と特許のギャップ分析
+- 学術ランドスケープの研究テーマ構造
+- 政策・市場動向との照合
+
+# クロスモジュール統合分析
+Phase 2のクロス分析結果を統合し、複眼的な知見を提示。
+
+# 戦略的示唆と提言
+- 短期アクション（1年以内）
+- 中期戦略（3年）
+- リスクと不確実性
+
+# シナリオプランニング
+- Probableシナリオ（最も可能性が高い）
+- Bestシナリオ（最善の場合）
+- Riskシナリオ（最悪の場合）
+"""
+        elif '市場' in mode_key or 'Market' in mode_key:
+            report_structure = """
+## レポート構成（市場統合分析モード）
+# エグゼクティブサマリー
+Mission Objectiveに対する市場視点での直接回答。
+
+# 市場・技術環境の全体像
+- 特許出願トレンドと市場動向の対比
+- Hype Cycle分析（技術成熟度の判定）
+- 政策・規制環境の影響評価
+
+# 技術ポートフォリオ分析
+- 技術クラスタの市場ポテンシャル評価
+- クラスタ動態マップによる投資対象の優先順位
+- 学術研究からの技術シーズ特定
+
+# 競争インテリジェンス
+- 主要プレイヤーの戦略ポジション
+- 新規参入の脅威評価
+- アライアンス・オープンイノベーション機会
+
+# ギャップ分析と機会特定
+- 特許-論文ギャップ（研究は盛んだが特許化が遅い領域）
+- ホワイトスペース（出願が少ないが市場ニーズがある領域）
+- 萌芽技術のビジネス化可能性
+
+# 戦略提言
+"""
+        else:
+            report_structure = """
+## レポート構成（標準分析モード）
+# エグゼクティブサマリー
+Mission Objectiveに対する直接回答。
+
+# 技術トレンド分析
+- クラスタ構造と主要技術テーマ
+- 成長領域とクラスタ動態
+- 萌芽技術（ノイズ分析）
+
+# 競争環境分析
+- 主要プレイヤーと市場集中度
+- キーワード戦略のポジション
+
+# 戦略的示唆と提言
+- 機会とリスク
+- 推奨アクション
+"""
+
+        strategist_system = f"""あなたは特許情報分析のシニアストラテジストです。経営層・知財戦略部門向けの本格的な戦略レポートを執筆してください。
+
+## 品質基準
+1. **4層分析の遵守**: 事実(数値)→解釈(意味)→洞察(統合知見)→提言(アクション)を各セクションで明示
+2. **定量的裏付け**: 全ての主張に具体的数値を付記（「128件（全体の23.4%）」のような形式）
+3. **Evidence引用**: 必ず [[Evidence X]] 形式で本文中に自然に引用する（段落末に添える）
+4. **具体性**: 出願人名・特許タイトル・キーワード・IPC分類を具体的に記載
+5. **レポートはMarkdown形式**: # でH1（章）、## でH2（節）、### でH3（小節）
+6. **各章は最低500文字以上**: 薄い記述は不可。深掘りした分析を求める
+7. **数値は件数と割合の両方**: 「152件」ではなく「152件（全体の23.4%）」
+
+## チャート・マップの必須掲載ルール
+- **全ての章（# 見出し）に最低1つの [[Evidence X]] 引用を含めること**。チャートやマップが無い章は不完全とみなす
+- 引用は段落の末尾ではなく、分析の根拠を示す自然な文脈に埋め込む
+- 特に以下のチャートは必ず引用すること:
+  - 技術ランドスケープ（Saturn Vクラスタマップ）
+  - クラスタ動態マップ（4象限）
+  - 出願トレンド（ATLAS時系列）
+  - 共起ネットワーク（Explorerネットワーク図）
+  - MEGA 4象限プロット
+- NEBULAデータがある場合: Hype Cycle、学術ランドスケープも必ず引用
+- 1つのEvidenceを複数章から引用してもよい（異なる分析視点で言及する）
+
+## 禁止事項
+- Layer 1（事実列挙）だけで終わるセクションは不可
+- 根拠なき推測や一般論は不可
+- Evidence引用なしの段落が3段落以上続くのは不可
+- **チャート/マップへの言及がない章は不可**（全章に視覚的根拠を含めること）"""
+
+        # Evidence ID 対応表 (Phase 3 で文脈と無関係な Evidence 引用が起きないよう必ず渡す)
+        evidence_catalog_lines = []
+        for snap_idx, snap in enumerate(snapshots):
+            ev_id = snap_idx + 1
+            ev_module = snap.get('module', 'Unknown')
+            ev_title = snap.get('title', '')
+            ev_desc = snap.get('description', '')[:80]
+            line = f"- [[Evidence {ev_id}]] ({ev_module}) {ev_title}"
+            if ev_desc:
+                line += f" — {ev_desc}"
+            evidence_catalog_lines.append(line)
+        evidence_catalog = '\n'.join(evidence_catalog_lines)
+
+        strategist_prompt = f"""# Mission Objective
+{mission_objective}
+
+{report_structure}
+
+# Evidence ID 対応表 (引用ルール厳守)
+以下が利用可能な全エビデンス(チャート・マップ・図表)の一覧です。
+**[[Evidence X]] を引用する際は、必ず以下の対応表を確認し、引用内容と文脈が一致することを保証してください。**
+たとえばワードクラウドのEvidenceをHype Cycleの章で引用するような文脈ミスマッチは厳禁です。
+
+{evidence_catalog}
+
+# モジュール別分析結果（Phase 1）
+{all_analyst_text[:12000]}
+
+# クロスモジュール分析結果（Phase 2）
+{cross_result[:5000]}
+
+# CAPCOMセッションのデータ要約（定量的根拠として使用すること）
+{capcom_data_context[:8000]}
+
+上記の全分析結果とデータを統合し、レポート構成に従って戦略レポートを執筆してください。
+各章は # で始め、節は ## で始めてください。
+CAPCOMデータに含まれるクラスタ動態、ノイズ分析、多様性指標、学術ランドスケープ、Hype Cycle等の全データを分析に活用すること。
+「データがない」「アクセスできない」という記述は禁止。CAPCOMデータ要約に情報が含まれている。
+
+## Evidence 引用の必須ルール (再強調)
+- 各 [[Evidence X]] 引用時、Evidence ID 対応表を確認し、その章のテーマと一致するエビデンスを選ぶこと
+- 例: 「Hype Cycle 分析」の章では Hype Cycle 関連の Evidence のみ引用、ワードクラウドや無関係なマップは引用しない
+- 引用しないエビデンスがあっても問題ない (該当文脈の章がなければ無理に引用しない)
+- 全章で最低1つ以上の Evidence を引用するが、必ず文脈に合うものを選ぶ
+
+## Markdown 見出し階層の絶対ルール (厳守)
+- **「エグゼクティブサマリー」は必ず `#` 1個 (H1) で書く。`##` (H2) で書いてはならない**
+- 各章のメイン見出し (NEBULA / ATLAS / Saturn V / MEGA / Explorer / 戦略提言 等) も `#` 1個 (H1)
+- サブセクションは `##` (H2)、その下の項目は `###` (H3)
+- レポートは必ず `# エグゼクティブサマリー` から始める (`## エグゼクティブサマリー` は禁止)
+- `###` (H3) を使うときは、必ず先に `##` (H2) を書く (H2 を飛ばして H3 を書かない)"""
+
+        final_report = client.generate_text(
+            system_prompt=strategist_system,
+            user_prompt=strategist_prompt,
+        )
+
+        progress.progress(1.0)
+        status.success("✅ レポート生成完了（3フェーズ）")
+
+        st.session_state['voyager_generated_report'] = final_report
+
+    except Exception as e:
+        st.error(f"レポート生成エラー: {e}")
+
+# ==================================================================
+# --- レポート表示（APOLLO SPACE レベル）---
+# ==================================================================
+if 'voyager_generated_report' in st.session_state and st.session_state['voyager_generated_report']:
+    st.markdown("---")
+
+    report_text = st.session_state['voyager_generated_report']
+    current_snapshots = st.session_state.get('snapshots', [])
+
+    # --- Design System ---
+    DS = {
+        'navy': '#003366',
+        'navy_light': '#004080',
+        'accent': '#0066cc',
+        'bg': '#ffffff',
+        'bg_secondary': '#f8f9fa',
+        'text': '#1a1a1a',
+        'text_light': '#666666',
+        'border': '#e0e0e0',
+    }
+
+    # Build snapshot lookup: evidence_id -> snapshot with image
+    snap_lookup = {}
+    for i, snap in enumerate(current_snapshots):
+        snap_lookup[i + 1] = snap
+
+    # --- KPI Summary Bar ---
+    df_main = st.session_state.get('df_main')
+    total_patents = len(df_main) if df_main is not None else 0
+    modules_used = sorted(set(s.get('module', '') for s in current_snapshots))
+
+    kpi_cols = st.columns(4)
+    with kpi_cols[0]:
+        st.metric("特許件数", f"{total_patents:,}")
+    with kpi_cols[1]:
+        st.metric("分析モジュール", f"{len(modules_used)}")
+    with kpi_cols[2]:
+        st.metric("エビデンス", f"{len(current_snapshots)}")
+    with kpi_cols[3]:
+        st.metric("レポートモード", st.session_state.get('voyager_report_mode', '標準').split('(')[0].strip())
+
+    # --- Rich CSS ---
+    st.markdown("""<style>
+    .report-container { background:#fff; border:1px solid #e0e0e0; border-radius:0 0 12px 12px; padding:40px 48px; margin:0 0 24px 0; box-shadow:0 2px 8px rgba(0,0,0,0.06); font-family:'Hiragino Kaku Gothic ProN','Noto Sans JP','Meiryo',sans-serif; line-height:1.9; color:#1a1a1a; }
+    .report-container h1 { color:#003366; font-size:1.7rem; border-bottom:3px solid #003366; padding-bottom:8px; margin-top:36px; }
+    .report-container h2 { color:#004080; font-size:1.3rem; border-bottom:2px solid #e0e0e0; padding-bottom:6px; margin-top:28px; }
+    .report-container h3 { color:#333; font-size:1.1rem; margin-top:20px; }
+    .report-container p { margin:10px 0; text-align:justify; }
+    .report-container ul, .report-container ol { margin:8px 0 8px 24px; }
+    .report-container li { margin:4px 0; }
+    .report-container blockquote { border-left:4px solid #003366; background:#f0f4f8; padding:12px 16px; margin:12px 0; border-radius:0 8px 8px 0; }
+    .report-container table { border-collapse:collapse; width:100%; margin:16px 0; }
+    .report-container th { background:#003366; color:#fff; padding:10px 14px; text-align:left; font-weight:600; }
+    .report-container td { border:1px solid #ddd; padding:8px 14px; }
+    .report-container tr:nth-child(even) { background:#f8f9fa; }
+    .report-container strong { color:#003366; }
+    .report-container .evidence-badge { background:#e8f0fe; color:#1a73e8; padding:2px 8px; border-radius:4px; font-weight:600; font-size:0.9em; }
+    .report-container .evidence-img { border:1px solid #e0e0e0; border-radius:8px; margin:12px 0; max-width:100%; }
+    .report-header { background:linear-gradient(135deg,#003366 0%,#004080 100%); color:#fff; padding:32px 48px; border-radius:12px 12px 0 0; margin:16px 0 0 0; }
+    .report-header h2 { color:#fff !important; border:none !important; font-size:1.5rem; margin:0; }
+    .report-header p { color:rgba(255,255,255,0.8); margin:6px 0 0; font-size:0.9rem; }
+    </style>""", unsafe_allow_html=True)
+
+    # --- Header ---
+    st.markdown(f"""<div class="report-header">
+        <h2>📝 VOYAGER Strategic Report</h2>
+        <p>{datetime.datetime.now().strftime('%Y-%m-%d %H:%M')} | {len(modules_used)} Modules | {len(current_snapshots)} Evidence</p>
+    </div>""", unsafe_allow_html=True)
+
+    # --- Render report with Evidence image inline ---
+    import re as _re
+    import base64
+
+    def _render_report_html(md_text, snap_lookup):
+        """Markdownテキストを処理し、Evidence引用に画像をインライン展開する（各画像は初回のみ表示）"""
+        inserted_images = set()  # 既に画像を挿入済みのEvidence ID
+
+        def _replace_evidence(match):
+            ev_id = int(match.group(1))
+            badge = f'<span class="evidence-badge">📌 Evidence {ev_id}</span>'
+
+            # 2回目以降の引用はバッジのみ（画像重複を防止）
+            if ev_id in inserted_images:
+                return badge
+
+            snap = snap_lookup.get(ev_id)
+            if snap:
+                img_bytes = snap.get('image')
+                if not img_bytes and snap.get('images') and len(snap['images']) > 0:
+                    img_bytes = snap['images'][0]
+
+                if img_bytes:
+                    inserted_images.add(ev_id)
+                    b64 = base64.b64encode(img_bytes).decode()
+                    title = snap.get('title', '')
+                    img_tag = f'<br><img class="evidence-img" src="data:image/png;base64,{b64}" alt="Evidence {ev_id}: {title}">'
+                    caption = f'<div style="text-align:center; color:#666; font-size:0.85em; margin-bottom:16px;">Fig.{ev_id}: {title}</div>'
+                    return badge + img_tag + caption
+            return badge
+
+        html = _re.sub(r'\[\[Evidence\s*(\d+)\]\]', _replace_evidence, md_text)
+        return html
+
+    rendered_html = _render_report_html(report_text, snap_lookup)
+    st.markdown(f'<div class="report-container">{rendered_html}</div>', unsafe_allow_html=True)
+
+    # --- Download Buttons ---
+    st.markdown("#### 📥 レポートダウンロード")
+    col_dl1, col_dl2 = st.columns([1, 2])
+
+    with col_dl1:
+        st.download_button(
+            "📥 Markdown (.md)",
+            data=report_text,
+            file_name=f"voyager_report_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.md",
+            mime="text/markdown",
+            key="voyager_download_md"
+        )
+
+    with col_dl2:
+        with st.expander("📋 Markdownソース"):
+            st.code(report_text, language="markdown")
+

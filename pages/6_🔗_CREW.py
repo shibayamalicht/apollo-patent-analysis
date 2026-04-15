@@ -16,14 +16,15 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import normalize
 from wordcloud import WordCloud
 import os
-import japanize_matplotlib
 import utils
+import patiroha
+utils.configure_matplotlib_font()
 
 # ==============================================================================
 #  1. ページ設定 (最優先)
 # ==============================================================================
 st.set_page_config(
-    page_title="APOLLO | CREW", 
+    page_title="APOLLO CAPCOM | CREW", 
     page_icon="🔗", 
     layout="wide"
 )
@@ -61,18 +62,16 @@ utils.render_sidebar()
 class PatentAnalyzer:
     def __init__(self, df, col_inv, col_date, col_assignee=None, embeddings=None):
         self.df = df.copy()
-        # 元データのインデックスを保持（ベクトル参照用）
         self.df['__orig_idx'] = range(len(self.df))
-        
+
         self.col_inv = col_inv
         self.col_date = col_date
         self.col_assignee = col_assignee
-        self.embeddings_global = embeddings # Mission Controlから受け取った全件ベクトル (正規化済み想定)
-        
+        self.embeddings_global = embeddings
+
         self.remove_chars = ['▲', '▼']
         self.sep_char = ';'
-        
-        # キャッシュ (ベクトル計算結果などを保持)
+
         self.cache_inventor = {'embeddings': None, 'topics': {}, 'names': [], 'name_to_idx': {}, 'processed_corpus': []}
         self.cache_corporate = {'embeddings': None, 'topics': {}, 'names': [], 'name_to_idx': {}, 'processed_corpus': []}
         self.current_mode = 'inventor'
@@ -83,8 +82,7 @@ class PatentAnalyzer:
             if not isinstance(name, str): return ""
             for char in self.remove_chars: name = name.replace(char, "")
             return name.strip().replace("　", "")
-        
-        # リスト化処理
+
         self.df['inventors_list'] = self.df[self.col_inv].astype(str).apply(
             lambda x: [clean(n) for n in x.split(self.sep_char) if clean(n)]
         )
@@ -125,19 +123,26 @@ class PatentAnalyzer:
         if mode == 'corporate' and (not self.col_assignee): return False
         if self.embeddings_global is None: return False
 
-        # 1. 展開 (Explode)
-        exploded = self.df.explode(target_col)[['__orig_idx', target_col, 'text_for_tfidf']]
+        text_col = 'text_for_tfidf'
+        if text_col not in self.df.columns:
+            col_map = st.session_state.get('col_map', {})
+            t_col = col_map.get('title', '')
+            a_col = col_map.get('abstract', '')
+            self.df[text_col] = (
+                self.df[t_col].fillna('') if t_col and t_col in self.df.columns else ''
+            ) + ' ' + (
+                self.df[a_col].fillna('') if a_col and a_col in self.df.columns else ''
+            )
+
+        exploded = self.df.explode(target_col)[['__orig_idx', target_col, text_col]]
         exploded = exploded.dropna(subset=[target_col])
         exploded = exploded[exploded[target_col] != ""]
-        
-        # 2. グルーピング
+
         grouped = exploded.groupby(target_col)['__orig_idx'].apply(list)
         names = grouped.index.tolist()
-        
-        # テキストも結合 (TF-IDF用)
-        text_grouped = exploded.groupby(target_col)['text_for_tfidf'].apply(lambda x: ' '.join(x.astype(str)))
-        
-        # 3. ベクトル平均化 & 再正規化
+
+        text_grouped = exploded.groupby(target_col)[text_col].apply(lambda x: ' '.join(x.astype(str)))
+
         n_samples = len(names)
         dim = self.embeddings_global.shape[1]
         
@@ -160,8 +165,7 @@ class PatentAnalyzer:
                 processed_corpus.append(text_grouped[name])
             
             prog_bar.empty()
-            
-            # 再正規化
+
             vectors = normalize(vectors, norm='l2')
         
         cache['names'] = names
@@ -186,8 +190,7 @@ class PatentAnalyzer:
         
         kmeans = KMeans(n_clusters=actual_k, random_state=42, n_init=10)
         kmeans.fit(cache['embeddings'])
-        
-        # トピック名生成 (TF-IDF)
+
         df_cluster = pd.DataFrame({'label': kmeans.labels_, 'text': cache['processed_corpus']})
         topic_names = {}
         
@@ -234,7 +237,7 @@ class PatentAnalyzer:
         
         target_set = set(applicants) if applicants else None
         if target_set:
-            target_col = 'applicants_list' 
+            target_col = 'applicants_list'
             mask = df_sub[target_col].apply(lambda x: not set(x).isdisjoint(target_set))
             df_sub = df_sub[mask]
 
@@ -251,10 +254,9 @@ class PatentAnalyzer:
         
         embeddings = cache.get('embeddings')
         name_to_idx = cache.get('name_to_idx')
-        
+
         if target_col not in df_subset.columns: return G
 
-        # 1. 共起カウント
         for item_list in df_subset[target_col]:
             if len(item_list) > 1:
                 for u, v in itertools.combinations(item_list, 2):
@@ -265,8 +267,7 @@ class PatentAnalyzer:
             elif len(item_list) == 1:
                 if not G.has_node(item_list[0]):
                     G.add_node(item_list[0])
-        
-        # 2. 距離計算 (オンデマンド)
+
         if embeddings is not None and name_to_idx is not None:
             for u, v in G.edges():
                 if u in name_to_idx and v in name_to_idx:
@@ -322,8 +323,7 @@ class PatentAnalyzer:
         target_col = 'inventors_list' if self.current_mode == 'inventor' else 'applicants_list'
         exploded = df_sub.explode(target_col)
         app_counts_total = exploded[target_col].value_counts()
-        
-        # Rising Score
+
         if year_range is not None:
             start_year, end_year = year_range
             recent_threshold = end_year - recent_years
@@ -409,7 +409,7 @@ class PatentAnalyzer:
 # ==============================================================================
 # ==============================================================================
 st.title("🔗 CREW")
-st.markdown("##### Co-occurrence Relationship Exploration Web")
+st.markdown("発明者・出願人の共願ネットワークを構築し、媒介中心性・コミュニティ構造から技術の中核プレイヤーとアライアンスを可視化します。")
 
 st.markdown("""
 CREW（共起関係探索ウェブ） は、発明者や出願人のつながり（共起ネットワーク）を可視化し、組織内のハブ人材や技術コミュニティを特定するモジュールです。
@@ -425,13 +425,13 @@ elif st.session_state.get('df_main') is not None:
     st.session_state['shared_df'] = df
 
 embeddings = st.session_state.get('sbert_embeddings')
+df_main = df
 
 if df is None or embeddings is None:
     st.error("⚠️ データまたはベクトル情報が読み込まれていません")
     st.markdown("Mission Control に戻って「分析エンジン起動」を実行してください。")
     st.stop()
 
-# --- Analyzer初期化 ---
 if 'analyzer' not in st.session_state:
     st.session_state.analyzer = None
 
@@ -479,7 +479,6 @@ with st.expander("分析パラメータ設定", expanded=True):
             st.session_state.analyzer = analyzer
         st.success("分析完了！")
 
-# --- Filters ---
 if st.session_state.analyzer:
     analyzer = st.session_state.analyzer
     analyzer.switch_mode('inventor' if mode == "発明者ネットワーク" else 'corporate')
@@ -517,7 +516,6 @@ if st.session_state.analyzer:
                 '急上昇スコア'
             ])
 
-    # データ構築
     G = analyzer.build_graph_at_year(year_range, applicants=sel_apps)
     G_filtered = analyzer.apply_filters(G, min_node, min_edge, True, year_range, applicants=sel_apps)
     
@@ -565,12 +563,12 @@ if st.session_state.analyzer:
             fig_net = go.Figure(data=[edge_trace, node_trace], layout=go.Layout(showlegend=False, margin=dict(b=0,l=0,r=0,t=0), height=600))
             fig_net.update_xaxes(visible=False); fig_net.update_yaxes(visible=False)
             # 幅いっぱいに広げるためにwidth=Noneを渡す (凝縮防止)
-            utils.update_fig_layout(fig_net, "共起ネットワーク図", height=600, width=None, theme_config=utils.get_theme_config("APOLLO Standard"))
+            utils.update_fig_layout(fig_net, "共起ネットワーク図", height=600, width=None)
             fig_net.update_layout(margin=dict(l=10, r=10, t=40, b=10))
             # アスペクト比制限を解除 (隠された軸設定による制限を回避)
             fig_net.update_yaxes(scaleanchor=None, scaleratio=None)
             st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
-            
+
         with tab2:
             st.dataframe(metrics_df.sort_values('媒介中心性', ascending=False), use_container_width=True)
             st.download_button("CSVダウンロード", metrics_df.to_csv().encode('utf-8'), "crew_metrics.csv", "text/csv")
@@ -581,41 +579,35 @@ if st.session_state.analyzer:
             df_hm['技術トピック'] = df_hm['技術トピック'].astype(str).str.split('; ')
             df_exp = df_hm.explode('技術トピック')
             df_exp = df_exp[df_exp['技術トピック'].str.strip() != ""]
-            
-            # ヒートマップデータ
+
             ct = pd.crosstab(df_exp['コミュニティ'], df_exp['技術トピック'])
-            
+
             if not ct.empty:
-                # 1. 軸を文字列化 (隙間防止) & 小数点削除 (float -> int -> str)
                 ct.index = ct.index.astype(float).astype(int).astype(str)
                 ct.columns = ct.columns.astype(str)
 
-                # 2. 並び替え
                 ct = ct.loc[ct.sum(axis=1).sort_values(ascending=False).index]
                 ct = ct[ct.sum().sort_values(ascending=False).index]
-                
-                # 3. テキストデータ作成 (0を空文字に)
+
                 text_df = ct.astype(int).astype(str)
                 text_df[ct == 0] = ""
-                
-                # 4. カラーマップ (0を薄いグレーに)
+
                 custom_colorscale = [[0.0, "#f9f9f9"], [0.01, "#eff3ff"], [1.0, "#08519c"]]
-                
-                # 5. 描画
+
                 fig_hm = px.imshow(
                     ct, 
                     aspect="auto", 
                     color_continuous_scale=custom_colorscale,
                     labels=dict(x="技術トピック", y="コミュニティID", color="人数")
                 )
-                # 6. テキスト適用 & グリッド線 (xgap/ygap)
                 fig_hm.update_traces(text=text_df, texttemplate="%{text}", xgap=1, ygap=1)
                 
                 fig_hm.update_xaxes(type='category', side="bottom")
                 fig_hm.update_yaxes(type='category', autorange="reversed")
                 
-                utils.update_fig_layout(fig_hm, "コミュニティ × 技術トピック", height=600, theme_config=utils.get_theme_config("APOLLO Standard"), show_axes=True)
+                utils.update_fig_layout(fig_hm, "コミュニティ × 技術トピック", height=600, show_axes=True)
                 st.plotly_chart(fig_hm, use_container_width=True, config={'editable': False})
+
             else: st.info("データなし")
 
         with tab4:
@@ -624,7 +616,7 @@ if st.session_state.analyzer:
                 df_tr = analyzer.get_inventor_trends(year_range=year_range, applicants=sel_apps)
                 if not df_tr.empty:
                     fig_tr = px.bar(df_tr, x='出願年', y=['継続', '新規'], labels={'value':'人数'}, color_discrete_map={'新規':'#EF553B','継続':'#636EFA'})
-                    utils.update_fig_layout(fig_tr, "発明者数推移", height=400, theme_config=utils.get_theme_config("APOLLO Standard"), show_axes=True)
+                    utils.update_fig_layout(fig_tr, "発明者数推移", height=400, show_axes=True)
                     st.plotly_chart(fig_tr, use_container_width=True, config={'editable': False})
                 
                 st.markdown("##### タイムライン")
@@ -632,7 +624,6 @@ if st.session_state.analyzer:
                 with col_tl: top_n_tl = st.slider("トップ表示数", 5, 50, 20)
                 df_time = analyzer.get_inventor_timeline(year_range=year_range, applicants=sel_apps, top_n=top_n_tl)
                 if not df_time.empty:
-                    # 出願数が多い順に上から表示
                     total_counts = df_time.groupby('発明者')['出願数'].sum().sort_values(ascending=False)
                     sorted_inventors = total_counts.index.tolist()
 
@@ -641,8 +632,9 @@ if st.session_state.analyzer:
                         category_orders={'発明者': sorted_inventors}
                     )
                     fig_time.update_layout(showlegend=False, height=max(400, top_n_tl * 25))
-                    utils.update_fig_layout(fig_time, "タイムライン", height=max(400, top_n_tl * 25), theme_config=utils.get_theme_config("APOLLO Standard"), show_axes=True)
+                    utils.update_fig_layout(fig_time, "タイムライン", height=max(400, top_n_tl * 25), show_axes=True)
                     st.plotly_chart(fig_time, use_container_width=True, config={'editable': False})
+
             else: st.info("企業モードではタイムライン非表示")
 
         with tab5:
@@ -655,6 +647,16 @@ if st.session_state.analyzer:
                     if kws:
                         wc = WordCloud(width=600, height=400, background_color='white', font_path=utils.get_japanese_font_path(), regexp=r"[\w']+").generate_from_frequencies(kws)
                         fig, ax = plt.subplots(); ax.imshow(wc, interpolation="bilinear"); ax.axis("off"); st.pyplot(fig)
+                        try:
+                            import capcom
+                            if capcom.is_active():
+                                wc_data = {
+                                    "metadata": {"module": "CREW", "title": sel, "type": "node_keywords"},
+                                    "word_frequencies": dict(kws)
+                                }
+                                capcom.save_data(f"crew_wordcloud.json", wc_data)
+                        except Exception:
+                            pass
                 with c2:
                     if kws: st.dataframe(pd.DataFrame(list(kws.items()), columns=['Word', 'Freq']), height=200)
                     st.write(metrics_df.loc[sel])
