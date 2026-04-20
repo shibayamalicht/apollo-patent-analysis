@@ -24,7 +24,7 @@ utils.configure_matplotlib_font()
 #  1. ページ設定 (最優先)
 # ==============================================================================
 st.set_page_config(
-    page_title="APOLLO CAPCOM | CREW", 
+    page_title="APOLLO v8 | CREW", 
     page_icon="🔗", 
     layout="wide"
 )
@@ -62,16 +62,18 @@ utils.render_sidebar()
 class PatentAnalyzer:
     def __init__(self, df, col_inv, col_date, col_assignee=None, embeddings=None):
         self.df = df.copy()
+        # 元データのインデックスを保持（ベクトル参照用）
         self.df['__orig_idx'] = range(len(self.df))
-
+        
         self.col_inv = col_inv
         self.col_date = col_date
         self.col_assignee = col_assignee
-        self.embeddings_global = embeddings
-
+        self.embeddings_global = embeddings # Mission Controlから受け取った全件ベクトル (正規化済み想定)
+        
         self.remove_chars = ['▲', '▼']
         self.sep_char = ';'
-
+        
+        # キャッシュ (ベクトル計算結果などを保持)
         self.cache_inventor = {'embeddings': None, 'topics': {}, 'names': [], 'name_to_idx': {}, 'processed_corpus': []}
         self.cache_corporate = {'embeddings': None, 'topics': {}, 'names': [], 'name_to_idx': {}, 'processed_corpus': []}
         self.current_mode = 'inventor'
@@ -82,7 +84,8 @@ class PatentAnalyzer:
             if not isinstance(name, str): return ""
             for char in self.remove_chars: name = name.replace(char, "")
             return name.strip().replace("　", "")
-
+        
+        # リスト化処理
         self.df['inventors_list'] = self.df[self.col_inv].astype(str).apply(
             lambda x: [clean(n) for n in x.split(self.sep_char) if clean(n)]
         )
@@ -123,6 +126,8 @@ class PatentAnalyzer:
         if mode == 'corporate' and (not self.col_assignee): return False
         if self.embeddings_global is None: return False
 
+        # 1. 展開 (Explode)
+        # text_for_tfidf が無い場合はtitle+abstractで代替
         text_col = 'text_for_tfidf'
         if text_col not in self.df.columns:
             col_map = st.session_state.get('col_map', {})
@@ -138,11 +143,14 @@ class PatentAnalyzer:
         exploded = exploded.dropna(subset=[target_col])
         exploded = exploded[exploded[target_col] != ""]
 
+        # 2. グルーピング
         grouped = exploded.groupby(target_col)['__orig_idx'].apply(list)
         names = grouped.index.tolist()
 
+        # テキストも結合 (TF-IDF用)
         text_grouped = exploded.groupby(target_col)[text_col].apply(lambda x: ' '.join(x.astype(str)))
-
+        
+        # 3. ベクトル平均化 & 再正規化
         n_samples = len(names)
         dim = self.embeddings_global.shape[1]
         
@@ -165,7 +173,8 @@ class PatentAnalyzer:
                 processed_corpus.append(text_grouped[name])
             
             prog_bar.empty()
-
+            
+            # 再正規化
             vectors = normalize(vectors, norm='l2')
         
         cache['names'] = names
@@ -190,7 +199,8 @@ class PatentAnalyzer:
         
         kmeans = KMeans(n_clusters=actual_k, random_state=42, n_init=10)
         kmeans.fit(cache['embeddings'])
-
+        
+        # トピック名生成 (TF-IDF)
         df_cluster = pd.DataFrame({'label': kmeans.labels_, 'text': cache['processed_corpus']})
         topic_names = {}
         
@@ -237,7 +247,7 @@ class PatentAnalyzer:
         
         target_set = set(applicants) if applicants else None
         if target_set:
-            target_col = 'applicants_list'
+            target_col = 'applicants_list' 
             mask = df_sub[target_col].apply(lambda x: not set(x).isdisjoint(target_set))
             df_sub = df_sub[mask]
 
@@ -254,9 +264,10 @@ class PatentAnalyzer:
         
         embeddings = cache.get('embeddings')
         name_to_idx = cache.get('name_to_idx')
-
+        
         if target_col not in df_subset.columns: return G
 
+        # 1. 共起カウント
         for item_list in df_subset[target_col]:
             if len(item_list) > 1:
                 for u, v in itertools.combinations(item_list, 2):
@@ -267,7 +278,8 @@ class PatentAnalyzer:
             elif len(item_list) == 1:
                 if not G.has_node(item_list[0]):
                     G.add_node(item_list[0])
-
+        
+        # 2. 距離計算 (オンデマンド)
         if embeddings is not None and name_to_idx is not None:
             for u, v in G.edges():
                 if u in name_to_idx and v in name_to_idx:
@@ -323,7 +335,8 @@ class PatentAnalyzer:
         target_col = 'inventors_list' if self.current_mode == 'inventor' else 'applicants_list'
         exploded = df_sub.explode(target_col)
         app_counts_total = exploded[target_col].value_counts()
-
+        
+        # Rising Score
         if year_range is not None:
             start_year, end_year = year_range
             recent_threshold = end_year - recent_years
@@ -425,13 +438,14 @@ elif st.session_state.get('df_main') is not None:
     st.session_state['shared_df'] = df
 
 embeddings = st.session_state.get('sbert_embeddings')
-df_main = df
+df_main = df  # AI Insight用の変数名統一
 
 if df is None or embeddings is None:
     st.error("⚠️ データまたはベクトル情報が読み込まれていません")
     st.markdown("Mission Control に戻って「分析エンジン起動」を実行してください。")
     st.stop()
 
+# --- Analyzer初期化 ---
 if 'analyzer' not in st.session_state:
     st.session_state.analyzer = None
 
@@ -479,6 +493,7 @@ with st.expander("分析パラメータ設定", expanded=True):
             st.session_state.analyzer = analyzer
         st.success("分析完了！")
 
+# --- Filters ---
 if st.session_state.analyzer:
     analyzer = st.session_state.analyzer
     analyzer.switch_mode('inventor' if mode == "発明者ネットワーク" else 'corporate')
@@ -516,6 +531,7 @@ if st.session_state.analyzer:
                 '急上昇スコア'
             ])
 
+    # データ構築
     G = analyzer.build_graph_at_year(year_range, applicants=sel_apps)
     G_filtered = analyzer.apply_filters(G, min_node, min_edge, True, year_range, applicants=sel_apps)
     
@@ -579,27 +595,34 @@ if st.session_state.analyzer:
             df_hm['技術トピック'] = df_hm['技術トピック'].astype(str).str.split('; ')
             df_exp = df_hm.explode('技術トピック')
             df_exp = df_exp[df_exp['技術トピック'].str.strip() != ""]
-
+            
+            # ヒートマップデータ
             ct = pd.crosstab(df_exp['コミュニティ'], df_exp['技術トピック'])
-
+            
             if not ct.empty:
+                # 1. 軸を文字列化 (隙間防止) & 小数点削除 (float -> int -> str)
                 ct.index = ct.index.astype(float).astype(int).astype(str)
                 ct.columns = ct.columns.astype(str)
 
+                # 2. 並び替え
                 ct = ct.loc[ct.sum(axis=1).sort_values(ascending=False).index]
                 ct = ct[ct.sum().sort_values(ascending=False).index]
-
+                
+                # 3. テキストデータ作成 (0を空文字に)
                 text_df = ct.astype(int).astype(str)
                 text_df[ct == 0] = ""
-
+                
+                # 4. カラーマップ (0を薄いグレーに)
                 custom_colorscale = [[0.0, "#f9f9f9"], [0.01, "#eff3ff"], [1.0, "#08519c"]]
-
+                
+                # 5. 描画
                 fig_hm = px.imshow(
                     ct, 
                     aspect="auto", 
                     color_continuous_scale=custom_colorscale,
                     labels=dict(x="技術トピック", y="コミュニティID", color="人数")
                 )
+                # 6. テキスト適用 & グリッド線 (xgap/ygap)
                 fig_hm.update_traces(text=text_df, texttemplate="%{text}", xgap=1, ygap=1)
                 
                 fig_hm.update_xaxes(type='category', side="bottom")
@@ -624,6 +647,7 @@ if st.session_state.analyzer:
                 with col_tl: top_n_tl = st.slider("トップ表示数", 5, 50, 20)
                 df_time = analyzer.get_inventor_timeline(year_range=year_range, applicants=sel_apps, top_n=top_n_tl)
                 if not df_time.empty:
+                    # 出願数が多い順に上から表示
                     total_counts = df_time.groupby('発明者')['出願数'].sum().sort_values(ascending=False)
                     sorted_inventors = total_counts.index.tolist()
 
@@ -647,6 +671,7 @@ if st.session_state.analyzer:
                     if kws:
                         wc = WordCloud(width=600, height=400, background_color='white', font_path=utils.get_japanese_font_path(), regexp=r"[\w']+").generate_from_frequencies(kws)
                         fig, ax = plt.subplots(); ax.imshow(wc, interpolation="bilinear"); ax.axis("off"); st.pyplot(fig)
+                        # CAPCOM: CREWワードクラウドデータ保存
                         try:
                             import capcom
                             if capcom.is_active():

@@ -1,0 +1,139 @@
+# APOLLO CAPCOM レポート生成タスク
+
+> **本ファイルは `apollo-capcom` Skill が最初に生成する Antigravity Artifact です。**
+> 各 `- [ ]` 項目は Agent が完了時に `- [x]` にチェックを入れ、Artifact Review Policy = "Request Review" 設定下ではユーザーの承認を経て次の Phase に進みます。
+
+---
+
+## Phase A: Mission & Data Intake
+
+- [ ] `voyager/mission.json` を読了し、Mission Objective を把握
+- [ ] `voyager/context.json` でデータセットのメタ情報（件数・期間・出願人特性）を確認
+- [ ] `evidence_list` 全件を走査し、`implementation_plan.md` § Evidence Inventory に一覧化
+- [ ] `snapshots/` のファイル一覧を取得し、各 Evidence と紐付け
+- [ ] `data/patents.csv` を **`head -5`** でカラム構成確認 → `wc -l` で件数把握
+- [ ] pandas で出願人上位10社・クラスタ別件数・年別件数を把握（`implementation_plan.md` § Data Summary に記録）
+- [ ] `data/` 以下の全モジュールJSONから主要数値（クラスタ数、ノイズ率、HHI/Entropy/Gini、CAGR等）を抽出
+- [ ] `prompts/` のAIインサイト **最低3-5件** を選定・読了し、知見を `implementation_plan.md` § Key AI Insights に記録
+- [ ] データセット全体像メモを完成させ、ユーザーに提示
+
+**完了条件**: 上記すべて `[x]`
+
+---
+
+## Phase A-2: Title Selection 🛑 GATE
+
+- [ ] `implementation_plan.md` § Title Candidates に **3案** を追記（15文字タイトル + 30文字サブタイトル）
+- [ ] Antigravity Artifact Review で **ユーザーが1案に ✅ を付ける** or コメントで指示
+- [ ] 確定タイトルを `implementation_plan.md` § Confirmed Title に転記
+- [ ] `voyager/mission.json` に `"confirmed_title"` フィールドで保存
+
+**ゲート通過条件**: Confirmed Title が確定、ユーザー承認済み
+
+---
+
+## Phase B: Evidence & Cross-Module Analysis 🛑 GATE x2
+
+### リファレンス読了
+- [ ] `capcom_schema/analysis/common_framework.md` 読了（4層分析モデル）
+- [ ] `capcom_schema/analysis/data_notes.md` 読了（特許/NPL非対称性、Web調査ルール）
+- [ ] `capcom_schema/analysis/cross_module.md` 読了（13種クロスパターン）
+
+### 🛑 GATE 1: クロスパターン選定（ユーザー承認）
+- [ ] `implementation_plan.md` § Cross-Module Pattern Selection に13パターン + Agent推奨3つ（★付き）を記載
+- [ ] Antigravity Artifact Review でユーザーが3つ選定
+- [ ] 確定した3パターンを `implementation_plan.md` § Confirmed Cross Patterns に転記
+
+### 🛑 GATE 2: Web調査可否（ユーザー承認）
+- [ ] `implementation_plan.md` § Web Research Themes に候補3-5件を記載
+- [ ] `task.md` の下記チェックボックスをユーザーが選択（必ず1つ `[x]` にする）
+  - [ ] Web調査を **実施する**（推奨）
+  - [ ] Web調査を **スキップする**（特許データのみで書く）
+  - [ ] Web調査テーマを **修正したい**（コメントで指示）
+
+### 本体作業
+- [ ] Evidence全件に優先順位（1-3）を付与
+- [ ] 優先度高 5-8件を1件ずつ精読（AIインサイト照合・`map_reading.md` 該当セクション・代表特許抽出・スナップショット記録）
+- [ ] `data/patents.csv` から代表特許 **15件以上** 取得（タイトル・出願人・公開番号）
+- [ ] 選定した3クロスパターンを実行（仮説→検証→結論、各15-20行）
+- [ ] 成果を `implementation_plan.md` § Phase B Output Summary に記録
+
+**ゲート通過条件**: 上記すべて `[x]` + bash gate 不要（Phase C 入口に組込）
+
+---
+
+## Phase C: Module Deep Dive 🛑 SCRIPTED GATE
+
+### 準備
+- [ ] `capcom_schema/analysis/deep_dive_guide.md` 読了（Step 0-6 必須セクション・最低行数）
+- [ ] `implementation_plan.md` § Deep Dive Plan を完成させ、ユーザー承認を取得
+
+### Deep Dive 生成（Step 0 → 6 の順）
+- [ ] Step 0: `reports/nebula_deep_dive.typ` （120行以上 / 8セクション）
+- [ ] Step 1: `reports/saturnv_deep_dive.typ` （250行以上 / 13セクション）
+- [ ] Step 2: `reports/explorer_deep_dive.typ` （200行以上 / 11セクション）
+- [ ] Step 3: `reports/mega_deep_dive.typ` （120行以上 / 9セクション）
+- [ ] Step 4: `reports/atlas_deep_dive.typ` （120行以上 / 9セクション）
+- [ ] Step 5: `reports/core_deep_dive.typ` （80行以上 / 7セクション）
+- [ ] Step 6: `reports/crew_deep_dive.typ` （最低行数指定なし）
+
+各 deep_dive に必須:
+- ミクロ分析A: 代表特許 **15件以上**（公開番号・タイトル・出願人）
+- ミクロ分析B: 出願人 **5社以上**（各5行以上）
+- `#snapshot-figure()` **1枚以上** 挿入
+
+### 🛑 SCRIPTED GATE: Phase C 完了判定
+- [ ] `bash capcom_schema/scripts/phase_c_gate.sh` を実行
+- [ ] exit code 0 を確認
+- [ ] 結果を `walkthrough.md` § Phase C Gate Result に転記
+- [ ] FAIL なら該当モジュールを補強して再実行
+
+**ゲート通過条件**: `phase_c_gate.sh` exit 0 + `walkthrough.md` に結果記録済み
+
+---
+
+## Phase D: Integration & Quality Gate 🛑 SCRIPTED GATE
+
+### 準備
+- [ ] `capcom_schema/analysis/report_structure.md` 読了
+- [ ] `capcom_schema/analysis/quality_checklist.md` 読了
+- [ ] `implementation_plan.md` § Report Structure & Quality Plan を完成させ、ユーザー承認を取得
+
+### 統合レポート生成
+- [ ] `reports/report.typ` を生成（`analysis/report_structure.md` § 1 の構造）
+- [ ] 全 deep_dive を **全文コピー**（要約・圧縮・省略禁止）
+- [ ] クロスモジュール統合分析章（80行以上、3パターン）
+- [ ] 結論章（Confirmed Title, Mission Objective への答え）
+- [ ] 付録: Evidence 一覧 / 代表特許リスト / Web調査出所
+
+### 🛑 SCRIPTED GATE: Phase D 品質判定
+- [ ] `bash capcom_schema/scripts/phase_d_gate.sh` を実行
+- [ ] exit code 0 を確認（7 Check 全通過）
+- [ ] 結果を `walkthrough.md` § Phase D Gate Result に転記
+- [ ] FAIL なら該当項目を修正して再実行
+
+### PDF 出力
+- [ ] `typst compile --root ".." reports/report.typ reports/report.pdf` 成功
+- [ ] `walkthrough.md` § Final Deliverables に出力ファイル一覧を記録
+
+**ゲート通過条件**: `phase_d_gate.sh` exit 0 + PDF 出力成功
+
+---
+
+## 最終成果物
+
+- [ ] `reports/report.pdf` (Typst PDF、本レポート)
+- [ ] `reports/report.typ` (ソースファイル)
+- [ ] `reports/*_deep_dive.typ` (モジュール別 deep_dive 全て)
+- [ ] `walkthrough.md` (Phase C/D Gate Result 転記済み)
+- [ ] `implementation_plan.md` (Confirmed Title, Cross Patterns, Plan 全て確定)
+
+---
+
+## 🔒 絶対遵守ルール（SKILL.md §0 参照）
+
+1. **全ゲートは省略不可** — Artifact Review を経ずに次 Phase に進まない
+2. **ユーザー応答待ち必須** — `task.md` のチェックボックスを Agent が勝手に `[x]` にしない（ユーザー判断項目のみ）
+3. **不合格時は強制ループ** — bash gate FAIL 時に「実質的にOK」と進むのは禁止
+4. **指示の長さで手順を変えない** — 「レポート書いて」でも全ゲート通過必須
+5. **省略判断禁止** — 「省略します」と宣言する前にユーザーに確認

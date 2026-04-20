@@ -1,0 +1,128 @@
+# APOLLO CAPCOM レポート Walkthrough（完了証跡）
+
+> **本ファイルは `apollo-capcom` Skill が Phase C/D 完了時に記録する Antigravity Artifact です。**
+> 各 bash gate スクリプトの実行結果を **そのまま転記** し、品質ゲートをクリアした証跡とします。
+> Agent は本ファイルを改ざんしないこと（スクリプト出力を加工せずコピペ）。
+
+---
+
+## セッション情報
+
+- **Session ID**: （例）session_20260416_143022_abc123
+- **Generated at**: （Phase D 完了時刻、ISO 8601）
+- **Agent**: Antigravity IDE
+- **Skill**: apollo-capcom (v7 overlay patch)
+- **Confirmed Title**: （`implementation_plan.md` § Confirmed Title から転記）
+
+---
+
+## Phase C Gate Result
+
+> `bash capcom_schema/scripts/phase_c_gate.sh` の stdout/stderr をそのまま転記してください。
+
+```
+（ここに phase_c_gate.sh の実行結果を貼り付け）
+
+=== Phase C ゲート判定 ===
+Reports dir: reports
+
+✅ OK:   reports/nebula_deep_dive.typ = 125行 (要 120行)
+✅ OK:   reports/saturnv_deep_dive.typ = 268行 (要 250行)
+✅ OK:   reports/explorer_deep_dive.typ = 215行 (要 200行)
+✅ OK:   reports/mega_deep_dive.typ = 134行 (要 120行)
+✅ OK:   reports/atlas_deep_dive.typ = 128行 (要 120行)
+✅ OK:   reports/core_deep_dive.typ = 92行 (要 80行)
+ℹ️  INFO: reports/crew_deep_dive.typ = 67行 (CREW は最低行数指定なし)
+
+✅ Phase C GATE PASSED. Phase D に進めます。
+```
+
+**Gate 通過判定**: ✅ PASSED / ❌ FAILED（該当を残す）
+
+---
+
+## Phase D Gate Result
+
+> `bash capcom_schema/scripts/phase_d_gate.sh` の stdout/stderr をそのまま転記してください。
+
+```
+（ここに phase_d_gate.sh の実行結果を貼り付け）
+
+=== Phase D 品質ゲート判定 ===
+Target: reports/report.typ
+
+✅ Check 1 OK:   report.typ = 912行 (要 800行以上)
+✅ Check 2 OK:   代表特許引用 = 23件 (要 15件以上)
+ℹ️  Check 3: Layer2(解釈)=12, Layer3(洞察)=8, Layer4(提言)=9 (各5件以上が目安)
+✅ Check 4 OK:   クロスモジュール統合分析 = 94行 (要 80行以上)
+✅ Check 5 OK:   snapshot-figure = 12枚 (要 8枚以上)
+✅ Check 6 OK:   Web情報使用=5件、出所記載=5件
+ℹ️  Check 7: 仮説導出=15件 vs 検証=18件 (近い値が望ましい)
+
+✅ Phase D GATE PASSED. レポート完成。
+```
+
+**Gate 通過判定**: ✅ PASSED / ❌ FAILED（該当を残す）
+
+---
+
+## Review Policy Compliance
+
+> Artifact Review Policy = "Request Review" 下で承認されたゲートを列挙
+
+| Phase | Artifact | 承認日時 | 承認者 | 内容 |
+|---|---|---|---|---|
+| A-2 | implementation_plan.md § Title Candidates | _未記録_ | _未記録_ | Confirmed Title: _未確定_ |
+| B-1 | implementation_plan.md § Cross-Module Pattern Selection | _未記録_ | _未記録_ | 3 patterns: _未確定_ |
+| B-2 | task.md § Phase B Gates > Web Research | _未記録_ | _未記録_ | 選択: _未確定_ |
+| C | implementation_plan.md § Deep Dive Plan | _未記録_ | _未記録_ | 承認内容: _未確定_ |
+| D | implementation_plan.md § Report Structure & Quality Plan | _未記録_ | _未記録_ | 承認内容: _未確定_ |
+
+---
+
+## Final Deliverables
+
+- [ ] `reports/report.pdf` — Typst PDF 本レポート
+  - サイズ: （例）2.4 MB
+  - 総ページ数: （例）68ページ
+- [ ] `reports/report.typ` — Typst ソース
+  - 行数: （例）912行
+- [ ] `reports/*_deep_dive.typ` — モジュール別 deep_dive
+  - NEBULA / Saturn V / Explorer / MEGA / ATLAS / CORE / CREW
+- [ ] `reports/presentation.pptx` — PPTX スライド（任意）
+  - スライド枚数: （例）32枚
+
+### Typst コンパイルコマンド
+
+```bash
+typst compile --root ".." reports/report.typ reports/report.pdf
+# 期待: 0 errors, 0 warnings
+```
+
+### PDF 出力検証
+
+- [ ] PDF が生成された
+- [ ] ページ数が想定範囲内
+- [ ] 全ての `#snapshot-figure()` が正しく表示されている
+- [ ] 日本語フォント（原ノ味等）が正しく埋め込まれている
+
+---
+
+## Known Issues / Notes
+
+> Phase 進行中に発見した問題・注意点があれば記録
+
+（例）
+- Evidence ev-007 の画像が壊れていたため、代替 snapshot_011.png を使用
+- Web調査で参照した富士経済レポートは 2024-12-15 版、出所明記済み
+- CORE モジュールの分類軸（core_axis_1〜3）は Phase B でユーザー確認済み
+
+---
+
+## References
+
+- タスクリスト: `task.md`
+- 実装計画: `implementation_plan.md`
+- スキル本体: `.agent/skills/apollo-capcom/SKILL.md`
+- 品質ゲート: `capcom_schema/scripts/phase_c_gate.sh`, `phase_d_gate.sh`
+- 品質チェック詳細: `capcom_schema/analysis/quality_checklist.md`

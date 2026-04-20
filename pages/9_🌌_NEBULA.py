@@ -18,7 +18,7 @@ import networkx.algorithms.community as community
 # ==================================================================
 # --- ページ設定 ---
 # ==================================================================
-st.set_page_config(page_title="APOLLO CAPCOM | NEBULA", page_icon="🌌", layout="wide")
+st.set_page_config(page_title="APOLLO v8 | NEBULA", page_icon="🌌", layout="wide")
 st.session_state['current_page'] = 'NEBULA'
 utils.render_sidebar()
 
@@ -40,9 +40,6 @@ col_map = st.session_state.col_map
 df_npl = None
 if 'df_npl' in st.session_state and st.session_state.df_npl is not None:
     df_npl = st.session_state.df_npl.copy()
-    
-if df_npl is not None:
-    news_data = df_npl[df_npl['data_sub_type'] == 'Business']
 
 # ==================================================================
 # --- Helper Functions ---
@@ -65,7 +62,7 @@ def render_network(df_target, title, top_n=50, threshold=0.05, height=600):
     Generate and render a co-occurrence network chart.
     Returns fig, net_stats for snapshot consolidation.
     """
-    # 固定キーワードを優先し、無ければ explorer_keywords を使用
+    # 固定キーワードを優先し、存在しない場合は旧カラムを使用
     tgt_col = 'explorer_keywords_fixed' if 'explorer_keywords_fixed' in df_target.columns else 'explorer_keywords'
     
     if tgt_col not in df_target.columns:
@@ -326,6 +323,7 @@ else:
             xaxis='x'
         ))
     elif not df_npl_filtered.empty:
+         # NPLデータは存在するが News 集計が 0 件だった場合、Date 列の解析失敗の可能性があるので警告する
          news_count = len(df_npl_filtered[df_npl_filtered['data_sub_type'] == 'Business'])
          if news_count > 0:
              st.warning(f"⚠️ News data exists ({news_count} items) but could not be plotted. Check if 'Date' column was parsed correctly in Mission Control.")
@@ -634,7 +632,7 @@ with tab_pat:
                         texts = texts + ' ' + df_main_filtered[a_col].fillna('')
                     sw = patiroha.get_stopwords()
                     df_main_filtered['explorer_keywords_fixed'] = texts.apply(
-                        lambda x: patiroha.extract_keywords(x, stopwords=sw))
+                        lambda x: utils.extract_keywords(x, stopwords=sw))
                 else:
                     df_main_filtered['explorer_keywords_fixed'] = [[] for _ in range(len(df_main_filtered))]
 
@@ -744,7 +742,7 @@ with tab_aca:
                         sw = patiroha.get_stopwords("npl")
                         df_aca['temp_text'] = df_aca['unified_title'].fillna('') + ' ' + df_aca['unified_content'].fillna('')
                         df_aca['explorer_keywords_fixed'] = df_aca['temp_text'].apply(
-                            lambda x: patiroha.extract_keywords(x, stopwords=sw, clean_html=True)
+                            lambda x: utils.extract_keywords(x, stopwords=sw, clean_html=True)
                         )
 
             fig_growth_a, stats_growth_a = render_growth_ranking(df_aca, "Academic", "aca", keywords_col='explorer_keywords_fixed')
@@ -828,7 +826,7 @@ with tab_news:
     if df_npl_filtered.empty:
         st.info("News/Marketデータがアップロードされていません (NPLデータなし)。")
     else:
-        # Newsには 'Business' を使用
+        # 以前のコードで確認された通り、Newsには 'Business' を使用
         df_news = df_npl_filtered[df_npl_filtered['data_sub_type'] == 'Business'].copy()
         
         if df_news.empty:
@@ -843,7 +841,7 @@ with tab_news:
                         sw = patiroha.get_stopwords("npl")
                         df_news['temp_text'] = df_news['unified_title'].fillna('') + ' ' + df_news['unified_content'].fillna('')
                         df_news['explorer_keywords_fixed'] = df_news['temp_text'].apply(
-                            lambda x: patiroha.extract_keywords(x, stopwords=sw, clean_html=True)
+                            lambda x: utils.extract_keywords(x, stopwords=sw, clean_html=True)
                         )
     
             fig_growth_n, stats_growth_n = render_growth_ranking(df_news, "News", "news", keywords_col='explorer_keywords_fixed')
@@ -917,6 +915,8 @@ with tab_news:
                  prompt_n = utils_ai.generate_ai_insight_prompt(insight_role_news, insight_context_n, consolidated_n, insight_inst_n)
                  utils_ai.render_ai_insight_button(prompt_n, "nebula_insight_news")
 
+
+# リクエストにより "About this analysis" セクションを削除
 
 # ==================================================================
 # --- 学術ランドスケープ (Academic Landscape) ---
@@ -1026,109 +1026,172 @@ if df_npl is not None and not df_npl.empty:
             df_clustered = df_acad[df_acad['acad_cluster'] != -1]
             df_noise = df_acad[df_acad['acad_cluster'] == -1]
 
+            # Saturn V と同じ色パレット
+            color_sequence = utils.APOLLO_COLORS
+            sorted_unique_cids = sorted(df_clustered['acad_cluster'].unique())
+
+            # ホバーテキストを事前に組み立て（1 trace 化のため）
+            def _build_acad_hover(row):
+                parts = [f"<b>{row.get('unified_title', '')}</b>"]
+                src = row.get('unified_source', '')
+                if src:
+                    parts.append(str(src))
+                yr = row.get('year', '')
+                if yr:
+                    parts.append(str(yr))
+                lbl = row.get('acad_cluster_label', '')
+                if lbl:
+                    parts.append(f"クラスタ: {lbl}")
+                return '<br>'.join(parts)
+
+            if not df_clustered.empty:
+                df_clustered = df_clustered.copy()
+                df_clustered['hover_text'] = df_clustered.apply(_build_acad_hover, axis=1)
+
             if acad_display_mode == "Density":
-                # 密度ヒートマップ
+                # 密度ヒートマップ（Saturn V と同じカスタムカラースケール）
+                custom_density_colorscale = [
+                    [0.0, "rgba(255, 255, 255, 0)"],
+                    [0.1, "rgba(225, 245, 254, 0.3)"],
+                    [0.4, "rgba(129, 212, 250, 0.6)"],
+                    [1.0, "rgba(2, 119, 189, 0.9)"],
+                ]
                 fig_acad.add_trace(go.Histogram2dContour(
                     x=df_clustered['acad_umap_x'], y=df_clustered['acad_umap_y'],
-                    colorscale='Blues', showscale=True,
-                    contours=dict(showlabels=False),
-                    ncontours=20, name='密度',
+                    colorscale=custom_density_colorscale,
+                    reversescale=False,
+                    showscale=False,
+                    contours=dict(coloring='fill', showlines=True),
+                    line=dict(width=0.5, color='rgba(0, 0, 0, 0.2)'),
+                    nbinsx=40, nbinsy=40, name='密度',
                 ))
-                # クラスタ重心にラベル
-                for cid, label in labels_map.items():
-                    if cid == -1:
-                        continue
-                    df_c = df_clustered[df_clustered['acad_cluster'] == cid]
-                    if df_c.empty:
-                        continue
-                    cx, cy = df_c['acad_umap_x'].mean(), df_c['acad_umap_y'].mean()
-                    fig_acad.add_annotation(x=cx, y=cy, text=label, showarrow=False,
-                        font=dict(size=10, color='#003366'), bgcolor='rgba(255,255,255,0.7)')
-
-            elif acad_display_mode == "Convex Hull":
-                from scipy.spatial import ConvexHull
-                colors = px.colors.qualitative.Set2
-                for idx, (cid, label) in enumerate(sorted(labels_map.items())):
-                    if cid == -1:
-                        continue
-                    df_c = df_clustered[df_clustered['acad_cluster'] == cid]
-                    if len(df_c) < 3:
-                        continue
-                    color = colors[idx % len(colors)]
-                    # 散布図
-                    fig_acad.add_trace(go.Scatter(
-                        x=df_c['acad_umap_x'], y=df_c['acad_umap_y'],
-                        mode='markers', marker=dict(size=5, color=color, opacity=0.6),
-                        name=label,
-                        hovertemplate='<b>%{customdata[0]}</b><br>%{customdata[1]}<extra>' + label + '</extra>',
-                        customdata=df_c[['unified_title', 'unified_source']].values,
-                    ))
-                    # 凸包
-                    try:
-                        points = df_c[['acad_umap_x', 'acad_umap_y']].values
-                        hull = ConvexHull(points)
-                        hull_x = [points[v, 0] for v in hull.vertices] + [points[hull.vertices[0], 0]]
-                        hull_y = [points[v, 1] for v in hull.vertices] + [points[hull.vertices[0], 1]]
-                        fig_acad.add_trace(go.Scatter(
-                            x=hull_x, y=hull_y, mode='lines',
-                            line=dict(color=color, width=2), showlegend=False,
-                            fill='toself', fillcolor=color.replace(')', ',0.08)').replace('rgb', 'rgba'),
-                        ))
-                    except Exception:
-                        pass
-
+                # Density モードは Focus を重ねず、ラベルのみ表示
+                marker_line = dict(width=1, color='white')
             else:
-                # Scatter（デフォルト）
-                colors = px.colors.qualitative.Set2
-                for idx, (cid, label) in enumerate(sorted(labels_map.items())):
-                    if cid == -1:
-                        continue
-                    df_c = df_clustered[df_clustered['acad_cluster'] == cid]
-                    if df_c.empty:
-                        continue
-                    color = colors[idx % len(colors)]
-                    fig_acad.add_trace(go.Scatter(
-                        x=df_c['acad_umap_x'], y=df_c['acad_umap_y'],
-                        mode='markers', marker=dict(size=6, color=color, opacity=0.7),
-                        name=label,
-                        hovertemplate='<b>%{customdata[0]}</b><br>%{customdata[1]}<br>%{customdata[2]}<extra>' + label + '</extra>',
-                        customdata=df_c[['unified_title', 'unified_source', 'year']].fillna('').values,
-                    ))
+                marker_line = dict(width=0)
 
-            # ノイズ点（全モード共通）
+            # Convex Hull（クラスタ領域）
+            if acad_display_mode == "Convex Hull" and not df_clustered.empty:
+                from scipy.spatial import ConvexHull
+                for i, cid in enumerate(sorted_unique_cids):
+                    points = df_clustered[df_clustered['acad_cluster'] == cid][['acad_umap_x', 'acad_umap_y']].values
+                    if len(points) >= 3:
+                        try:
+                            hull = ConvexHull(points)
+                            hull_points = points[hull.vertices]
+                            hull_points = np.append(hull_points, [hull_points[0]], axis=0)
+                            cluster_color = color_sequence[i % len(color_sequence)]
+                            fig_acad.add_trace(go.Scatter(
+                                x=hull_points[:, 0], y=hull_points[:, 1],
+                                mode='lines', fill='toself',
+                                fillcolor=cluster_color, opacity=0.1,
+                                line=dict(color=cluster_color, width=2),
+                                hoverinfo='skip', showlegend=False,
+                            ))
+                        except Exception:
+                            pass
+
+            # Focus（全件 1 trace、colorscale でクラスタ別着色）— Saturn V 方式
+            if acad_display_mode != "Density" and not df_clustered.empty:
+                fig_acad.add_trace(go.Scatter(
+                    x=df_clustered['acad_umap_x'], y=df_clustered['acad_umap_y'],
+                    mode='markers',
+                    marker=dict(
+                        color=df_clustered['acad_cluster'],
+                        colorscale=color_sequence,
+                        showscale=False,
+                        size=5,
+                        opacity=0.8,
+                        line=marker_line,
+                    ),
+                    hoverinfo='text', hovertext=df_clustered['hover_text'],
+                    name='論文 (Valid)', showlegend=False,
+                ))
+
+            # ノイズ点（別 trace、Saturn V と同じスタイル）
             if len(df_noise) > 0:
+                noise_hover = df_noise['unified_title'].fillna('').tolist()
                 fig_acad.add_trace(go.Scatter(
                     x=df_noise['acad_umap_x'], y=df_noise['acad_umap_y'],
-                    mode='markers', marker=dict(size=3, color='lightgray', opacity=0.3),
-                    name=f'ノイズ ({len(df_noise)}件)',
-                    hovertemplate='<b>%{customdata[0]}</b><extra>ノイズ</extra>',
-                    customdata=df_noise[['unified_title']].values,
+                    mode='markers',
+                    marker=dict(color='#999999', size=3, opacity=0.3, line=dict(width=0)),
+                    hoverinfo='text', hovertext=noise_hover,
+                    name='Noise', showlegend=False,
                 ))
 
-            # クラスタ重心ラベル（Scatter/Convex Hullモード）
-            if acad_display_mode != "Density":
-                for cid, label in labels_map.items():
-                    if cid == -1:
-                        continue
-                    df_c = df_clustered[df_clustered['acad_cluster'] == cid]
-                    if df_c.empty:
-                        continue
-                    cx, cy = df_c['acad_umap_x'].mean(), df_c['acad_umap_y'].mean()
-                    fig_acad.add_annotation(
-                        x=cx, y=cy, text=label, showarrow=False,
-                        font=dict(size=9, color='#333'), bgcolor='rgba(255,255,255,0.8)',
-                        bordercolor='#ccc', borderwidth=1, borderpad=2,
-                    )
+            # クラスタ重心ラベル（Saturn V と同じ colored border 2pt）
+            for cid, label in labels_map.items():
+                if cid == -1:
+                    continue
+                df_c = df_clustered[df_clustered['acad_cluster'] == cid]
+                if df_c.empty:
+                    continue
+                cx, cy = df_c['acad_umap_x'].mean(), df_c['acad_umap_y'].mean()
+                try:
+                    color_idx = sorted_unique_cids.index(cid)
+                    border_color = color_sequence[color_idx % len(color_sequence)]
+                except (ValueError, IndexError):
+                    border_color = "#333333"
+                fig_acad.add_annotation(
+                    x=cx, y=cy, text=label, showarrow=False,
+                    font=dict(size=11, color='black', family="Helvetica"),
+                    bgcolor='rgba(255,255,255,0.8)',
+                    bordercolor=border_color, borderwidth=2, borderpad=4,
+                )
 
-            fig_acad.update_layout(
-                title=f'学術論文ランドスケープ ({landscape_result.n_clusters if landscape_result else "?"}クラスタ / ノイズ {len(df_noise)}件)',
-                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),
-                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, title=''),
-                plot_bgcolor='white', height=700,
-                legend=dict(orientation='v', yanchor='top', y=1, xanchor='left', x=1.02),
+            # レイアウト（Saturn V と同じ APOLLO テンプレート + height=1200 + aspect 1:1）
+            title_txt = f"学術論文ランドスケープ ({landscape_result.n_clusters if landscape_result else '?'}クラスタ / ノイズ {len(df_noise)}件)"
+            utils.update_fig_layout(fig_acad, title_txt, height=1200, show_legend=False)
+
+            # aspect 1:1 を強制
+            if not df_clustered.empty:
+                x_min, x_max = df_clustered['acad_umap_x'].min(), df_clustered['acad_umap_x'].max()
+                y_min, y_max = df_clustered['acad_umap_y'].min(), df_clustered['acad_umap_y'].max()
+                pad_factor = 0.02
+                x_pad = (x_max - x_min) * pad_factor if x_max > x_min else 1.0
+                y_pad = (y_max - y_min) * pad_factor if y_max > y_min else 1.0
+                fig_acad.update_layout(
+                    xaxis=dict(range=[x_min - x_pad, x_max + x_pad], autorange=False),
+                    yaxis=dict(
+                        range=[y_min - y_pad, y_max + y_pad],
+                        autorange=False,
+                        scaleanchor="x", scaleratio=1,
+                    ),
+                )
+
+            st.plotly_chart(fig_acad, use_container_width=True, config={
+                'editable': True,
+                'edits': {
+                    'annotationPosition': True,
+                    'annotationText': False,
+                    'axisTitleText': False,
+                    'legendPosition': False,
+                    'legendText': False,
+                    'shapePosition': False,
+                    'titleText': False,
+                },
+            })
+
+            # --- CSV ダウンロード（Saturn V と同じ運用） ---
+            # クラスタID・ラベル・UMAP 座標を含む学術論文データを出力
+            acad_export_cols = [
+                c for c in [
+                    'unified_title', 'unified_content', 'unified_source',
+                    'year', 'citation_count', 'doi',
+                    'acad_cluster', 'acad_cluster_label',
+                    'acad_umap_x', 'acad_umap_y',
+                ] if c in df_acad.columns
+            ]
+            csv_acad = df_acad[acad_export_cols].to_csv(
+                index=False, encoding='utf-8-sig'
+            ).encode('utf-8-sig')
+            st.download_button(
+                "📥 学術ランドスケープ全データ (CSV)",
+                csv_acad,
+                "APOLLO_NEBULA_Academic_Landscape.csv",
+                "text/csv",
+                key="nebula_academic_landscape_csv_dl",
             )
-
-            st.plotly_chart(fig_acad, use_container_width=True)
 
             # スナップショット
             utils.render_snapshot_button(

@@ -205,7 +205,7 @@ HHI (Herfindahl-Hirschman Index) は `applicant_ranking` の件数分布から�
 - `applicant_ranking` と CREW モジュールの共著ネットワークを組み合わせることで、上位プレイヤー間の連携関係を可視化可能
 - `ipc_ranking` と Saturn V のクラスタリング結果を対比することで、IPC分類では見えない技術的類似性を発見可能
 
-## v7新規フィールド: 多様性指標
+## 新規フィールド: 多様性指標
 
 `atlas_statistics.json` に以下のフィールドが追加されている:
 

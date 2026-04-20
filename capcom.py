@@ -5,6 +5,10 @@
 # 全データを st.session_state['capcom_store'] に保持し、
 # ZIP ダウンロード時のみメモリ上で動的に組み立てる。
 # ファイルシステムへの書き込みは行わない (ephemeral環境対応)。
+#
+# export_session_zip() は selected_tools 引数で複数 AI エージェントを選択可能。
+# 選択された CAPCOM モジュール用の資材 (capcom_schema_patches/{codex,antigravity}/)
+# を ZIP 直下に展開済みで同梱する。
 # ==================================================================
 
 import os
@@ -62,6 +66,7 @@ def init_session():
     # patents.csv の初期出力 (df_main があれば)
     save_patents_csv()
 
+    # 後方互換: 旧 API は (session_id, session_path) を返していた
     return session_id, session_id
 
 
@@ -408,10 +413,19 @@ def _increment_counter(key):
 # --- ZIP エクスポート ---
 # ==================================================================
 
-def export_session_zip():
+def export_session_zip(selected_tools=None):
     """
     session_state['capcom_store'] から ZIP を動的に組み立ててバイト列で返す。
     リポジトリの不変アセット (capcom_schema/, CLAUDE.md, .claude/skills/) も同梱する。
+
+    Args:
+        selected_tools: list[str] or None
+            CAPCOM モジュール選択肢。"claude_code" / "codex" / "antigravity" のいずれか1つ以上。
+            None または空リストの場合は "claude_code" のみが有効。
+            "codex" を含む場合: capcom_schema_patches/codex/ の資材を ZIP 直下に展開する
+                               （AGENTS.md, .codex/skills/, exec_mode_addendum.md 等）
+            "antigravity" を含む場合: capcom_schema_patches/antigravity/ の資材を展開する
+                                     （GEMINI.md, AGENTS.md, .agent/, artifacts_templates/ 等）
 
     Returns:
         tuple: (zip_bytes, zip_filename) または (None, None)
@@ -419,6 +433,10 @@ def export_session_zip():
     store = _get_store()
     if store is None:
         return None, None
+
+    # デフォルトは Claude Code のみ
+    if not selected_tools:
+        selected_tools = ["claude_code"]
 
     sid = store['session_id']
     project_root = os.path.dirname(os.path.abspath(__file__))
@@ -464,10 +482,30 @@ def export_session_zip():
             json.dumps(store['metadata'], ensure_ascii=False, indent=2, default=str)
         )
 
-        # 6. リポジトリの不変アセット
+        # 6. リポジトリの不変アセット（Claude Code 用の基本資材）
         _add_repo_assets_to_zip(zf, sid, project_root)
 
+        # 7. 選択された CAPCOM モジュール用オーバーレイ資材を展開同梱
+        if "codex" in selected_tools:
+            _add_tool_patch_to_zip(zf, sid, project_root, "codex")
+        if "antigravity" in selected_tools:
+            _add_tool_patch_to_zip(zf, sid, project_root, "antigravity")
+
     return buf.getvalue(), f'{sid}.zip'
+
+
+# ZIP 同梱から除外するファイル/ディレクトリ名
+_EXCLUDE_NAMES = {'.DS_Store'}
+
+
+def _is_excluded(name):
+    """ZIP 同梱から除外するか判定する（隠しファイル・OSゴミ・__pycache__）"""
+    if name in _EXCLUDE_NAMES:
+        return True
+    if name.startswith('.') and name not in ('.codex', '.agent'):
+        # .codex / .agent はツール配置規約上必要なので残す
+        return True
+    return False
 
 
 def _add_repo_assets_to_zip(zf, sid, project_root):
@@ -477,13 +515,19 @@ def _add_repo_assets_to_zip(zf, sid, project_root):
     if os.path.exists(src):
         zf.write(src, f'{sid}/CLAUDE.md')
 
+    # requirements-session.txt（CAPCOM スライド生成用の最小依存）
+    # ZIP 展開後、ユーザーは `pip install -r requirements-session.txt` で
+    # python-pptx / Pillow を一括インストールできる。
+    req_src = os.path.join(project_root, 'requirements-session.txt')
+    if os.path.exists(req_src):
+        zf.write(req_src, f'{sid}/requirements-session.txt')
+
     # capcom_schema/ 配下 (再帰)
     schema_root = os.path.join(project_root, 'capcom_schema')
     if os.path.exists(schema_root):
         for root, _, files in os.walk(schema_root):
             for fname in files:
-                # __pycache__ や隠しファイルは除外
-                if fname.startswith('.') or '__pycache__' in root:
+                if _is_excluded(fname) or '__pycache__' in root:
                     continue
                 full = os.path.join(root, fname)
                 rel = os.path.relpath(full, project_root)
@@ -494,11 +538,52 @@ def _add_repo_assets_to_zip(zf, sid, project_root):
     if os.path.exists(skills_root):
         for root, _, files in os.walk(skills_root):
             for fname in files:
-                if fname.startswith('.'):
+                if _is_excluded(fname):
                     continue
                 full = os.path.join(root, fname)
                 rel = os.path.relpath(full, project_root)
                 zf.write(full, f'{sid}/{rel}')
+
+
+def _add_tool_patch_to_zip(zf, sid, project_root, tool_key):
+    """
+    capcom_schema_patches/{tool_key}/ 配下の資材を ZIP 内セッション直下に展開同梱する。
+
+    これにより、ユーザーは apply_patch.sh を手動実行しなくても、
+    ZIP を展開するだけで Codex / Antigravity 向けのオーバーレイ資材が配置された状態になる。
+
+    展開ルール:
+      - README.md, apply_patch.sh は同梱から除外（開発者向け・実行不要）
+      - それ以外のファイル/ディレクトリ（AGENTS.md, GEMINI.md, .codex/, .agent/, etc.）は
+        `capcom_schema_patches/{tool_key}/<path>` → `{sid}/<path>` に転記
+      - AGENTS.md のように Codex と Antigravity で同じ arcname になるファイルは、
+        既に ZIP に追加済みならスキップ（両者は共通内容のため内容は同じ）
+    """
+    patch_root = os.path.join(project_root, 'capcom_schema_patches', tool_key)
+    if not os.path.isdir(patch_root):
+        return
+
+    # 同梱除外: パッチ管理用の開発者向けファイル
+    PATCH_MGMT_FILES = {'README.md', 'apply_patch.sh'}
+
+    # ZIP 内に既に書き込まれた arcname 集合を取得（重複書込み防止）
+    existing = set(zf.namelist())
+
+    for root, dirs, files in os.walk(patch_root):
+        dirs[:] = [d for d in dirs if d != '__pycache__']
+        for fname in files:
+            if _is_excluded(fname):
+                continue
+            if root == patch_root and fname in PATCH_MGMT_FILES:
+                continue
+            full = os.path.join(root, fname)
+            rel = os.path.relpath(full, patch_root)
+            arcname = f'{sid}/{rel}'
+            if arcname in existing:
+                # Codex と Antigravity が共通の AGENTS.md を持つケース等。既存を優先する
+                continue
+            zf.write(full, arcname)
+            existing.add(arcname)
 
 
 # ==================================================================

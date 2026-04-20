@@ -117,7 +117,7 @@ Saturn V はSBERT+UMAP+HDBSCANによるAI特許ランドスケープモジュー
 - 「親クラスタ『{parent_cluster}』をドリルダウンした結果、**N個**のサブクラスタが検出された」
 - 「サブクラスタの分布から、当該技術領域内の細分化された研究テーマが明らかになった」
 
-## v7新規フィールド: ノイズ分析
+## 新規フィールド: ノイズ分析
 
 `saturnv_clusters.json` に `noise_analysis` オブジェクトが追加:
 
@@ -149,7 +149,7 @@ Saturn V はSBERT+UMAP+HDBSCANによるAI特許ランドスケープモジュー
 3. `top_applicants` で特定企業に集中していれば戦略的ニッチ
 4. `patents.csv` で cluster==-1 のレコードを直接参照し、具体的な特許タイトルを確認
 
-## v7新規フィールド: クラスタ動態マップ
+## 新規フィールド: クラスタ動態マップ
 
 `saturnv_clusters.json` に `cluster_dynamics` オブジェクトが追加:
 

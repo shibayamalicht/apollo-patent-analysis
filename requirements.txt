@@ -10,7 +10,6 @@ wordcloud==1.9.4
 openpyxl
 kaleido
 python-pptx
-python-docx
 Pillow
 requests
 google-generativeai

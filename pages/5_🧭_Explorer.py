@@ -30,7 +30,7 @@ utils.configure_matplotlib_font()
 warnings.filterwarnings('ignore')
 
 st.set_page_config(
-    page_title="APOLLO CAPCOM | Explorer",
+    page_title="APOLLO v8 | Explorer",
     page_icon="🧭",
     layout="wide"
 )
@@ -52,6 +52,7 @@ if FONT_PATH:
 
 
 def update_fig_layout(fig, title, height=600, show_legend=True):
+    # タイトルのサニタイズ
     if isinstance(title, str):
         title = re.sub(r'<[^>]+>', '', title)
 
@@ -141,6 +142,7 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_k
         ax.axis('off')
         st.pyplot(fig)
 
+        # CAPCOM: ワードクラウドデータ保存
         if capcom_key:
             try:
                 import capcom
@@ -158,6 +160,7 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_k
             except Exception:
                 pass
 
+        # VOYAGERスナップショットボタン
         if capcom_key:
             utils.render_snapshot_button(
                 title=f"ワードクラウド: {title}",
@@ -187,6 +190,7 @@ Explorer (戦略的キーワード探索) は、特許文書内の専門用語�
 急上昇ワードの特定、時系列での技術推移、そして企業間のポジショニング比較を通じて、次の一手となるインサイトを発掘します。
 """)
 
+# データロード
 if not st.session_state.get("preprocess_done", False):
     st.error("分析データがありません。Mission Controlでデータをロードしてください。"); st.stop()
 
@@ -194,6 +198,7 @@ df_main = st.session_state.df_main
 col_map = st.session_state.col_map
 delimiters = st.session_state.delimiters
 
+# 出願人リスト生成
 app_counts = pd.Series()
 if col_map['applicant'] in df_main.columns:
     if 'applicant_main' in df_main.columns:
@@ -206,18 +211,21 @@ if col_map['applicant'] in df_main.columns:
 sorted_applicants = app_counts.index.tolist()
 app_count_dict = app_counts.to_dict()
 
+# 前処理 (Home.pyで作成された 'explorer_keywords' を使用。存在しない場合のみ計算)
 target_col_keywords = 'explorer_keywords'
 if target_col_keywords not in df_main.columns:
     with st.spinner("Explorer: テキスト解析とキーワード抽出を実行中..."):
         df_main['explorer_text'] = df_main[col_map['title']].fillna('') + ' ' + df_main[col_map['abstract']].fillna('')
         df_main[target_col_keywords] = df_main['explorer_text'].apply(
-            lambda x: patiroha.extract_keywords(x, stopwords=stopwords)
+            lambda x: utils.extract_keywords(x, stopwords=stopwords)
         )
         st.session_state.df_main = df_main
 
+# explorer_textが無い場合の自己修復
 if 'explorer_text' not in df_main.columns:
     df_main['explorer_text'] = df_main[col_map['title']].fillna('') + ' ' + df_main[col_map['abstract']].fillna('')
 
+# モード選択
 selected_tab = st.radio(
     "分析モードを選択:",
     ["全体俯瞰 (Global Overview)", "トレンド分析 (Trend Analysis)", "競合比較戦略 (Comparative Strategy)", "文脈検索 (Context Search/KWIC)"],
@@ -250,6 +258,7 @@ if selected_tab == "全体俯瞰 (Global Overview)":
         with st.spinner("全体ネットワーク計算中..."):
             c_all = Counter(all_keywords)
             top_nodes_global = [w for w, c in c_all.most_common(global_net_top_n)]
+            # patirohaで共起グラフ構築 (上位キーワードに絞った文書リスト)
             keyword_lists_filtered = [
                 [w for w in kws if w in top_nodes_global]
                 for kws in df_main['explorer_keywords']
@@ -260,6 +269,7 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                 threshold=global_net_threshold,
                 similarity="jaccard",
             )
+            # 共起回数を保持（スナップショット用）
             pair_counts_global = Counter()
             for kws in df_main['explorer_keywords']:
                 valid_w = [w for w in set(kws) if w in top_nodes_global]
@@ -267,6 +277,7 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                     for pair in combinations(sorted(valid_w), 2): pair_counts_global[pair] += 1
 
             if G_global.number_of_nodes() > 0:
+                # patiroha.detect_communities は dict[str, int]（ノード名→コミュニティID）を返す
                 community_map = patiroha.detect_communities(G_global, algorithm="louvain")
                 pos_global = nx.spring_layout(G_global, k=0.8, seed=42)
                 
@@ -292,9 +303,12 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                 fig_net_g.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
                 update_fig_layout(fig_net_g, "Global Co-occurrence Network", height=700)
                 st.plotly_chart(fig_net_g, use_container_width=True, config={'editable': False})
-
+                
+                # --- スナップショット (全体ネットワーク) ---
+                # 1. コミュニティ構造（構造化）
                 hub_keywords = patiroha.get_hub_keywords(G_global, centrality="degree")
                 deg_centrality = {kw: score for kw, score in hub_keywords}
+                # community_map (dict[str,int]) からコミュニティ構造を再構築
                 from collections import defaultdict
                 _comm_groups = defaultdict(list)
                 for node, cid in community_map.items():
@@ -311,10 +325,12 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                         "hub": hub_node,
                         "hub_centrality": round(deg_centrality.get(hub_node, 0), 4)
                     })
+                # 旧形式（スナップショットの表示互換用）
                 comm_summary = []
                 for cs in communities_structured:
                     comm_summary.append(f"Group {cs['id']+1}: {', '.join(cs['members'][:5])}")
 
+                # 2. 全ノード中心性ランキング
                 hubs_ranked = []
                 for node, cent in sorted(deg_centrality.items(), key=lambda x: x[1], reverse=True):
                     hubs_ranked.append({
@@ -324,6 +340,7 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                         "community": next((cs["id"] for cs in communities_structured if node in cs["members"]), -1)
                     })
 
+                # 3. エッジ（Jaccard係数+共起回数付き）上位100
                 edges_ranked = []
                 for u, v, d in sorted(G_global.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:100]:
                     edges_ranked.append({
@@ -332,6 +349,7 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                         "cooccurrence_count": pair_counts_global.get(tuple(sorted([u, v])), 0)
                     })
 
+                # 4. ブリッジエッジ（コミュニティ間を結ぶエッジ）
                 bridge_edges = []
                 for u, v, d in G_global.edges(data=True):
                     cu = next((cs["id"] for cs in communities_structured if u in cs["members"]), -1)
@@ -344,9 +362,12 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                         })
                 bridge_edges.sort(key=lambda x: x['jaccard'], reverse=True)
 
+                # リッチサマリーと統合
+                # ネットワーク文脈用のキーワード中心抽出を使用
                 top_kw_global = [w for w, c in c_all.most_common(20)]
                 network_reps = utils.get_keyword_centric_representatives(df_main, top_kw_global, n_reps=10)
 
+                # Format for summary
                 rep_lines = ["\n**代表的特許 (ネットワーク中心性ベース):**"]
                 for i, r in enumerate(network_reps):
                      rep_lines.append(f"{i+1}. 【{r['title']}】 ({r['applicant']}) - {r['abstract'][:80]}...")
@@ -363,9 +384,11 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                     "edges_ranked": edges_ranked,
                     "bridge_edges": bridge_edges[:20]
                 }
+                # キーワード中心の代表特許を注入
                 if network_reps:
                     snap_data['cluster_summary'] = (snap_data.get('cluster_summary', '') + "\n".join(rep_lines))
 
+                # AIインサイト (全体) - 上部へ移動
                 insight_context_g = f"""
                 **チャートタイプ**: 全体共起ネットワーク (Explorer)
                 **対象データ**: 全データの共起頻度上位 {global_net_top_n} キーワード。
@@ -401,6 +424,7 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                     key="exp_global_snap"
                 )
 
+                # AI Insight Button
                 insight_context_g = f"""
 
                 **チャートタイプ**: 全体共起ネットワーク (Explorer)
@@ -422,6 +446,7 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                 prompt_g = utils_ai.generate_ai_insight_prompt(insight_role, insight_context_g, snap_data, insight_inst_g)
                 utils_ai.render_ai_insight_button(prompt_g, "exp_global_insight")
 
+                # CAPCOM data/ JSON出力
                 try:
                     import capcom
                     if capcom.is_active():
@@ -478,7 +503,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
         min_year = int(df_target['year'].min())
         
         interval_years = st.slider("期間の粒度 (年)", 1, 10, 5, key="ta_interval")
-
+        
         periods = []
         c_end = current_year
         while c_end >= min_year:
@@ -487,7 +512,8 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
             periods.append((real_start, c_end))
             c_end -= interval_years
             if c_end < min_year: break
-
+        
+        # 1. 急上昇キーワード
         st.markdown(f"##### 1. 急上昇キーワード (Growth Rate)")
         if len(periods) > 1:
             st.caption(f"比較期間: [{periods[0][0]}-{periods[0][1]}] vs [{periods[1][0]}-{periods[1][1]}]")
@@ -522,6 +548,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
         else:
             st.warning("比較対象となる過去のデータ期間が不足しています。")
 
+        # 2. 時系列マルチ・ワードクラウド
         st.markdown(f"##### 2. 時系列ワードクラウド (Time-Lapse)")
         cols = st.columns(3)
         for i, (start, end) in enumerate(periods):
@@ -530,7 +557,8 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
                 kws_p = [w for sublist in df_p['explorer_keywords'] for w in sublist]
                 st.markdown(f"**{start} - {end}** ({len(df_p)}件)")
                 if kws_p: generate_wordcloud_and_list(kws_p, f"{start}-{end}", 30, FONT_PATH)
-
+            
+        # 3. トレンド・ネットワーク
         st.markdown(f"##### 3. トレンド・共起ネットワーク (赤=急上昇 / 青=停滞)")
         col_net1, col_net2 = st.columns(2)
         with col_net1: ta_net_n = st.slider("抽出単語数", 30, 100, 70, key="ta_net_n")
@@ -539,7 +567,8 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
         all_target_kw = [w for sublist in df_target['explorer_keywords'] for w in sublist]
         c_all = Counter(all_target_kw)
         top_nodes = [w for w, c in c_all.most_common(ta_net_n)]
-
+        
+        # patirohaで共起グラフ構築 (トレンド)
         keyword_lists_trend = [
             [w for w in kws if w in top_nodes]
             for kws in df_target['explorer_keywords']
@@ -550,6 +579,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
             threshold=ta_net_th,
             similarity="jaccard",
         )
+        # 共起回数を保持（スナップショット用）
         pair_counts = Counter()
         for kws in df_target['explorer_keywords']:
             valid_w = [w for w in set(kws) if w in top_nodes]
@@ -588,11 +618,14 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
             update_fig_layout(fig_net, "Trend Network", height=700)
             st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
 
+            # --- スナップショット (トレンドネットワーク) ---
+            # コミュニティ検出
             trend_communities = patiroha.detect_communities(G, algorithm="louvain")
             hub_keywords_trend = patiroha.get_hub_keywords(G, centrality="degree")
             deg_centrality = {kw: score for kw, score in hub_keywords_trend}
-            trend_community_map = trend_communities
+            trend_community_map = trend_communities  # patirohaは既にdict[str,int]を返す
 
+            # 全ノード構造化（成長率+中心性）
             period_past_str = f"{periods[1][0]}-{periods[1][1]}" if len(periods) > 1 else "N/A"
             period_recent_str = f"{periods[0][0]}-{periods[0][1]}"
 
@@ -617,6 +650,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
             emerging_keywords.sort(key=lambda x: x['growth_rate'], reverse=True)
             declining_keywords.sort(key=lambda x: x['growth_rate'])
 
+            # エッジ（Jaccard係数+共起回数）上位100
             trend_edges_ranked = []
             for u, v, d in sorted(G.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:100]:
                 trend_edges_ranked.append({
@@ -625,6 +659,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
                     "cooccurrence_count": pair_counts.get(tuple(sorted([u, v])), 0)
                 })
 
+            # コミュニティ構造化（dict[str,int]から再構築）
             from collections import defaultdict
             _trend_groups = defaultdict(list)
             for node, cid in trend_community_map.items():
@@ -638,6 +673,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
                     "hub": hub_node, "hub_centrality": round(deg_centrality.get(hub_node, 0), 4)
                 })
 
+            # トレンドネットワーク用のキーワード中心抽出
             growth_nodes = sorted([n for n in G.nodes()], key=lambda n: c_rec_net.get(n, 0) - c_pst_net.get(n, 0), reverse=True)[:15]
             trend_reps = utils.get_keyword_centric_representatives(df_target, growth_nodes, n_reps=10)
 
@@ -656,6 +692,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
                 "edges_ranked": trend_edges_ranked,
                 "notes": "Nodes colored by Growth Rate (Red=High, Blue=Low)."
             }
+            # トレンド分析データ（順序バグ修正: render_snapshot_buttonの前に追加）
             snap_data['trend_analysis'] = {
                 "period_past": period_past_str,
                 "period_recent": period_recent_str,
@@ -665,6 +702,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
             if trend_reps:
                 snap_data['cluster_summary'] = (snap_data.get('cluster_summary', '') + "\n".join(rep_lines_t))
 
+            # AIインサイト (トレンド)
             insight_context_t = f"""
             **チャートタイプ**: トレンド・共起ネットワーク (成長率)
             **対象データ**: 時系列比較による急上昇キーワードを含む共起ネットワーク。
@@ -700,9 +738,11 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
                 key="exp_trend_snap"
             )
 
+            # AI Insight Button
             prompt_t = utils_ai.generate_ai_insight_prompt(insight_role, insight_context_t, snap_data, insight_inst_t)
             utils_ai.render_ai_insight_button(prompt_t, "exp_trend_insight")
 
+            # CAPCOM data/ JSON出力
             try:
                 import capcom
                 if capcom.is_active():
@@ -765,6 +805,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
         c_my = Counter(words_my)
         c_tgt = Counter(words_target)
         
+        # 1. トルネードチャート
         st.markdown("##### 1. キーワード出現頻度比較 (Tornado Chart)")
         all_keys = set(list(c_my.keys()) + list(c_tgt.keys()))
         valid_keys = [k for k in all_keys if (c_my[k] + c_tgt[k]) >= 3]
@@ -813,6 +854,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
                 key="exp_tornado_snap"
             )
 
+        # 2. ワードクラウド
         st.markdown("##### 2. 企業別ワードクラウド")
         c_wc1, c_wc2 = st.columns(2)
         with c_wc1:
@@ -821,7 +863,8 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
         with c_wc2:
             st.markdown(f"**{target_comp}**")
             if words_target: generate_wordcloud_and_list(words_target, target_comp, 30, FONT_PATH)
-
+            
+        # 3. 支配率ネットワーク
         st.markdown(f"##### 3. 支配率ネットワーク (青=自社優勢 / 赤=競合優勢)")
         col_cs1, col_cs2 = st.columns(2)
         with col_cs1: cs_net_n = st.slider("抽出単語数", 30, 100, 70, key="cs_net_n")
@@ -830,13 +873,14 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
         combined_keywords = words_my + words_target
         c_combined = Counter(combined_keywords)
         top_nodes = [w for w, c in c_combined.most_common(cs_net_n)]
-
+        
         if 'applicant_main' in df_main.columns:
             mask_2 = df_main['applicant_main'].apply(lambda x: isinstance(x, list) and (my_comp in x or target_comp in x))
         else:
             mask_2 = df_main[col_map['applicant']].fillna('').str.contains(re.escape(my_comp) + "|" + re.escape(target_comp))
         df_2 = df_main[mask_2]
-
+        
+        # patirohaで共起グラフ構築 (競合比較)
         keyword_lists_comp = [
             [w for w in kws if w in top_nodes]
             for kws in df_2['explorer_keywords']
@@ -847,6 +891,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
             threshold=cs_net_th,
             similarity="jaccard",
         )
+        # 共起回数を保持（スナップショット用）
         pair_counts = Counter()
         for kws in df_2['explorer_keywords']:
             valid_w = [w for w in set(kws) if w in top_nodes]
@@ -880,11 +925,14 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
             update_fig_layout(fig_net, "Dominance Network", height=700)
             st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
 
+            # --- スナップショット (支配率ネットワーク) ---
+            # コミュニティ検出
             dom_communities = patiroha.detect_communities(G, algorithm="louvain")
             hub_keywords_dom = patiroha.get_hub_keywords(G, centrality="degree")
             deg_centrality = {kw: score for kw, score in hub_keywords_dom}
-            dom_community_map = dom_communities
+            dom_community_map = dom_communities  # patirohaは既にdict[str,int]を返す
 
+            # 全ノード構造化（支配率+中心性）
             dom_keywords = []
             my_exclusive = []
             target_exclusive = []
@@ -908,6 +956,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
                 elif 0.4 <= dom_val <= 0.6:
                     contested.append(node)
 
+            # エッジ（Jaccard係数+共起回数）上位100
             dom_edges_ranked = []
             for u, v, d in sorted(G.edges(data=True), key=lambda x: x[2]['weight'], reverse=True)[:100]:
                 dom_edges_ranked.append({
@@ -916,6 +965,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
                     "cooccurrence_count": pair_counts.get(tuple(sorted([u, v])), 0)
                 })
 
+            # コミュニティ構造化（dict[str,int]から再構築）
             _dom_groups = defaultdict(list)
             for node, cid in dom_community_map.items():
                 _dom_groups[cid].append(node)
@@ -928,6 +978,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
                     "hub": hub_node, "hub_centrality": round(deg_centrality.get(hub_node, 0), 4)
                 })
 
+            # 代表特許抽出
             dom_reps = utils.get_keyword_centric_representatives(df_2, list(G.nodes()), n_reps=10)
             rep_lines_d = ["\n**代表的特許 (支配率ネットワーク・キーワードベース):**"]
             for i, r in enumerate(dom_reps):
@@ -944,6 +995,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
                 "edges_ranked": dom_edges_ranked,
                 "notes": f"Dominance: {my_comp} vs {target_comp}. Blue favorable to {my_comp}, Red favorable to {target_comp}."
             }
+            # 支配率分析データ（順序バグ修正: render_snapshot_buttonの前に追加）
             snap_data['dominance_analysis'] = {
                 "my_company": my_comp,
                 "target_company": target_comp,
@@ -955,6 +1007,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
             if dom_reps:
                 snap_data['cluster_summary'] = (snap_data.get('cluster_summary', '') + "\n".join(rep_lines_d))
 
+            # AI Insight (比較分析)
             insight_context_c = f"""
             **チャートタイプ**: 支配率共起ネットワーク (Dominance Network)
             **対象データ**: 2社({my_comp} vs {target_comp})の共起ネットワーク比較。
@@ -990,9 +1043,11 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
                 key="exp_dom_snap"
             )
 
+            # AI Insight Button
             prompt_c = utils_ai.generate_ai_insight_prompt(insight_role, insight_context_c, snap_data, insight_inst_c)
             utils_ai.render_ai_insight_button(prompt_c, "exp_dom_insight")
 
+            # CAPCOM data/ JSON出力
             try:
                 import capcom
                 if capcom.is_active():

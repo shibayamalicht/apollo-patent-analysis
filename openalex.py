@@ -1,5 +1,6 @@
 # ==================================================================
-# openalex.py -- APOLLO OpenALEX API通信モジュール
+# openalex.py -- APOLLO v8.0.0 OpenALEX API通信モジュール
+# OpenALEX_Collector.html のJSロジックをPython移植
 # ==================================================================
 
 import time
@@ -96,6 +97,15 @@ class OpenAlexCollector:
         if params.get("oa_only"):
             filters.append("is_oa:true")
 
+        # 要約ありのみ（分析精度確保用）
+        if params.get("has_abstract"):
+            filters.append("has_abstract:true")
+
+        # 言語フィルタ（例: "en" で英語のみ）
+        language = params.get("language")
+        if language:
+            filters.append(f"language:{language}")
+
         institution_ids = params.get("institution_ids")
         if institution_ids:
             filters.append(
@@ -150,6 +160,8 @@ class OpenAlexCollector:
         pub_types: list = None,
         oa_only: bool = False,
         institution_ids: list = None,
+        has_abstract: bool = False,
+        language: str = None,
         on_progress: Callable = None,
     ) -> list[dict]:
         """単一クエリで論文を検索する（cursor-based pagination）
@@ -187,6 +199,8 @@ class OpenAlexCollector:
             "pub_types": pub_types,
             "oa_only": oa_only,
             "institution_ids": institution_ids,
+            "has_abstract": has_abstract,
+            "language": language,
         }
 
         all_papers: list[dict] = []
@@ -264,6 +278,8 @@ class OpenAlexCollector:
                 "pub_types": kwargs.get("pub_types"),
                 "oa_only": kwargs.get("oa_only", False),
                 "institution_ids": kwargs.get("institution_ids"),
+                "has_abstract": kwargs.get("has_abstract", False),
+                "language": kwargs.get("language"),
             }
 
             while year_count < max_per_year:

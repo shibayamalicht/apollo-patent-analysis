@@ -1,4 +1,4 @@
-# APOLLO v7.0.0 — 特許分析プラットフォーム
+# APOLLO v8.0.0 — 特許分析プラットフォーム
 
 ## 言語設定
 - 常に日本語で会話する
@@ -7,10 +7,21 @@
 - ドキュメントも日本語で生成する
 
 ## プロジェクト概要
-APOLLO v7.0.0 は、Streamlitベースの特許分析プラットフォーム。
+APOLLO v8.0.0 は、Streamlitベースの特許分析プラットフォーム。
 patirohaライブラリをコアエンジンとし、SBERT・UMAP・HDBSCANによる分析、
 Gemini APIによるアプリ内レポート生成（VOYAGER）、
-Claude Code連携によるDeep Diveレポート生成（CAPCOM）を統合した次世代版。
+Claude Code / Codex CLI / Antigravity IDE による Deep Diveレポート生成（CAPCOM・マルチツール対応）を統合した次世代版。
+
+## 主な機能
+1. **母集団設計の文書化**: CAPCOM ページで以下4項目を任意入力可能にし、分析レポートに反映
+   - 母集団論理式の設計意図 → CAPCOM に送信し分析で考慮
+   - 母集団論理式 → 分析反映 + レポート付録に掲載
+   - 収録年情報 → CAPCOM に送信し分析で考慮
+   - 使用した特許データベース名 → 分析注記と付録で反映
+2. **CAPCOM マルチツール対応**: Claude Code / Codex CLI / Antigravity IDE を複数選択可能（選択したツール用パッチがZIPに展開済みで同梱）
+3. **OpenALEX 拡張**: 論文種別（article / review / book-chapter など10種）の複数選択、検索結果のCSVダウンロード
+4. **レポート用語統一**: 内部ファイル名・フィールド名の露出を禁止し、正式な日本語呼称に統一（`capcom_schema/analysis/terminology.md`）
+5. **経営層向け要約版（別冊）の任意同時生成**: Phase A で STOP-GATE 確認 → 8-12 ページに凝縮した別冊を `reports/report_executive.typ` として出力（`capcom_schema/analysis/executive_summary_guide.md`）
 
 ## 起動方法
 ```bash
@@ -138,7 +149,7 @@ summary = patiroha.generate_spatial_summary(df, "cluster", "umap_x", "umap_y")
 
 ### テスト
 - patiroha: `pytest tests/` — 84テスト
-- APOLLO v7: Streamlit動作確認（手動）
+- APOLLO: Streamlit動作確認（手動）
 
 ## CAPCOM Skills (Claude Code連携)
 CAPCOMセッションデータ(ZIP展開後の `session_xxx/` フォルダ)を分析・レポート生成する際:
@@ -149,12 +160,14 @@ CAPCOMセッションデータ(ZIP展開後の `session_xxx/` フォルダ)を�
 ### 各フェーズで追加で読むリファレンスファイル（省略禁止）
 | Phase | 読むファイル | 内容 |
 |-------|-----------|------|
+| Phase A | `analysis/terminology.md` | 用語統一ルール（最優先） |
 | Phase B | `analysis/common_framework.md` | 4層分析モデル・数値根拠の書式 |
 | Phase B | `analysis/data_notes.md` | 特許/NPLの非対称性・Web調査ルール |
 | Phase B | `analysis/cross_module.md` | 13種のクロス分析パターン |
 | Phase C | `analysis/deep_dive_guide.md` | Step 0-6の必須セクション・最低行数・ミクロ分析ルール |
 | Phase D | `analysis/report_structure.md` | report.typ構造・付録テンプレート |
 | Phase D | `analysis/quality_checklist.md` | 品質チェック（定量コマンド + 項目一覧） |
+| Phase D | `analysis/executive_summary_guide.md` | 経営層向け要約版（別冊）執筆ガイド（別冊生成フラグが ON の場合のみ） |
 
 **各フェーズにゲートあり**: リファレンスを読んだ内容（セクション数・パターン番号等）をユーザーに報告してから作業を開始すること
 
@@ -163,5 +176,6 @@ CAPCOMセッションデータ(ZIP展開後の `session_xxx/` フォルダ)を�
 - **`prompts/` AIインサイト**: 最低3件読了。読まずにdeep_diveを書くと表面的になる
 - **ミクロ分析**: 代表特許15件以上（公開番号・タイトル・出願人）、出願人5社以上（各5行以上）
 - **クロスモジュール分析**: 最低3パターン、各パターン仮説→検証→結論の15-20行
-- **v7新機能**: ノイズ分析・クラスタ動態マップ・多様性指標(Entropy/Gini)・学術ランドスケープの解釈を必ず含める
+- **v7/v8新機能**: ノイズ分析・クラスタ動態マップ・多様性指標(Entropy/Gini)・学術ランドスケープの解釈を必ず含める
+- **用語ルール**: レポート本文には内部ファイル名（`saturnv_clusters.json` 等）・内部フィールド名（`spatial_context`, `cluster_dynamics` 等）・内部ガイドファイル名（`*.md`）を**書いてはいけない**。`capcom_schema/analysis/terminology.md` の正式日本語呼称を使うこと
 - **Web調査**: Phase B完了前にテーマ一覧を提示してユーザー確認を得る

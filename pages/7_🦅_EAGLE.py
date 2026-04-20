@@ -29,7 +29,7 @@ import matplotlib.font_manager as fm
 warnings.filterwarnings('ignore')
 
 # ページ設定
-st.set_page_config(page_title="APOLLO CAPCOM | EAGLE", page_icon="🦅", layout="wide")
+st.set_page_config(page_title="APOLLO v8 | EAGLE", page_icon="🦅", layout="wide")
 
 st.session_state['current_page'] = 'EAGLE'
 
@@ -98,12 +98,21 @@ def apply_ngram_filters(text):
 
 @st.cache_data
 def extract_compound_nouns(text, stopwords_list):
+    # 防御層: 異常入力と超長文で Janome の IndexError を避ける
+    if not isinstance(text, str) or not text.strip():
+        return []
+    if len(text) > 8000:
+        text = text[:8000]
+
     text = normalize_text(text)
-    text = apply_ngram_filters(text) 
+    text = apply_ngram_filters(text)
     text = re.sub(r'【.*?】', '', text)
     text = re.sub(r'[!\"#$%&\'()*+,-./:;<=>?@[\]^_`{|}~]', ' ', text)
 
-    tokens = t.tokenize(text)
+    try:
+        tokens = t.tokenize(text)
+    except Exception:
+        return []
     words, compound_word = [], ''
     for token in tokens:
         pos = token.part_of_speech.split(',')[0]
@@ -536,7 +545,7 @@ if show_labels_chk:
         ))
 
 fig_lasso.update_layout(annotations=annotations_main)
-update_fig_eagle(fig_lasso, "Current Clusters", show_legend=is_applicant_filtered)
+update_fig_eagle(fig_lasso, "Current Clusters", show_legend=False)
 
 # インタラクティブロジック
 if is_editing:

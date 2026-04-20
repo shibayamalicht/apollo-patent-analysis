@@ -1,0 +1,216 @@
+# APOLLO CAPCOM レポート Implementation Plan
+
+> **本ファイルは `apollo-capcom` Skill が Phase A 完了時に初版生成し、以降 Phase 進行に合わせて追記される Antigravity Artifact です。**
+>
+> **ユーザー承認ポイント**（Review Policy = "Request Review" 時に承認待ちになる）:
+> - § Title Candidates （Phase A-2 ゲート）
+> - § Cross-Module Pattern Selection （Phase B ゲート1）
+> - § Web Research Themes （Phase B ゲート2 と連動。task.md のチェックボックスで選択）
+> - § Deep Dive Plan （Phase C ゲート）
+> - § Report Structure & Quality Plan （Phase D ゲート）
+>
+> ユーザーは Google Docs 式コメントで指示・承認ができます。
+
+---
+
+## Mission Objective
+
+> （Phase A で `voyager/mission.json` から転記）
+
+Primary Objective: **（例）全固体電池の競争環境と技術トレンドを可視化**
+
+Stakeholder: （例）研究開発部門、経営企画
+
+Deliverable: Typst PDF レポート + PPTX スライド
+
+---
+
+## Dataset Context
+
+> （Phase A で `voyager/context.json` + `data/patents.csv` から把握）
+
+| 項目 | 値 |
+|---|---|
+| 特許件数 | （例）3,214件 |
+| 期間 | （例）2015-01-01 〜 2024-12-31 |
+| 出願人上位3社 | （例）X社 (18.2%) / Y社 (12.5%) / Z社 (9.8%) |
+| Saturn V クラスタ数 | （例）12 |
+| EAGLE クラスタ数 | （例）8 |
+| HHI (Herfindahl-Hirschman Index) | （例）0.187（中程度の集中） |
+
+---
+
+## Evidence Inventory
+
+> （Phase A で `evidence_list` 全件を走査、Phase B 精読優先度を付与）
+
+| # | Evidence ID | Module | Title | 優先度 | 関連Snapshot |
+|---|---|---|---|---|---|
+| 1 | ev-001 | Saturn V | （例）全固体電池クラスタの分布 | ★★★ | snapshot_001.png |
+| 2 | ev-002 | MEGA | （例）出願人CAGRランキング | ★★★ | snapshot_002.png |
+| ... | ... | ... | ... | ... | ... |
+
+---
+
+## Key AI Insights (Phase A 読了済み)
+
+> （Phase A で `prompts/` から最低3件読了、要点を記録）
+
+### saturn_main_insight.md
+（要点メモ、150文字程度）
+
+### mega_pulse_insight.md
+（要点メモ、150文字程度）
+
+### exp_global_insight.md
+（要点メモ、150文字程度）
+
+---
+
+## 🛑 Phase A-2 Gate: Title Candidates
+
+> **ユーザー承認対象**。以下3案から1つを選んで ✅ を付けるか、Other でカスタム指定してください。
+
+- [ ] **案1**: （15文字以内タイトル） — （30文字以内サブタイトル、根拠メモ）
+- [ ] **案2**: （15文字以内タイトル） — （30文字以内サブタイトル、根拠メモ）
+- [ ] **案3**: （15文字以内タイトル） — （30文字以内サブタイトル、根拠メモ）
+
+### Confirmed Title
+
+> （ユーザー確定後に Agent が記入）
+
+- **タイトル**: _未確定_
+- **サブタイトル**: _未確定_
+
+---
+
+## 🛑 Phase B Gate 1: Cross-Module Pattern Selection
+
+> **ユーザー承認対象**。13パターンから3つ選定してください。Agent推奨に ★ を付けています。
+
+| | Pattern | 組合せモジュール | 要旨 | Mission関連度 |
+|---|---|---|---|---|
+| ☐ | ★ P1 | Saturn V × MEGA | クラスタ動態分析（成長/衰退判定） | ★★★ |
+| ☐ | ★ P4 | CORE × ATLAS | 分類×出願人HHIの時系列 | ★★★ |
+| ☐ | ★ P13 | NEBULA × Saturn V | 学術ギャップ分析 | ★★☆ |
+| ☐ | P2 | Saturn V × Explorer | クラスタ×キーワード | ★★☆ |
+| ☐ | P3 | CORE × MEGA | 分類×動態 | ★☆☆ |
+| ☐ | P5 | Saturn V × CREW | クラスタ×発明者 | ★☆☆ |
+| ☐ | P6 | ATLAS × MEGA | 基本統計×動態 | ★★☆ |
+| ☐ | P7 | CREW × ATLAS | 発明者×統計 | ★☆☆ |
+| ☐ | P8 | Explorer × MEGA | キーワード×動態 | ★★☆ |
+| ☐ | P9 | NEBULA × ATLAS | 学術×特許時系列 | ★★☆ |
+| ☐ | P10 | NEBULA × MEGA | 学術×動態 | ★☆☆ |
+| ☐ | P11 | EAGLE × Saturn V | 手動×AI分類比較 | ★☆☆ |
+| ☐ | P12 | CORE × CREW | 分類×人材ネットワーク | ★☆☆ |
+
+### Confirmed Cross Patterns
+
+> （ユーザー選定後に Agent が記入）
+
+1. _未確定_
+2. _未確定_
+3. _未確定_
+
+---
+
+## 🛑 Phase B Gate 2: Web Research Themes
+
+> **ユーザー承認対象**。Agentが Mission Objective から導出した候補。`task.md` のチェックボックスで「実施 / スキップ / 修正」を選択してください。
+
+**候補テーマ**:
+1. （例）X社 の2024-2025年プレスリリース（新製品発表・研究開発動向）
+2. （例）次世代電池市場 市場規模予測（富士経済 / 矢野経済 等）
+3. （例）経産省「次世代電池戦略」政策動向
+4. （例）主要学会の最新発表（ECS / Battery Symposium）
+5. （例）競合国外企業（韓国LG、中国BYD）の参入動向
+
+### Confirmed Web Research
+
+> （ユーザー選定後に Agent が記入）
+
+- **実施するテーマ**: _未確定_
+- **出所記録規約**: 全Web情報に footnote で `出所: サイト名/タイトル、取得日: YYYY-MM-DD` を付記
+
+---
+
+## 🛑 Phase C Gate: Deep Dive Plan
+
+> **ユーザー承認対象**。以下の計画で Phase C に進めてよいか、Google Docs 式コメントで承認してください。
+
+### 実行 Step 順序
+
+| Step | モジュール | 最低行数 | 必須セクション数 | 実行する |
+|---|---|---|---|---|
+| 0 | NEBULA | 120行 | 8 | ✅ |
+| 1 | Saturn V | 250行 | 13 | ✅ |
+| 2 | Explorer | 200行 | 11 | ✅ |
+| 3 | MEGA | 120行 | 9 | ✅ |
+| 4 | ATLAS | 120行 | 9 | ✅ |
+| 5 | CORE | 80行 | 7 | ✅ |
+| 6 | CREW | 60行 | 任意 | ✅ |
+
+### 必須内容（全モジュール共通）
+
+- ミクロ分析A: 代表特許 **15件以上**（公開番号・タイトル・出願人）
+- ミクロ分析B: 出願人 **5社以上**（各5行以上）
+- `#snapshot-figure()` 1枚以上
+- Phase B で選定した3クロスパターンに該当するモジュールは重点記述
+
+### 完了判定
+
+`bash capcom_schema/scripts/phase_c_gate.sh` が exit 0 を返す（主観判断不可、機械的判定）。
+
+---
+
+## 🛑 Phase D Gate: Report Structure & Quality Plan
+
+> **ユーザー承認対象**。以下の構成・品質基準で Phase D に進めてよいか、コメントで承認してください。
+
+### report.typ 章構成（10章 + 付録）
+
+1. 表紙 + エグゼクティブサマリー
+2. 背景・目的（Mission Objective）
+3. データセット概要
+4. NEBULA deep_dive（全文コピー）
+5. Saturn V deep_dive（全文コピー）
+6. Explorer deep_dive（全文コピー）
+7. MEGA deep_dive（全文コピー）
+8. ATLAS deep_dive（全文コピー）
+9. CORE / CREW deep_dive（全文コピー）
+10. クロスモジュール統合分析（80行以上、3パターン）
+11. 結論・推奨アクション
+付録: Evidence 一覧 / 代表特許リスト / Web調査出所一覧
+
+### 品質チェック（`phase_d_gate.sh` で自動判定）
+
+| Check | 基準 | 判定方法 |
+|---|---|---|
+| 1 | report.typ ≥ 800行 | `wc -l` |
+| 2 | 代表特許引用 ≥ 15件 | 特開/特許第/WO20/JP20 パターン |
+| 3 | 4層モデル各5件以上 | キーワード検出（解釈/洞察/提言） |
+| 4 | クロス統合章 ≥ 80行 | セクション抽出 + `wc -l` |
+| 5 | `#snapshot-figure()` ≥ 8枚 | パターン検出 |
+| 6 | Web情報使用件数 ≤ 出所記載件数 | 出所漏れ検知 |
+| 7 | 仮説 vs 検証 バランス | 参考情報（FAIL扱いなし） |
+
+---
+
+## 📝 Phase 進行ログ
+
+> （Agent が Phase 完了時に追記）
+
+- Phase A: _未開始_
+- Phase A-2: _未開始_
+- Phase B: _未開始_
+- Phase C: _未開始_
+- Phase D: _未開始_
+
+---
+
+## 参照
+
+- スキル本体: `.agent/skills/apollo-capcom/SKILL.md`
+- チェックリスト: `task.md`
+- ゲート結果記録: `walkthrough.md`
+- 共通資産: `capcom_schema/` （analysis/ references/ exemplars/ templates/ scripts/）

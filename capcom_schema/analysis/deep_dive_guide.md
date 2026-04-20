@@ -1,8 +1,26 @@
 # Phase C: モジュール別 deep dive 詳細手順
 
-> このファイルは `SKILL.md` から分離されたリファレンス。Phase C（モジュール別deep dive）で使用する。
+> このファイル名はレポート本文に書かないこと（執筆者の内部参照専用）。
 > Phase C の概要 → `SKILL.md` Phase C セクション
 > 品質検証 → `analysis/quality_checklist.md`
+> **用語統一ルール → `analysis/terminology.md`（執筆前に必読）**
+
+---
+
+## ⚠️ 最重要前提: 内部識別子はレポート本文に書いてはいけない
+
+以下、このガイドには内部ファイル名（`saturnv_clusters.json` 等）・内部フィールド名（`spatial_context`, `cluster_dynamics`, `noise_analysis`, `quadrant_summary` 等）が**実行手順の指示として**登場する。これらは執筆者（AI エージェント）が JSON を読む際に使う識別子であり、**deep_dive.typ や report.typ のレポート本文には書いてはいけない**。
+
+レポート本文に書く際は必ず `analysis/terminology.md` の正式日本語呼称に置換すること:
+- `spatial_context` → 「空間配置」「UMAP 空間上の近接関係」「空間配置分析」
+- `cluster_dynamics` → 「クラスタ動態マップ」
+- `noise_analysis` → 「ノイズ分析（萌芽技術候補）」
+- `quadrant_summary` → 「4 象限サマリ」
+- `saturnv_clusters.json` → 「Saturn V TELESCOPE 分析」
+- `mega_momentum.json` → 「MEGA PULSE 分析」
+- ...以下同様
+
+Phase D の `phase_d_gate.sh` がこの違反を機械的に検出する。
 
 ---
 
@@ -105,11 +123,41 @@ MEGA PULSEでリーダー象限に位置する唯一の化学メーカーであ�
 - `report_style.typ`の関数（`evidence-box`, `styled-table`, `snapshot-figure`, `insight-box`）を使用すること
 - 各ファイルの冒頭に `#import "report_style.typ": *` を記述する
 
-### v7 新規分析要件
+### 新規分析要件
 - **ノイズ分析**: Saturn V deep_diveにノイズ特許の萌芽テーマ考察を含める
 - **クラスタ動態マップ**: Saturn V/EAGLE/NEBULAのクラスタ動態マップ（累積件数xCAGR）の4象限解釈を含める
 - **多様性指標**: ATLAS deep_diveにEntropy/Gini指標の解釈を含める（HHIとの3指標組み合わせ分析）
 - **学術-特許クロス分析**: NEBULAデータがある場合、NEBULA学術クラスタ vs Saturn V特許クラスタのクロス分析を含める
+
+### 設計意図への明示的参照（v8 全 deep_dive 必須）
+
+**全ての `*_deep_dive.typ` の冒頭段落（最初の evidence-box の前、または導入文として）で、設計意図への参照を 1 文以上含める**。
+
+**目的**: Phase A STOP-GATE で確定した「本分析の視座」および `sub_questions`（作業メモ）を、各 deep_dive で忘れず意識するため。
+
+**実施手順**:
+
+1. **Phase A 決定を読む**: 執筆前に `reports/_phase_a_decisions.json` の `query_intent_summary` と `sub_questions` を確認
+2. **この章が扱う SQ を特定**: 各 deep_dive は `sub_questions` のうち特定の 1-3 個の観点を主に扱う。執筆者メモで対応付けを整理（例: Saturn V deep_dive → SQ1, SQ3 を主に扱う）
+3. **冒頭段落で意図参照を 1 文**: 本章の分析が本分析の視座にどう貢献するかを宣言調で 1 文示す
+
+**⚠️ 絶対制約**:
+- サブクエスチョンは執筆者の内部メモ。**レポート本文に `SQ1` 等の記号、「問い 1」等の表現は書かない**
+- 本文は通常の宣言調の論述で書く（詳細: `analysis/terminology.md` §5-A-2）
+
+**記載例**:
+
+❌ **NG（問い/答え形式）**:
+> 本章では Q1「最大成長領域はどこか」に答える。A: タイヤ用ゴムが最大成長である。
+
+❌ **NG（作業メモを本文化）**:
+> 本章は SQ1 と SQ3 の観点から分析する。
+
+✅ **OK（宣言調の冒頭段落）**:
+> 本章は、本分析の視座である「自社の注力領域選定」に即して、Saturn V TELESCOPE 分析の結果から技術領域の成長構造と各社の注力ポジションを読み解く。特に、成長性が顕著な領域と自社未進出の空白領域の識別を主眼とする。
+
+✅ **OK（タイプ B の競合分析 deep_dive 冒頭）**:
+> 本章は、本分析の視座である「3 社の EV 戦略比較」に即して、MEGA PULSE 分析の 4 象限サマリから各社のポジションと注力領域の差異を読み解く。3 社の出願動態を並行して確認することで、共通の主戦場と社別の独自路線を識別する。
 
 ---
 
@@ -169,7 +217,17 @@ V字回復パターンを示す。主力は超領域ゴム・エラストマー�
 
 ---
 
-## Step 0: NEBULA deep_dive
+## Step 0: NEBULA deep_dive（nebula_strategy に応じて分岐）
+
+**⚠️ 最初に `reports/_phase_a_decisions.json` の `nebula_strategy.selected_mode` を確認する**:
+
+| モード | 処理 |
+|---|---|
+| `execute` | 以下の通常手順で `nebula_deep_dive.typ` を生成 |
+| `web_compensation` | `nebula_deep_dive.typ` の代わりに **`external_env_deep_dive.typ`** を生成（Web 調査結果を 4 カテゴリで整理、`#footnote` 引用付き、詳細は後述） |
+| `omit` | **Step 0 自体をスキップ**。以降の Step 1-6 で「環境分析結果を参照」する記述も省略 |
+
+### モード `execute` の場合（NEBULA 実行済み）
 
 NEBULAデータ（`nebula_hype_cycle.json` / `nebula_macro_events.json`）が存在する場合、**他の全モジュールに先行して**環境分析を実施する。NEBULA deep_diveは後続のStep 1-6における分析の「外部環境コンテキスト」として機能する。
 
@@ -192,7 +250,7 @@ NEBULAデータ（`nebula_hype_cycle.json` / `nebula_macro_events.json`）が存
    - 代表論文の引用（各クラスタの`representative_papers`から2-3件を具体的に引用: タイトル、著者/出典、年、研究の意義）
    - **特許クラスタ（Saturn V）との対比（P13パターン）**: 
      - 学術超領域とSaturn V超領域を対応させ、研究→特許化のパイプラインを評価
-     - 学術で大きいが特許で小さい → 特許化の機会（ただし日本語特許限定の注記を付す）
+     - 学術で大きいが特許で小さい → 特許化の機会（提供された特許データセットの範囲に起因するカバレッジ制約の注記を付す。`database_name` が `voyager/context.json` の `population_meta` に指定されていればその名前を使用、未指定なら「提供された特許データセット」と汎用表記）
      - 特許で大きいが学術で小さい → 学術基盤が薄い、または実用化が先行
      - 両方で成長 → 最も有望な技術領域
 5. **学術クラスタ動態マップ**（`cluster_dynamics`がある場合は必須）:
@@ -206,6 +264,67 @@ NEBULAデータ（`nebula_hype_cycle.json` / `nebula_macro_events.json`）が存
 **最低120行**（学術ランドスケープ分析を含むため）。 `wc -l reports/nebula_deep_dive.typ` で確認する。
 
 > **環境分析の位置づけ**: NEBULA deep_diveで導出した「外部環境からの主要仮説」は、Step 1-6の各deep_diveの冒頭で参照される。例えば「NEBULA環境分析で特定された2020年の規制変更が、Saturn Vクラスタ構造にどう反映されているか」といった文脈で、環境→特許の因果関係を分析する。
+
+### モード `web_compensation` の場合（Web 調査で補完）
+
+NEBULA データが存在しないため、Phase B の Web 調査結果を元に `reports/external_env_deep_dive.typ` を生成する。
+
+**ファイル名**: `external_env_deep_dive.typ`（`nebula_deep_dive.typ` ではないので注意）
+
+**必須 4 カテゴリ**（Phase A STOP-GATE D で確定した `web_coverage_categories` と一致）:
+
+1. **市場規模・業界統計**
+2. **政策・規制動向**
+3. **学術動向・キーパーソン**
+4. **主要企業動向**
+
+**執筆要件**:
+
+- 各カテゴリにつき 1-2 段落（各 5-8 行）
+- 各主張に `#footnote[出所名, URL, 取得日]` を最低 1 件付与
+- 付録 C の Web 調査出所一覧と整合させる
+- 最低 80 行（NEBULA deep_dive の 120 行より短めでも可、ただし 4 カテゴリ網羅が必須）
+
+**記載テンプレート**:
+```typst
+#import "report_style.typ": *
+
+= 外部環境分析（Web 調査に基づく）
+
+本章は、本分析の特許データに対する外部コンテキストを Web 調査で補完したものである。
+4 カテゴリ（市場規模・政策・学術動向・主要企業動向）にわたって情報を収集し、
+本母集団の特許動向と対比して評価する。
+
+== 市場規模・業界統計
+
+{市場予測・業界統計を 5-8 行で記述。#footnote[...] で出所明記}
+
+== 政策・規制動向
+
+{関連政策・規制を 5-8 行で記述。#footnote[...]}
+
+== 学術動向・キーパーソン
+
+{学術論文動向・主要研究機関を 5-8 行で記述。#footnote[...]}
+
+== 主要企業動向
+
+{主要企業の事業戦略・M&A・プレスリリースを 5-8 行で記述。#footnote[...]}
+
+== 外部環境と本母集団の整合性
+
+{4 カテゴリで得た外部情報と本母集団の特許動向を対比し、整合点・乖離点を
+簡潔にまとめる（10-15 行）。NEBULA の「学術-特許クロス分析」（P13）の代替となる位置付け}
+```
+
+**Step 1-6 の各 deep_dive の冒頭で参照**: モード `execute` と同様に、`external_env_deep_dive.typ` で導出した外部環境仮説を各 Step で参照する。
+
+### モード `omit` の場合（省略）
+
+**Step 0 自体をスキップ**:
+- `reports/nebula_deep_dive.typ` も `external_env_deep_dive.typ` も作らない
+- Step 1-6 の各 deep_dive で「NEBULA 環境分析」「外部環境からの仮説」といった記述は省略
+- 仮説検証サマリーでは NEBULA 由来仮説を含めない（特許データ由来の仮説のみ）
 
 ---
 

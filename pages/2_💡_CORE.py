@@ -22,7 +22,7 @@ import patiroha
 # --- 1. ページ設定 ---
 # ==================================================================
 st.set_page_config(
-    page_title="APOLLO CAPCOM | CORE", 
+    page_title="APOLLO v8 | CORE", 
     page_icon="💡", 
     layout="wide"
 )
@@ -64,7 +64,13 @@ def _core_text_preprocessor(text):
 def advanced_tokenize_core(text):
     text = _core_text_preprocessor(text)
     if not text: return ""
-    tokens = list(t.tokenize(text))
+    # 防御層: 超長文で Janome の IndexError を避ける
+    if len(text) > 8000:
+        text = text[:8000]
+    try:
+        tokens = list(t.tokenize(text))
+    except Exception:
+        return ""
     processed_tokens = []
     i = 0
     while i < len(tokens):
@@ -183,9 +189,14 @@ class CoreLogicParser:
 
     def to_regex_string(self, node):
         # Helper to convert a Node back to regex string if it contains only OR/Literal
-        if isinstance(node, RegexNode):
+        if isinstance(node, RegexNode): 
+            # Pattern inside RegexNode is already compiled or string? 
+            # In our class, it's compiled. We need the source string. 
+            # Implementation trick: Store source pattern in RegexNode
             if hasattr(node, 'pattern') and node.pattern: return node.pattern.pattern
-            return ""
+            # If it was constructed blindly? 
+            # Let's modifying RegexNode to store source.
+            return "" 
         if isinstance(node, OrNode):
             parts = [self.to_regex_string(c) for c in node.children]
             return r'(?:' + '|'.join(parts) + r')'
@@ -193,6 +204,7 @@ class CoreLogicParser:
              raise ValueError("Cannot use AND (*) inside a NEAR/ADJ condition. Use OR (+) only.")
         return ""
 
+# Patch RegexNode to store source for recursion
 class RegexNode(LogicNode):
     def __init__(self, pattern): 
         self.source = pattern
@@ -205,7 +217,8 @@ def parse_core_rule(rule_str):
     try:
         parser = CoreLogicParser()
         return parser.parse(rule_str)
-    except Exception as e:
+    except Exception:
+        # cache 中はエラー表示を抑制。呼び出し側で None を判定する。
         return None
 
 @st.cache_data
@@ -745,7 +758,7 @@ elif current_phase.startswith("フェーズ 4"):
                     
                     if chart_type == "ヒートマップ":
                         fig = px.imshow(
-                            ct_final, 
+                            ct_final,
                             labels=dict(x=x_ax, y=y_ax, color="件数"),
                             x=ct_final.columns,
                             y=ct_final.index,
@@ -753,10 +766,13 @@ elif current_phase.startswith("フェーズ 4"):
                             color_continuous_scale='YlGnBu',
                             text_auto=True
                         )
+                        # マス間に薄い白線を入れて可読性を高める
+                        fig.update_traces(xgap=2, ygap=2)
                         fig.update_layout(
                             height=max(600, len(ct_final)*40),
                             yaxis=dict(title=y_ax),
-                            xaxis=dict(title=x_ax, side='bottom')
+                            xaxis=dict(title=x_ax, side='bottom'),
+                            plot_bgcolor='white'
                         )
                         st.plotly_chart(fig, use_container_width=True, config={'editable': False}, key=f"core_chart_{wrapper_key}")
                         
@@ -810,6 +826,7 @@ elif current_phase.startswith("フェーズ 4"):
                          matrix_csv = ct_final.to_csv()
                          note = ""
 
+                    # Construct Data Summary for VOYAGER
                     # Construct Data Summary for VOYAGER
                     snap_data = {
                         'module': 'CORE',

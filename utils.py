@@ -13,6 +13,7 @@ import plotly.express as px
 # ==================================================================
 # --- 0. APOLLO Standard 色定数 ---
 # ==================================================================
+# 旧 get_theme_config("APOLLO Standard") の定義をモジュール定数化したもの
 APOLLO_COLORS = px.colors.qualitative.G10      # Plotly 離散カラーパレット (10色)
 APOLLO_BG = "#ffffff"                          # 背景色 (paper_bgcolor / plot_bgcolor)
 APOLLO_TEXT = "#333333"                        # 文字色 (font.color)
@@ -88,8 +89,8 @@ def get_npl_stopwords():
 def render_sidebar():
     """共通サイドバーを描画する"""
 
-
-    # 共通CSSの適用
+    
+    # 共通CSSの適用 (旧 APOLLO Standard テーマの背景・サイドバー bg を統合)
     st.markdown("""
     <style>
         html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #ffffff; color: #333333; }
@@ -131,7 +132,7 @@ def render_sidebar():
 Advanced Patent & Overall Landscape-analytics
 Logic Orbiter
 
-**v7.0.0**
+**v8.0.0**
 """)
         st.markdown("---")
         st.subheader("Home"); st.page_link("Home.py", label="Mission Control", icon="🛰️")
@@ -196,6 +197,8 @@ Logic Orbiter
         st.markdown("---")
         st.caption("© 2025-2026 しばやま")
 
+# 旧 get_theme_config() は廃止。色定数は冒頭の APOLLO_* を使用。
+
 # ==================================================================
 # --- 5. Snapshot (VOYAGER連携) ---
 # ==================================================================
@@ -212,7 +215,7 @@ def calculate_cagr_slope(df_subset, year_col='year'):
 @st.cache_data(show_spinner=False)
 def generate_rich_summary(df_target, title_col='title', abstract_col='abstract', n_representatives=5):
     """
-    VOYAGER用の高解像度サマリを生成する (Cached)
+    VOYAGER v5.1用の高解像度サマリを生成する (Cached)
     - 統計情報 (HHI, CAGR, Trend)
     - 代表特許 (Centroid Distance)
     """
@@ -510,7 +513,7 @@ def render_snapshot_button(title, description, key, fig=None, data_summary=None,
             'data_summary': data_summary,
             'module': module_name,
             'timestamp': pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'images': [] # 画像リストを保存
+            'images': [] # 新機能: 画像リストを保存
         }
         
         # 対象フィギュアの統合
@@ -624,6 +627,93 @@ def render_snapshot_button(title, description, key, fig=None, data_summary=None,
 # ==================================================================
 # --- 5. AI アシスタント (共通) ---
 # ==================================================================
+def parse_label_response(text: str) -> dict:
+    """LLM 応答をパースして {cluster_id: label} 辞書を返す。
+
+    対応形式（自動判別）:
+      - TSV:          `0\\tラベル`（タブ / カンマ / コロン / 全角コロン区切り）
+      - JSON:         `{"0": "ラベル", "1": "ラベル"}`
+      - Markdown 表:  `| 0 | ラベル | ...`
+      - 平文:         `0: ラベル` `0. ラベル` `0 - ラベル`
+
+    部分応答にも対応（対象クラスタ ID が全部揃っていなくてよい）。
+    ラベル末尾の改行・クォートは自動で除去。
+
+    Returns:
+        dict[int, str]: {cluster_id: label} の辞書。パース失敗時は空 dict。
+    """
+    if not isinstance(text, str) or not text.strip():
+        return {}
+    s = text.strip()
+
+    # Markdown コードブロック除去（```json ... ``` / ``` ... ```）
+    s = re.sub(r'^```(?:json|tsv|csv|txt|markdown)?\s*\n?', '', s, flags=re.IGNORECASE)
+    s = re.sub(r'\n?\s*```\s*$', '', s)
+    s = s.strip()
+
+    # 1. JSON 形式を優先的に試行
+    if s.startswith('{') or s.startswith('['):
+        try:
+            data = json.loads(s)
+            if isinstance(data, dict):
+                out = {}
+                for k, v in data.items():
+                    try:
+                        cid = int(str(k).strip())
+                        label = str(v).strip().strip('"\'「」『』')
+                        if label:
+                            out[cid] = label
+                    except (ValueError, TypeError):
+                        continue
+                if out:
+                    return out
+        except json.JSONDecodeError:
+            pass
+
+    # 2. Markdown 表形式（パイプ `|` で始まる行が複数ある場合）
+    pipe_lines = [ln for ln in s.split('\n') if ln.strip().startswith('|')]
+    if len(pipe_lines) >= 2:
+        out = {}
+        for line in pipe_lines:
+            line = line.strip()
+            # 区切り行スキップ: |---|---|
+            if re.match(r'^\|[\s\-:|]+\|$', line):
+                continue
+            cells = [c.strip() for c in line.strip('|').split('|')]
+            if len(cells) >= 2:
+                try:
+                    cid = int(cells[0])
+                    label = cells[1].strip().strip('"\'「」『』')
+                    if label and label.lower() not in ('id', 'cluster id', 'ラベル', 'label', '提案ラベル'):
+                        out[cid] = label
+                except ValueError:
+                    continue
+        if out:
+            return out
+
+    # 3. TSV / 平文形式: 各行を「ID [区切り文字] ラベル」として解析
+    out = {}
+    for line in s.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        # 区切り文字: タブ / カンマ / コロン / 全角コロン / ハイフン / ピリオド
+        m = re.match(r'^(\d+)\s*[\t\.,:：\-—]\s*(.+)$', line)
+        if not m:
+            continue
+        try:
+            cid = int(m.group(1))
+            label = m.group(2).strip().strip('"\'「」『』')
+            # CSV の場合は末尾クォートも除去
+            label = label.rstrip(',').strip()
+            if label:
+                out[cid] = label
+        except ValueError:
+            continue
+
+    return out
+
+
 def generate_ai_cluster_prompt(df_source, cluster_col, target_cols, tfidf_matrix, feature_names, n_samples=5):
     """クラスタごとの代表文献を抽出し、命名用プロンプトを生成する（c-TF-IDF方式）"""
     from sklearn.metrics.pairwise import euclidean_distances
@@ -699,20 +789,20 @@ def generate_ai_cluster_prompt(df_source, cluster_col, target_cols, tfidf_matrix
 # 制約事項
 - ラベルは**20文字以内**の日本語で記述してください。
 - 専門用語を適切に使用し、技術的特徴や解決課題を反映させてください。
-- 出力は **JSON形式のみ** としてください。解説は不要です。
+- 出力は下記の **TSV 形式（タブ区切り、1 行 1 クラスタ）** を推奨します。
+  解説・前置き・コードブロックは不要です。
+- 全クラスタを一度に回答する必要はありません。**一部のクラスタだけの応答も受け付けます**
+  （例: 「10-30 だけ再提案して」のような部分応答も OK）。
 
-# 出力例
-{{
-  "0": "全固体電池の固体電解質",
-  "1": "画像認識による異常検知",
-  "2": "カーボンニュートラル燃料製造"
-}}
+# 出力フォーマット（TSV: クラスタID<TAB>ラベル）
+0	全固体電池の固体電解質
+1	画像認識による異常検知
+2	カーボンニュートラル燃料製造
 
-# 出力フォーマット (JSON)
-{{
-  "クラスタID (整数)": "提案ラベル",
-  ...
-}}
+# 補足: 以下の形式でも取り込み可能です（TSV が困難な場合のみ使用）
+- JSON: `{{"0": "ラベル", "1": "ラベル"}}`
+- Markdown 表: `| 0 | ラベル |`
+- 平文: `0: ラベル` / `0. ラベル` / `0 - ラベル`
 
 # クラスタデータ
 {sampled_docs_str}
@@ -720,15 +810,24 @@ def generate_ai_cluster_prompt(df_source, cluster_col, target_cols, tfidf_matrix
     return prompt
 
 def render_ai_label_assistant(df_source, cluster_col, label_map_key, col_map, tfidf_matrix, feature_names, widget_key_prefix=None):
-    """AIラベルサジェストUI (共通部品)"""
-    with st.expander("AIによるラベルサジェスト (オプション)"):
-        st.markdown("LLM (ChatGPT等) にプロンプトを投げ、結果のJSONを取り込むことでラベルを自動設定します。")
-        
+    """AIラベルサジェストUI (共通部品)
+
+    LLM 応答は TSV / JSON / Markdown 表 / 平文 いずれも自動判別。
+    部分応答（一部クラスタだけ）も受け付け、既存マップに **追記マージ** します。
+    取り込み結果は session_state に保存され、下段の data_editor の「AI 提案」列に
+    そのまま表示されます。
+    """
+    with st.expander("🤖 AIによるラベルサジェスト (オプション)"):
+        st.markdown(
+            "LLM (ChatGPT等) にプロンプトを投げ、**TSV（タブ区切り）で応答を受け取り**、"
+            "そのまま貼り付けて取り込みます。JSON / Markdown 表 / 平文 も自動判別します。"
+        )
+
         col_s1, col_s2 = st.columns([1, 2])
         with col_s1:
             n_samples_ai = st.number_input("1クラスタあたりのサンプル数", min_value=1, value=5, key=f"ai_n_samples_{label_map_key}")
-        
-        if st.button("プロンプトを生成", key=f"ai_gen_btn_{label_map_key}"):
+
+        if st.button("📝 プロンプトを生成", key=f"ai_gen_btn_{label_map_key}"):
             target_cols = [col_map.get('title'), col_map.get('abstract')]
             prompt = generate_ai_cluster_prompt(df_source, cluster_col, target_cols, tfidf_matrix, feature_names, n_samples=n_samples_ai)
             st.session_state[f"ai_prompt_{label_map_key}"] = prompt
@@ -738,74 +837,215 @@ def render_ai_label_assistant(df_source, cluster_col, label_map_key, col_map, tf
             st.info("👆 右上のコピーボタンでコピーし、LLMに入力してください。")
 
         st.markdown("---")
-        st.markdown("**結果の取り込み (JSON)**")
-        json_input = st.text_area("LLMの出力JSONを貼り付け:", height=150, key=f"ai_json_input_{label_map_key}")
-        
-        if st.button("サジェストを適用", key=f"ai_apply_btn_{label_map_key}"):
+        st.markdown("**結果の取り込み（TSV / JSON / Markdown 表 / 平文 に自動対応）**")
+        st.caption(
+            "💡 **部分応答もそのまま貼付可能**（例: クラスタ 5, 12, 47 だけ再提案させた結果を貼付 → 既存ラベルに追記マージ）。"
+            "クラスタ ID が重複した場合は新しいラベルで上書きされます。"
+        )
+        tsv_input = st.text_area(
+            "LLM の出力を貼付:",
+            height=150,
+            key=f"ai_json_input_{label_map_key}",
+            placeholder="例:\n0\t全固体電池の固体電解質\n1\t画像認識による異常検知\n...",
+        )
+
+        if st.button("✅ サジェストを適用（追記マージ）", key=f"ai_apply_btn_{label_map_key}"):
             try:
-                # JSONのクリーニング (Markdownコードブロック除去)
-                cleaned_json = re.sub(r'^```json\s*|\s*```$', '', json_input.strip(), flags=re.MULTILINE)
-                data = json.loads(cleaned_json)
-                
-                # key変換 (str -> int) & 適用
-                current_map = st.session_state[label_map_key]
-                count = 0
-                for cid_str, label in data.items():
-                    try:
-                        cid = int(cid_str)
-                        # df_sourceのクラスタカラムに存在するIDか確認
-                        unique_cids = df_source[cluster_col].unique()
-                        
-                        if cid in current_map or cid in unique_cids: # 存在するクラスタのみ
-                            new_val = f"[{cid}] {label}"
-                            current_map[cid] = new_val
-                            
-                            # ウィジェットのステートも強制更新して、UI上の表示を同期させる
-                            if widget_key_prefix:
-                                w_key = f"{widget_key_prefix}_{cid}"
-                                if w_key in st.session_state:
-                                    st.session_state[w_key] = new_val
-                            count += 1
-                    except: pass
-                
-                # 反映 (session_stateのマップは参照渡しされている前提だが、念のため再代入)
+                parsed = parse_label_response(tsv_input)
+                if not parsed:
+                    st.warning("応答を解析できませんでした。TSV / JSON / Markdown 表 / 平文 のいずれかで貼り付けてください。")
+                    return
+
+                # 追記マージ: 既存 current_map を保持しつつ、新エントリを上書き
+                current_map = st.session_state.get(label_map_key, {}) or {}
+                unique_cids = set(df_source[cluster_col].unique().tolist())
+                # AI 提案そのものを session_state に保存（data_editor の AI 提案列で参照）
+                ai_suggest_key = f"ai_suggestions_{label_map_key}"
+                existing_suggest = st.session_state.get(ai_suggest_key, {}) or {}
+
+                count_updated = 0
+                count_added = 0
+                for cid, raw_label in parsed.items():
+                    # 対象クラスタに存在する ID のみ採用
+                    if cid not in current_map and cid not in unique_cids:
+                        continue
+                    new_val = f"[{cid}] {raw_label}"
+                    if cid in current_map:
+                        count_updated += 1
+                    else:
+                        count_added += 1
+                    current_map[cid] = new_val
+                    existing_suggest[cid] = new_val
+
+                    # 旧 text_input 形式の互換: widget の session_state も強制更新
+                    if widget_key_prefix:
+                        w_key = f"{widget_key_prefix}_{cid}"
+                        if w_key in st.session_state:
+                            st.session_state[w_key] = new_val
+
                 st.session_state[label_map_key] = current_map
-                
-                # [Saturn V] ラベルカラムの更新
+                st.session_state[ai_suggest_key] = existing_suggest
+
+                # data_editor 形式のテーブルも同期（AI 提案列を反映するため再生成）
+                table_key = f"{widget_key_prefix}_editor_df" if widget_key_prefix else None
+                if table_key and table_key in st.session_state:
+                    # 既存 DataFrame に AI 提案を反映
+                    _edf = st.session_state[table_key]
+                    if 'AI 提案' in _edf.columns:
+                        _edf['AI 提案'] = _edf['クラスタID'].map(
+                            lambda cid: existing_suggest.get(int(cid), _edf.loc[_edf['クラスタID'] == cid, 'AI 提案'].iloc[0] if len(_edf.loc[_edf['クラスタID'] == cid]) > 0 else '')
+                        )
+                        st.session_state[table_key] = _edf
+
+                # 派生ラベル列の更新（各モジュール別）
                 if label_map_key == "saturnv_labels_map" and 'df_main' in st.session_state:
-                   # ラベル更新を反映
-                   st.session_state.df_main['cluster_label'] = st.session_state.df_main['cluster'].map(current_map)
+                    st.session_state.df_main['cluster_label'] = st.session_state.df_main['cluster'].map(current_map)
                 elif label_map_key == "drill_labels_map" and 'df_drilldown_result' in st.session_state:
-                   st.session_state.df_drilldown_result['drill_cluster_label'] = st.session_state.df_drilldown_result['drill_cluster'].map(current_map)
-
-                # [MEGA] ラベルカラムの更新
+                    st.session_state.df_drilldown_result['drill_cluster_label'] = st.session_state.df_drilldown_result['drill_cluster'].map(current_map)
                 elif label_map_key == "mega_drill_labels_map" and 'df_drilldown' in st.session_state:
-                   st.session_state.df_drilldown['label'] = st.session_state.df_drilldown['cluster_id'].map(current_map)
-                   st.session_state.sbert_sub_cluster_map_auto = current_map
+                    st.session_state.df_drilldown['label'] = st.session_state.df_drilldown['cluster_id'].map(current_map)
+                    st.session_state.sbert_sub_cluster_map_auto = current_map
 
-                st.success(f"{count} 件のラベルを更新しました！")
+                st.success(
+                    f"✅ 取り込み完了: 新規 **{count_added}** 件 / 上書き **{count_updated}** 件 "
+                    f"(合計 {count_added + count_updated} 件、未対応 {len(parsed) - count_added - count_updated} 件)"
+                )
                 st.rerun()
-                
-            except Exception as e:
-                st.error(f"JSONパースエラー: {e}")
 
-def create_label_editor_ui(original_map, current_map, key_prefix):
-    """手動ラベル編集UI機能 (共通)"""
+            except Exception as e:
+                st.error(f"取り込みエラー: {e}")
+
+def create_label_editor_ui(original_map, current_map, key_prefix, max_individual_widgets=30):
+    """手動ラベル編集UI機能 (共通)
+
+    クラスタ数が max_individual_widgets を超える場合は自動的に st.data_editor
+    (テーブル形式編集) に切り替わり、Streamlit の WebSocket メッセージ制限や
+    "Bad message format / Tried to use Session..." 系エラーを回避する。
+
+    Args:
+        original_map: {cluster_id: original_label} 初回ラベル
+        current_map: {cluster_id: current_label} 現在のラベル（編集済み含む）
+        key_prefix: session_state のキー接頭辞
+        max_individual_widgets: これを超えたら data_editor 形式に切替（デフォルト 30）
+
+    Returns:
+        dict: {cluster_id: new_label} 編集後のラベル辞書
+    """
     widgets_dict = {}
     sorted_ids = sorted([cid for cid in original_map.keys() if cid != -1])
-    for cluster_id in sorted_ids:
-        orig_label = original_map.get(cluster_id, "")
-        curr_label = current_map.get(cluster_id, orig_label)
-        if orig_label == "(該当なし)": continue
-        col1, col2 = st.columns([2, 3])
-        with col1: st.markdown(f":green[{orig_label}]")
-        with col2:
-            key = f"{key_prefix}_{cluster_id}"
-            if key not in st.session_state:
-                st.session_state[key] = curr_label
-            # value引数を指定せず、key経由でsession_stateの値を使用させる
-            new_label = st.text_input(f"Edit {cluster_id}", label_visibility="collapsed", key=key)
-            widgets_dict[cluster_id] = new_label
+    # "(該当なし)" を除いた有効クラスタ数
+    valid_ids = [cid for cid in sorted_ids if original_map.get(cid, "") != "(該当なし)"]
+
+    # --- 大規模クラスタ対応: テーブル形式 (st.data_editor) ---
+    if len(valid_ids) > max_individual_widgets:
+        import pandas as pd
+
+        # AI 提案を session_state から取得（render_ai_label_assistant が書き込む）
+        ai_suggest_key = f"ai_suggestions_{key_prefix.replace('_label', '_labels_map') if key_prefix.endswith('_label') else key_prefix}"
+        # キー規約が複数あるので候補を試す
+        ai_suggestions = {}
+        for candidate in [
+            f"ai_suggestions_{key_prefix.replace('_label', '_labels_map')}",
+            f"ai_suggestions_{key_prefix}_labels_map",
+            f"ai_suggestions_{key_prefix}",
+        ]:
+            if candidate in st.session_state:
+                ai_suggestions = st.session_state[candidate] or {}
+                break
+
+        st.caption(
+            f"ℹ️ クラスタ数が {len(valid_ids)} 個と多いため、テーブル形式で編集します"
+            f"（text_input を大量生成すると Streamlit のメッセージ制限を超えるため）。"
+            f"『編集後ラベル』列のセルをクリックして編集してください。"
+        )
+        st.caption(
+            "💡 **操作のコツ**: セルをダブルクリック or クリック後 **Enter** で編集 → **Tab** で次セルへ。"
+            " Excel からの **コピー&ペースト** も可能（複数セル同時貼付対応）。"
+        )
+
+        table_key = f"{key_prefix}_editor_df"
+
+        # 初回のみ DataFrame を session_state に格納
+        if table_key not in st.session_state:
+            rows = [
+                {
+                    'クラスタID': cid,
+                    '元ラベル': original_map.get(cid, ""),
+                    'AI 提案': ai_suggestions.get(cid, ""),
+                    '編集後ラベル': current_map.get(cid, original_map.get(cid, "")),
+                }
+                for cid in valid_ids
+            ]
+            st.session_state[table_key] = pd.DataFrame(rows)
+        else:
+            # 2 回目以降: AI 提案列を session_state から再同期（取り込み後の反映）
+            _df_existing = st.session_state[table_key]
+            if 'AI 提案' not in _df_existing.columns:
+                _df_existing['AI 提案'] = ""
+            if ai_suggestions:
+                _df_existing['AI 提案'] = _df_existing['クラスタID'].map(
+                    lambda cid: ai_suggestions.get(int(cid), "")
+                )
+                st.session_state[table_key] = _df_existing
+
+        # --- 一括操作ボタン ---
+        btn_col1, btn_col2, btn_col3 = st.columns([2, 2, 3])
+        with btn_col1:
+            if st.button("📥 AI 提案 → 編集後ラベルへ一括コピー", key=f"{key_prefix}_bulk_copy_ai", use_container_width=True):
+                _df = st.session_state[table_key].copy()
+                mask = _df['AI 提案'].astype(str).str.strip().astype(bool)
+                _df.loc[mask, '編集後ラベル'] = _df.loc[mask, 'AI 提案']
+                st.session_state[table_key] = _df
+                st.toast(f"✅ {mask.sum()} 件の AI 提案を編集後ラベルへコピーしました", icon="📥")
+                st.rerun()
+        with btn_col2:
+            if st.button("↩️ 編集後ラベルを元ラベルへリセット", key=f"{key_prefix}_bulk_reset", use_container_width=True):
+                _df = st.session_state[table_key].copy()
+                _df['編集後ラベル'] = _df['元ラベル']
+                st.session_state[table_key] = _df
+                st.toast("↩️ 元ラベルに戻しました", icon="↩️")
+                st.rerun()
+        with btn_col3:
+            st.caption("🔍 テーブル右上の虫眼鏡アイコンで絞り込み検索、列ヘッダークリックでソート可")
+
+        edited_df = st.data_editor(
+            st.session_state[table_key],
+            disabled=['クラスタID', '元ラベル', 'AI 提案'],
+            hide_index=True,
+            use_container_width=True,
+            num_rows='fixed',
+            key=f"{key_prefix}_data_editor",
+            column_config={
+                'クラスタID': st.column_config.NumberColumn('ID', width='small'),
+                '元ラベル': st.column_config.TextColumn('元ラベル', width='medium'),
+                'AI 提案': st.column_config.TextColumn('AI 提案', width='medium', help="AIラベルサジェストの結果。「編集後ラベル」列にドラッグしてコピー、または上の一括コピーボタンを使用"),
+                '編集後ラベル': st.column_config.TextColumn('編集後ラベル', width='large', help="この列のセルをクリックして編集してください"),
+            },
+        )
+        # DataFrame を session_state に反映（次回描画時に編集内容を保持）
+        st.session_state[table_key] = edited_df
+
+        # 戻り値の辞書を構築
+        for _, row in edited_df.iterrows():
+            cid = int(row['クラスタID'])
+            widgets_dict[cid] = str(row['編集後ラベル']) if row['編集後ラベル'] else original_map.get(cid, "")
+
+    # --- 少数クラスタ: 従来の text_input 形式 ---
+    else:
+        for cluster_id in valid_ids:
+            orig_label = original_map.get(cluster_id, "")
+            curr_label = current_map.get(cluster_id, orig_label)
+            col1, col2 = st.columns([2, 3])
+            with col1: st.markdown(f":green[{orig_label}]")
+            with col2:
+                key = f"{key_prefix}_{cluster_id}"
+                if key not in st.session_state:
+                    st.session_state[key] = curr_label
+                # value引数を指定せず、key経由でsession_stateの値を使用させる
+                new_label = st.text_input(f"Edit {cluster_id}", label_visibility="collapsed", key=key)
+                widgets_dict[cluster_id] = new_label
+
+    # ノイズクラスタ (-1) は編集不可で別途表示
     if -1 in original_map:
         orig_noise = original_map[-1]
         curr_noise = current_map.get(-1, orig_noise)
@@ -1183,6 +1423,8 @@ def load_tokenizer():
 def extract_keywords(text, tokenizer=None, stopwords=None, top_n=None, clean_html=False):
     """
     テキストから特徴語（名詞・複合名詞）を抽出する (patiroha委譲)
+    Janome の内部エラー (IndexError 等) と異常入力を吸収するロバストラッパー。
+
     Args:
         text (str): 対象テキスト
         tokenizer: 未使用 (後方互換性のため維持)
@@ -1190,8 +1432,27 @@ def extract_keywords(text, tokenizer=None, stopwords=None, top_n=None, clean_htm
         top_n: 未使用 (後方互換性のため維持)
         clean_html (bool): Trueの場合、HTML/XMLタグを除去する (NPL推奨)
     Returns:
-        list: 抽出されたキーワードのリスト
+        list: 抽出されたキーワードのリスト (失敗時・異常入力時は空リスト)
     """
+    # 入力サニタイズ: None / NaN / 非文字列を弾く
+    if not isinstance(text, str):
+        return []
+    text = text.strip()
+    if not text:
+        return []
+
+    # Janome の lattice サイズ制約を回避。
+    # 実測で 8000 文字超で IndexError (lattice.enodes のインデックス超過) を誘発することがある。
+    # キーワード抽出では十分なサイズなので切り詰める。
+    MAX_LEN = 8000
+    if len(text) > MAX_LEN:
+        text = text[:MAX_LEN]
+
     if stopwords is None:
         stopwords = patiroha.get_stopwords()
-    return patiroha.extract_keywords(text, stopwords=stopwords, clean_html=clean_html)
+
+    try:
+        return patiroha.extract_keywords(text, stopwords=stopwords, clean_html=clean_html)
+    except Exception:
+        # Janome / patiroha 内部の予期せぬエラーは空リストで吸収し、分析全体を止めない
+        return []

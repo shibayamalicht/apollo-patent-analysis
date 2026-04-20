@@ -44,7 +44,7 @@ warnings.filterwarnings('ignore')
 # --- 1. ページ設定 ---
 # ==================================================================
 st.set_page_config(
-    page_title="APOLLO CAPCOM | Saturn V", 
+    page_title="APOLLO v8 | Saturn V", 
     page_icon="🚀", 
     layout="wide"
 )
@@ -140,12 +140,21 @@ def apply_ngram_filters(text):
 
 @st.cache_data
 def extract_compound_nouns(text, stopwords_list):
+    # 防御層: 異常入力と超長文で Janome の IndexError を避ける
+    if not isinstance(text, str) or not text.strip():
+        return []
+    if len(text) > 8000:
+        text = text[:8000]
+
     text = normalize_text(text)
-    text = apply_ngram_filters(text) 
+    text = apply_ngram_filters(text)
     text = re.sub(r'【.*?】', '', text)
     text = re.sub(r'[!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~]', ' ', text)
 
-    tokens = t.tokenize(text)
+    try:
+        tokens = t.tokenize(text)
+    except Exception:
+        return []
     words, compound_word = [], ''
     for token in tokens:
         pos = token.part_of_speech.split(',')[0]
@@ -613,6 +622,7 @@ with tab_main:
                         hoverinfo='text', hovertext=df_focus_noise['hover_text'], name='Noise'
                     ))
 
+        # ラベル追加
         if show_labels_chk:
             label_data_source = df_universe
             target_cids = cluster_values if "ALL" not in cluster_values else label_data_source['cluster'].unique()
@@ -638,7 +648,7 @@ with tab_main:
                 )
 
         norm_msg = " (絶対評価)" if use_abs_scale and map_mode == "密度マップ (Density)" else ""
-        utils.update_fig_layout(fig_main, f"Saturn V - メインマップ{norm_msg}", height=1200)
+        utils.update_fig_layout(fig_main, f"Saturn V - メインマップ{norm_msg}", height=1200, show_legend=False)
         
 
         # 1. アスペクト比: 歪みを防ぐため1:1を強制
@@ -728,7 +738,8 @@ with tab_main:
                  label = st.session_state.saturnv_labels_map.get(cid, f"Cluster {cid}")
                  count = cluster_counts_snap.get(cid, 0)
                  cluster_summary_lines.append(f"- {label} ({count}件)")
-
+                 
+                # 代表特許を追加
                  if cid in cluster_reps:
                      for rep in cluster_reps[cid]:
                          cluster_summary_lines.append(rep)
@@ -942,8 +953,7 @@ with tab_main:
                                 _df_noise_capcom = df_universe[df_universe['cluster'] == -1]
                                 _noise_texts = (_df_noise_capcom[_title_col].fillna('') + ' ' +
                                                _df_noise_capcom.get(_abstract_col, pd.Series([''] * len(_df_noise_capcom))).fillna(''))
-                                _noise_kws = _noise_texts.apply(
-                                    lambda x: patiroha.extract_keywords(x, stopwords=patiroha.get_stopwords()))
+                                _noise_kws = _noise_texts.apply(utils.extract_keywords)
                                 _all_kws = []
                                 for _kw_list in _noise_kws:
                                     _all_kws.extend(_kw_list)
@@ -1071,8 +1081,7 @@ with tab_main:
                         if title_col and title_col in df_noise.columns:
                             noise_texts = (df_noise[title_col].fillna('') + ' ' +
                                           df_noise.get(abstract_col, pd.Series([''] * len(df_noise))).fillna(''))
-                            noise_kws = noise_texts.apply(
-                                lambda x: patiroha.extract_keywords(x, stopwords=patiroha.get_stopwords()))
+                            noise_kws = noise_texts.apply(utils.extract_keywords)
 
                             from collections import Counter
                             all_kws = []
@@ -1355,7 +1364,7 @@ with tab_main:
                         borderpad=4
                     ))
             fig_drill.update_layout(annotations=annotations_drill)
-            utils.update_fig_layout(fig_drill, f'Saturn V ドリルダウン: {st.session_state.drill_base_label}', height=1000)
+            utils.update_fig_layout(fig_drill, f'Saturn V ドリルダウン: {st.session_state.drill_base_label}', height=1000, show_legend=False)
             st.plotly_chart(fig_drill, use_container_width=True, config={
                 'editable': True,
                 'edits': {

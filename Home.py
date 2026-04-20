@@ -27,7 +27,7 @@ warnings.filterwarnings('ignore')
 # --- ページ設定 ---
 # ==================================================================
 st.set_page_config(
-    page_title="APOLLO v7 | Mission Control",
+    page_title="APOLLO v8 | Mission Control",
     page_icon="🛰️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -271,6 +271,80 @@ with container:
                     with c3:
                         oalex_max = st.number_input("取得上限", min_value=50, max_value=10000, value=200, step=50, key="oalex_max")
 
+                    # --- 年別取得モード（10,000件/クエリ制限を回避して広い年範囲を網羅） ---
+                    oalex_by_year = st.checkbox(
+                        "📅 年別取得モード（年ごとに最大上限まで取得、広い年範囲で大量取得したい場合）",
+                        value=False,
+                        key="oalex_by_year",
+                        help=(
+                            "OFF: 全期間で合算して『取得上限』まで取得（高速・少量向け）\n"
+                            "ON:  各年ごとに『年あたりの最大件数』まで取得し重複除去（広い年範囲・大量取得向け）\n"
+                            "     年数 × ページネーション回数分のAPIコールが発生するため時間がかかります"
+                        ),
+                    )
+                    oalex_max_per_year = 10000
+                    if oalex_by_year:
+                        oalex_max_per_year = st.number_input(
+                            "年あたりの最大件数（max_per_year）",
+                            min_value=100, max_value=10000, value=10000, step=500,
+                            key="oalex_max_per_year",
+                            help="各年ごとに取得する上限件数。10,000 が OpenAlex の実質上限。",
+                        )
+                        _years_span = max(1, int(oalex_year_to) - int(oalex_year_from) + 1)
+                        st.caption(
+                            f"🧮 試算: {_years_span} 年 × 最大 {oalex_max_per_year:,} 件 = "
+                            f"最大 {_years_span * int(oalex_max_per_year):,} 件（重複除去前）。"
+                            f"所要時間: 年数とページ送りに比例（広範囲だと数分以上）"
+                        )
+
+                    # --- 論文種別フィルタ（複数選択可、未選択＝全種別） ---
+                    # OpenALEX_Collector.html と同等の10種類
+                    OALEX_PUB_TYPE_OPTIONS = {
+                        "Article（学術論文）": "article",
+                        "Review（総説）": "review",
+                        "Book Chapter": "book-chapter",
+                        "Book": "book",
+                        "Dataset": "dataset",
+                        "Preprint": "preprint",
+                        "Dissertation（学位論文）": "dissertation",
+                        "Editorial": "editorial",
+                        "Letter": "letter",
+                        "Report（技術レポート）": "report",
+                    }
+                    oalex_pub_type_labels = st.multiselect(
+                        "論文種別（複数選択可、未選択＝全種別）",
+                        options=list(OALEX_PUB_TYPE_OPTIONS.keys()),
+                        default=[],
+                        key="oalex_pub_type_labels",
+                        help="OpenALEX の type フィルタ。未選択の場合は全種別が対象。",
+                    )
+                    oalex_pub_types = [OALEX_PUB_TYPE_OPTIONS[lbl] for lbl in oalex_pub_type_labels]
+
+                    # --- 分析品質向上フィルタ ---
+                    col_filt1, col_filt2 = st.columns(2)
+                    with col_filt1:
+                        oalex_has_abstract = st.checkbox(
+                            "📄 要約ありの論文のみ取得",
+                            value=True,
+                            key="oalex_has_abstract",
+                            help=(
+                                "OpenAlex の `has_abstract:true` フィルタを適用。\n"
+                                "要約（unified_content）は SBERT 埋め込み・クラスタリングで必須のため、\n"
+                                "分析精度を担保したい場合は推奨（デフォルト ON）。"
+                            ),
+                        )
+                    with col_filt2:
+                        oalex_en_only = st.checkbox(
+                            "🌐 英語論文のみ取得",
+                            value=False,
+                            key="oalex_en_only",
+                            help=(
+                                "OpenAlex の `language:en` フィルタを適用。\n"
+                                "多言語データ（中国語・ドイツ語等）が混在すると SBERT の精度が低下するため、\n"
+                                "グローバル比較が主目的なら ON を推奨。"
+                            ),
+                        )
+
                     if st.button("🔍 OpenALEX検索実行", key="oalex_search_btn"):
                         if not oalex_query.strip():
                             st.error("検索キーワードを入力してください。")
@@ -299,42 +373,195 @@ with container:
                                         progress_bar.progress(min(current / total, 1.0))
                                     status_text.markdown(f"取得中: {current} 件...")
 
-                                # 検索実行
-                                if len(queries) == 1:
+                                def on_year_progress(yi, total_years, year, year_count, year_total, all_count):
+                                    # 全体プログレス: 年インデックス + 当年内の進捗
+                                    year_frac = (year_count / year_total) if year_total else 1.0
+                                    overall = (yi + min(year_frac, 1.0)) / max(total_years, 1)
+                                    progress_bar.progress(min(overall, 1.0))
+                                    status_text.markdown(
+                                        f"📅 {year} 年 ({yi + 1}/{total_years}): "
+                                        f"{year_count:,} / {year_total:,} 件 | 累計: {all_count:,} 件"
+                                    )
+
+                                # 共通フィルタ引数（全 4 パスで使用）
+                                _common_kwargs = dict(
+                                    pub_types=oalex_pub_types if oalex_pub_types else None,
+                                    institution_ids=inst_ids if inst_ids else None,
+                                    has_abstract=bool(oalex_has_abstract),
+                                    language=("en" if oalex_en_only else None),
+                                )
+
+                                # 検索実行（通常モード / 年別取得モードで分岐）
+                                if oalex_by_year:
+                                    # --- 年別取得モード（10,000件/クエリ制限を回避） ---
+                                    if len(queries) == 1:
+                                        raw_papers = collector.search_by_year(
+                                            queries[0],
+                                            year_from=int(oalex_year_from),
+                                            year_to=int(oalex_year_to),
+                                            max_per_year=int(oalex_max_per_year),
+                                            on_progress=on_year_progress,
+                                            **_common_kwargs,
+                                        )
+                                    else:
+                                        # 複数クエリ × 年別: 各クエリを個別に年別検索して重複除去
+                                        raw_papers = []
+                                        seen_ids = set()
+                                        total_q = len(queries)
+                                        for qi, q in enumerate(queries):
+                                            def _q_year_progress(
+                                                yi, total_years, year,
+                                                year_count, year_total, all_count,
+                                                _qi=qi, _tq=total_q,
+                                            ):
+                                                year_frac = (year_count / year_total) if year_total else 1.0
+                                                within_q = (yi + min(year_frac, 1.0)) / max(total_years, 1)
+                                                overall = (_qi + within_q) / _tq
+                                                progress_bar.progress(min(overall, 1.0))
+                                                status_text.markdown(
+                                                    f"🔎 クエリ {_qi + 1}/{_tq} | 📅 {year} 年 "
+                                                    f"({yi + 1}/{total_years}): {year_count:,} / {year_total:,} 件 | "
+                                                    f"統合累計: {len(raw_papers):,} 件"
+                                                )
+                                            batch = collector.search_by_year(
+                                                q,
+                                                year_from=int(oalex_year_from),
+                                                year_to=int(oalex_year_to),
+                                                max_per_year=int(oalex_max_per_year),
+                                                on_progress=_q_year_progress,
+                                                **_common_kwargs,
+                                            )
+                                            for paper in batch:
+                                                pid = paper.get("id", "")
+                                                if pid and pid not in seen_ids:
+                                                    seen_ids.add(pid)
+                                                    raw_papers.append(paper)
+                                elif len(queries) == 1:
+                                    # --- 通常モード（単一クエリ） ---
                                     raw_papers = collector.search(
                                         queries[0],
                                         year_from=oalex_year_from, year_to=oalex_year_to,
                                         max_results=oalex_max,
-                                        institution_ids=inst_ids if inst_ids else None,
                                         on_progress=on_progress,
+                                        **_common_kwargs,
                                     )
                                 else:
+                                    # --- 通常モード（複数クエリ OR） ---
                                     raw_papers = collector.search_multi_query(
                                         queries,
                                         year_from=oalex_year_from, year_to=oalex_year_to,
                                         max_results=oalex_max,
-                                        institution_ids=inst_ids if inst_ids else None,
+                                        **_common_kwargs,
                                     )
 
                                 if raw_papers:
                                     papers = [collector.transform_paper(p) for p in raw_papers]
                                     df_oalex = collector.to_npl_dataframe(papers)
 
+                                    # 英語のみフラグ ON の場合、タイトル側も英語判定で追加フィルタ
+                                    # （OpenAlex の `language:en` は abstract ベース判定のため、
+                                    #   タイトルが別言語の論文が混入することがある）
+                                    if oalex_en_only and not df_oalex.empty:
+                                        # CJK 漢字・ひらがな・カタカナ・ハングル・キリル・アラビア・タイ・ヘブライ文字等を検出
+                                        _non_en_pat = re.compile(
+                                            r'[\u3040-\u309F'      # ひらがな
+                                            r'\u30A0-\u30FF'       # カタカナ
+                                            r'\u4E00-\u9FFF'       # CJK 統合漢字
+                                            r'\u3400-\u4DBF'       # CJK 統合漢字拡張 A
+                                            r'\uAC00-\uD7AF'       # ハングル音節
+                                            r'\u0400-\u04FF'       # キリル文字
+                                            r'\u0590-\u05FF'       # ヘブライ文字
+                                            r'\u0600-\u06FF'       # アラビア文字
+                                            r'\u0E00-\u0E7F'       # タイ文字
+                                            r'\u0900-\u097F'       # デーヴァナーガリー
+                                            r']'
+                                        )
+                                        _before_n = len(df_oalex)
+                                        _title_series = df_oalex['unified_title'].fillna('').astype(str)
+                                        df_oalex = df_oalex[~_title_series.str.contains(_non_en_pat, regex=True)].reset_index(drop=True)
+                                        _removed_n = _before_n - len(df_oalex)
+                                        if _removed_n > 0:
+                                            status_text.info(
+                                                f"🌐 タイトルが非英語の論文 **{_removed_n:,} 件** を除外しました "
+                                                f"（OpenAlex の `language:en` は要約ベースの判定のため、"
+                                                f"タイトルだけ日本語・中国語等の多言語ジャーナル論文が混入することがあります）"
+                                            )
+
                                     progress_bar.progress(1.0)
-                                    status_text.success(f"✅ {len(df_oalex)}件の論文を取得しました。")
 
-                                    st.dataframe(df_oalex[['unified_title', 'unified_date', 'unified_source', 'citation_count']].head(10))
-
-                                    if st.button("➕ データセットに追加 (OpenALEX)", key="oalex_add_btn"):
-                                        st.session_state.df_npl_accumulated = pd.concat(
-                                            [st.session_state.df_npl_accumulated, df_oalex], ignore_index=True)
-                                        st.success(f"{len(df_oalex)}件を追加しました。")
-                                        st.rerun()
+                                    if df_oalex.empty:
+                                        status_text.warning("フィルタ後、該当する論文が 0 件になりました。条件を緩めてください。")
+                                        st.session_state.pop('oalex_last_result', None)
+                                    else:
+                                        status_text.success(f"✅ {len(df_oalex):,} 件の論文を取得しました。")
+                                        # 検索結果を session_state に保持してページ再描画後も使えるようにする
+                                        st.session_state['oalex_last_result'] = df_oalex
                                 else:
                                     status_text.warning("該当する論文が見つかりませんでした。")
+                                    st.session_state.pop('oalex_last_result', None)
 
                             except Exception as e:
                                 st.error(f"OpenALEX検索エラー: {e}")
+
+                    # --- 検索結果プレビュー + CSV ダウンロード + データセット追加 ---
+                    df_oalex_cached = st.session_state.get('oalex_last_result')
+                    if df_oalex_cached is not None and not df_oalex_cached.empty:
+                        st.markdown("###### 🔎 検索結果プレビュー")
+
+                        # 要約の取得成功率を表示（分析精度に直結するため明示）
+                        _has_abstract = df_oalex_cached['unified_content'].fillna('').astype(str).str.strip().astype(bool)
+                        _abs_ratio = _has_abstract.sum() / len(df_oalex_cached) * 100
+                        _abs_color = "🟢" if _abs_ratio >= 80 else ("🟡" if _abs_ratio >= 50 else "🔴")
+                        st.caption(
+                            f"{_abs_color} 要約取得率: **{_abs_ratio:.1f}%** "
+                            f"({_has_abstract.sum():,} / {len(df_oalex_cached):,} 件) — "
+                            f"SBERT 埋め込み・クラスタリングは `unified_content`（要約）を使用します"
+                        )
+
+                        # プレビュー表示用に要約を切り詰め（全文は CSV ダウンロードで取得可）
+                        _preview = df_oalex_cached[[
+                            'unified_title', 'unified_content', 'unified_date',
+                            'unified_source', 'citation_count',
+                        ]].head(10).copy()
+                        _preview['unified_content'] = _preview['unified_content'].fillna('').astype(str).apply(
+                            lambda s: (s[:150] + '…') if len(s) > 150 else s
+                        )
+                        st.dataframe(
+                            _preview,
+                            column_config={
+                                'unified_title': st.column_config.TextColumn('タイトル', width='medium'),
+                                'unified_content': st.column_config.TextColumn('要約（先頭150字）', width='large'),
+                                'unified_date': st.column_config.TextColumn('出版日', width='small'),
+                                'unified_source': st.column_config.TextColumn('ジャーナル', width='medium'),
+                                'citation_count': st.column_config.NumberColumn('被引用数', width='small'),
+                            },
+                            hide_index=True,
+                            use_container_width=True,
+                        )
+                        st.caption(
+                            f"全 {len(df_oalex_cached)} 件を取得済み。先頭10件をプレビュー表示（要約は切り詰め）。"
+                            f"分析対象の全カラム: `unified_title` / `unified_content`（要約）/ `unified_date` / "
+                            f"`unified_source` / `unified_region`（所属機関）/ `citation_count` / `doi` / "
+                            f"`data_sub_type`（= Academic）"
+                        )
+
+                        col_dl, col_add = st.columns(2)
+                        with col_dl:
+                            # CSV ダウンロード（取得した全件、Excel で開けるよう UTF-8 BOM）
+                            csv_bytes = df_oalex_cached.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+                            st.download_button(
+                                "📥 検索結果をCSVでダウンロード",
+                                data=csv_bytes,
+                                file_name=f"openalex_results_{datetime.datetime.now():%Y%m%d_%H%M%S}.csv",
+                                mime="text/csv",
+                                key="oalex_csv_dl",
+                            )
+                        with col_add:
+                            if st.button("➕ データセットに追加 (OpenALEX)", key="oalex_add_btn"):
+                                st.session_state.df_npl_accumulated = pd.concat(
+                                    [st.session_state.df_npl_accumulated, df_oalex_cached], ignore_index=True)
+                                st.success(f"{len(df_oalex_cached)}件を追加しました。")
+                                st.rerun()
 
             # --- タブ 2: News (ニュース) ---
             with npl_tabs[1]:
@@ -551,8 +778,9 @@ with container:
                 
 
         if st.session_state.df_main is not None:
+            # タブ2に移動
             pass
-
+            
     with tab2:
         st.markdown("##### 特許データのカラムを分析用フィールドに割り当てます。")
         if st.session_state.df_main is not None:
@@ -824,7 +1052,7 @@ with container:
                                 t_val = str(row['unified_title']) if pd.notna(row['unified_title']) else ""
                                 c_val = str(row['unified_content']) if pd.notna(row['unified_content']) else ""
                                 txt = t_val + " " + c_val
-                                return patiroha.extract_keywords(txt, stopwords=npl_sw)
+                                return utils.extract_keywords(txt, stopwords=npl_sw)
                             else:
                                 return []
 
@@ -859,7 +1087,7 @@ with container:
 
                     # Explorer用キーワードリスト
                     df['explorer_keywords'] = df['text_for_sbert'].apply(
-                        lambda x: patiroha.extract_keywords(x, stopwords=current_sw))
+                        lambda x: utils.extract_keywords(x, stopwords=current_sw))
 
                     # TF-IDF行列 — patiroha.build_tfidf
                     tfidf_matrix, feature_names = patiroha.build_tfidf(
@@ -988,6 +1216,7 @@ padding: 10px 12px; text-align: center;">
 0%, 100% {{ opacity: 1; }}
 50% {{ opacity: 0.3; }}
 }}</style>""", unsafe_allow_html=True)
+            # ZIPダウンロード方式のためパス表示は不要
 
         else:
             # CAPCOM 待機状態

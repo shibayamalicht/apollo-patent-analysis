@@ -82,7 +82,7 @@ def update_fig_layout(fig, title, height=600, show_legend=True):
 # ==================================================================
 
 st.set_page_config(
-    page_title="APOLLO CAPCOM | ATLAS",
+    page_title="APOLLO v8 | ATLAS",
     page_icon="🌍",
     layout="wide"
 )
@@ -243,7 +243,7 @@ if status_col:
         # 登録/有効
         if any(k in s_lower for k in ['granted', 'registered', 'active', '登録', '有効', '権利存続', '存続']):
             return 'granted'
-        # 拒絶 (「拒絶査定後の出願」等の誤判定を防ぐため pending より先)
+        # 拒絶 (← 「拒絶査定後の出願」等の誤判定を防ぐため pending より先)
         if any(k in s_lower for k in ['rejected', 'refused', 'denied', '拒絶', '却下']):
             return 'rejected'
         # 取下げ
@@ -508,6 +508,7 @@ with tab1_line:
         # Snapshot Button
         snap_data = utils.generate_rich_summary(df_filtered if 'df_target' not in locals() else df_target, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=5)
         snap_data['module'] = 'ATLAS'
+        # Optimize Chart Data
         # Optimize Chart Data (Wide Format for Applicants)
         if data is not None and not data.empty:
              if 'assignee_parsed' in data.columns:
@@ -956,11 +957,13 @@ with tab4:
         data = st.session_state['atlas_data_bubble_tab4']
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
-
+        
+        # Snapshot Button
         # Snapshot Button
         snap_data = utils.generate_rich_summary(data, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=5)
         snap_data['module'] = 'ATLAS'
-
+        
+        # Optimize Chart Data
         # Optimize Chart Data
         if hasattr(data, 'head'):
 
@@ -1054,11 +1057,12 @@ with tab5:
         data = st.session_state['atlas_data_bubble_ipc']
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
-
+        
+        # Snapshot Button
         # Snapshot Button
         snap_data = utils.generate_rich_summary(data, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=5)
         snap_data['module'] = 'ATLAS'
-
+        
         # Optimize Chart Data (IPC Bubble)
         df_snap_safe = data.head(30).copy()
         if 'assignee_parsed' in df_snap_safe.columns:

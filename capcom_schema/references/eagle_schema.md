@@ -60,7 +60,7 @@ EAGLE は探索的ランドスケープモジュール。投げ縄(Lasso)選択�
 - 「Saturn V のクラスタ『{auto_label}』に相当する領域が、EAGLEでは『{eagle_label_A}』と『{eagle_label_B}』に分割されている」
 - 「自動分類と手動分類の差異から、分析者が重視する技術境界が明らかになる」
 
-## v7新規フィールド: クラスタ動態マップ
+## 新規フィールド: クラスタ動態マップ
 
 `data/eagle_cluster_dynamics.json` が新規出力される:
 

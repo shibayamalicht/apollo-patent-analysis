@@ -43,7 +43,7 @@ class LLMClient:
 # ==================================================================
 # --- ページ設定 ---
 # ==================================================================
-st.set_page_config(page_title="APOLLO CAPCOM | VOYAGER", page_icon="📝", layout="wide")
+st.set_page_config(page_title="APOLLO v8 | VOYAGER", page_icon="📝", layout="wide")
 utils.render_sidebar()
 
 st.title("📝 VOYAGER")
@@ -180,7 +180,7 @@ with col_act:
             if snap.get('images') and len(snap['images']) > 1:
                 c_str += f"- [Visual Reference Note]: This evidence consists of multiple images. Refer to [Evidence {i+1}-1] for the first chart (e.g. Growth/Ranking) and [Evidence {i+1}-2] for the second (e.g. Network).\n"
 
-            # --- 構造化データ処理 ---
+            # --- 構造化データ処理 (v5.1 High-Res) ---
             
             # リストアーティファクトの再帰的クリーナー (['a', 'b'] -> "a, b")
             def clean_data_for_prompt(data, key=None):
@@ -282,22 +282,22 @@ with col_act:
                         if 'density' in ns:
                             c_str += f", Density: {ns['density']}"
                         c_str += "\n"
-                    # ハブ
+                    # ハブ（新形式 hubs_ranked / 旧形式 hubs 両対応）
                     if 'hubs_ranked' in ns:
                         top_hubs = ns['hubs_ranked'][:10] if isinstance(ns['hubs_ranked'], list) else ns['hubs_ranked']
                         c_str += f"  - Top Hubs (Centrality): {clean_join(top_hubs)}\n"
                     elif 'hubs' in ns:
                         c_str += f"  - Top Hubs (Centrality): {clean_join(ns['hubs'])}\n"
-                    # エッジ
+                    # エッジ（新形式 edges_ranked / 旧形式 edges 両対応）
                     if 'edges_ranked' in ns:
                         top_edges = ns['edges_ranked'][:10] if isinstance(ns['edges_ranked'], list) else ns['edges_ranked']
                         c_str += f"  - Strongest Connections: {clean_join(top_edges)}\n"
                     elif 'edges' in ns:
                         c_str += f"  - Strongest Connections: {clean_join(ns['edges'])}\n"
-                    # コミュニティ
+                    # コミュニティ（新形式 communities リスト / 旧形式 文字列 両対応）
                     if 'communities' in ns:
                         c_str += f"  - Community Groups: {clean_join(ns['communities'])}\n"
-                    # ブリッジエッジ
+                    # ブリッジエッジ（新規）
                     if 'bridge_edges' in ns and ns['bridge_edges']:
                         bridges = ns['bridge_edges'][:5] if isinstance(ns['bridge_edges'], list) else ns['bridge_edges']
                         c_str += f"  - Bridge Edges (Cross-Community): {clean_join(bridges)}\n"
@@ -335,7 +335,7 @@ with col_act:
                 if 'error' in data_sum:
                      c_str += f"- [Note] Data extraction partial error: {data_sum['error']}\n"
                 
-                # --- NEBULA統合スナップショット処理 ---
+                # --- NEBULA統合スナップショット処理 (v5.3) ---
                 if data_sum.get('type') == 'trend_network_consolidated':
                     c_str += f"- [Consolidated Analysis Data]\n"
                     
@@ -371,7 +371,7 @@ with col_act:
                 # レガシー文字列
                 c_str += f"- Data Summary: {data_sum}\n"
         
-        # 2. システムプロンプト選択
+        # 2. システムプロンプト選択 (2段階アーキテクチャ v6.0)
         
         # --- 共通ルール ---
         common_evidence_rules = """
@@ -524,7 +524,8 @@ with col_act:
                     # 画像の収集
                     if snap.get('images'): module_images.extend(snap['images'])
                     elif snap.get('image'): module_images.append(snap['image'])
-
+                
+                # タスク追加
                 tasks.append({
                     'id_label': f"Module Analysis: {module_name}",
                     'content': module_content,
@@ -619,6 +620,7 @@ if st.button("📝 レポート生成", type="primary", key="voyager_generate_re
 
         # =============================================
         # Phase 0: CAPCOMセッションJSONからデータ自動収集
+        # In-Memory 統一版: capcom.list_data_files() + capcom.get_data() で取得
         # =============================================
         status.markdown("🔄 **データ収集中...**")
         capcom_data_context = ""
@@ -1160,6 +1162,8 @@ if 'voyager_generated_report' in st.session_state and st.session_state['voyager_
     st.markdown(f'<div class="report-container">{rendered_html}</div>', unsafe_allow_html=True)
 
     # --- Download Buttons ---
+    # レポートは Markdown で出力し、必要に応じてユーザー側で Pandoc 等を使って変換する。
+    # 本格的なレポートが必要な場合は CAPCOM (ZIP→AI エージェント) ワークフローを使用する。
     st.markdown("#### 📥 レポートダウンロード")
     col_dl1, col_dl2 = st.columns([1, 2])
 

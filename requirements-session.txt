@@ -1,0 +1,18 @@
+# ======================================================================
+# APOLLO v8 CAPCOM セッション専用 — スライド生成用の最小依存
+# ======================================================================
+#
+# このファイルは CAPCOM ZIP に同梱される。ZIP 展開後のセッションフォルダで:
+#
+#   pip install -r requirements-session.txt
+#
+# を実行すれば、Claude Code / Codex / Antigravity で以下の生成が可能になる:
+#   - PowerPoint 生成   (apollo-pptx スキル → python-pptx)
+#   - 画像の埋め込み     (snapshots/*.png を本文に挿入)
+#
+# Streamlit アプリ本体（Home.py）を動かすための依存は含まない。
+# それは apollo_v8/requirements.txt 側にある。
+# ======================================================================
+
+python-pptx
+Pillow

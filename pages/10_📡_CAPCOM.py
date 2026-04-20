@@ -1,6 +1,7 @@
 # ==================================================================
-# 10_📡_CAPCOM.py — APOLLO v7.0.0 CAPCOM (Capsule Communicator)
-# セッション管理・ZIPエクスポート・Claude Code連携
+# 10_📡_CAPCOM.py — APOLLO v8.0.0 CAPCOM (Capsule Communicator)
+# セッション管理・ZIPエクスポート・マルチツール連携
+# （Claude Code / Codex CLI / Antigravity IDE を複数選択可能）
 # ==================================================================
 
 import streamlit as st
@@ -8,7 +9,7 @@ import os
 import json
 import datetime
 
-st.set_page_config(page_title="APOLLO v7 | CAPCOM", page_icon="📡", layout="wide")
+st.set_page_config(page_title="APOLLO v8 | CAPCOM", page_icon="📡", layout="wide")
 st.session_state['current_page'] = 'CAPCOM'
 
 import utils
@@ -26,7 +27,7 @@ st.markdown("全モジュールの分析結果をセッションZIPにパッケ�
 # --- セッションステータス ---
 # ==================================================================
 
-# セッション揮発に関する警告(ブラウザを閉じると消失)
+# In-Memory版の警告(セッションはブラウザ閉じると消失)
 st.warning(
     "⚠️ **CAPCOMセッションはブラウザを閉じると失われます。**\n"
     "完了後は必ず下部の「ZIPダウンロード」ボタンでセッション一式を保存してください。\n"
@@ -129,6 +130,122 @@ padding: 10px 12px; text-align: center;">
         st.caption(
             f"ℹ️ VOYAGER 側の Mission Objective とは異なる内容で CAPCOM Export されます。"
         )
+
+    # ==================================================================
+    # --- 母集団メタ情報（全項目任意） ---
+    # 設計意図 / 論理式 / 収録年情報 / 特許データベース名 を CAPCOM に渡し、
+    # 分析レポート本文とレポート付録に反映させる。
+    # ==================================================================
+    st.markdown("---")
+    st.markdown("### 🗂️ 母集団メタ情報（任意・全項目任意）")
+    st.markdown(
+        "分析対象の特許母集団について任意情報を記録します。入力内容は"
+        "CAPCOM に送信され、**分析の前提条件としてレポートに反映**されます。"
+        "論理式は付録に、設計意図・収録年情報・データベース名は分析本文と付録の両方に"
+        "適切な形で組み込まれます。"
+    )
+
+    capcom_query_intent = st.text_area(
+        "🎯 母集団論理式の設計意図（任意）",
+        value=st.session_state.get('capcom_query_intent', ''),
+        height=100,
+        placeholder=(
+            "例: 本母集団はCNF（セルロースナノファイバー）関連技術のうち、"
+            "食品・化粧品用途を除外し、構造材料・複合材料用途に焦点を絞って抽出した。"
+            "IPC C08L, C08K を主軸に、B29, B32 のコーティング関連を補助的に含めている。"
+        ),
+        key="capcom_query_intent_input",
+        help="分析レポートの冒頭・前提条件欄・付録に反映されます。",
+    )
+    st.session_state['capcom_query_intent'] = capcom_query_intent
+
+    capcom_query_logic = st.text_area(
+        "🔎 母集団論理式（任意）",
+        value=st.session_state.get('capcom_query_logic', ''),
+        height=100,
+        placeholder=(
+            "例: (TI=(CNF OR セルロースナノファイバー OR nanocellulose) "
+            "AND IPC=(C08L* OR C08K* OR B29*)) "
+            "AND PD=(20150101:20260131)"
+        ),
+        key="capcom_query_logic_input",
+        help="**レポート付録に全文掲載**されます。機密情報は含めないでください。",
+    )
+    st.session_state['capcom_query_logic'] = capcom_query_logic
+
+    col_cov, col_db = st.columns(2)
+    with col_cov:
+        capcom_coverage_years = st.text_input(
+            "📅 収録年情報（任意）",
+            value=st.session_state.get('capcom_coverage_years', ''),
+            placeholder="例: 2015-01-01〜2026-01-31（出願日ベース）",
+            key="capcom_coverage_years_input",
+            help="分析の時系列解釈に反映されます。",
+        )
+        st.session_state['capcom_coverage_years'] = capcom_coverage_years
+    with col_db:
+        capcom_database_name = st.text_input(
+            "🗄️ 使用した特許データベース名（任意）",
+            value=st.session_state.get('capcom_database_name', ''),
+            placeholder="例: 社内特許DB / Derwent Innovation / PatSnap",
+            key="capcom_database_name_input",
+            help="付録および分析注記（カバレッジ制約）の記述に反映されます。",
+        )
+        st.session_state['capcom_database_name'] = capcom_database_name
+
+    # ==================================================================
+    # --- CAPCOM モジュール選択（複数選択可） ---
+    # 選択されたツールに対応する capcom_schema_patches/ 配下の資材が
+    # ZIP 出力時に同梱される。
+    # ==================================================================
+    st.markdown("---")
+    st.markdown("### 🤝 CAPCOM モジュール選択（複数選択可）")
+    st.markdown(
+        "レポート生成に使用する AI エージェントを選択してください。"
+        "**ZIP に各エージェント用のパッチが自動同梱**され、手動での apply_patch.sh 実行は不要です。"
+    )
+
+    CAPCOM_TOOL_OPTIONS = {
+        "Claude Code（Anthropic）": "claude_code",
+        "Codex CLI（OpenAI）": "codex",
+        "Antigravity IDE（Google）": "antigravity",
+    }
+    default_tools = st.session_state.get('capcom_tools_selected', ["Claude Code（Anthropic）"])
+    selected_tool_labels = st.multiselect(
+        "使用する CAPCOM モジュール",
+        options=list(CAPCOM_TOOL_OPTIONS.keys()),
+        default=default_tools,
+        key="capcom_tools_selected_input",
+        help=(
+            "Claude Code は `capcom_schema/` 一式で動作（追加資材なし）。"
+            "Codex / Antigravity を選択した場合、対応するオーバーレイ資材が ZIP 直下に展開済みで同梱されます。"
+        ),
+    )
+    st.session_state['capcom_tools_selected'] = selected_tool_labels
+    selected_tool_keys = [CAPCOM_TOOL_OPTIONS[lbl] for lbl in selected_tool_labels]
+
+    if not selected_tool_keys:
+        st.warning("⚠️ 最低1つの CAPCOM モジュールを選択してください（デフォルト: Claude Code）。")
+        # 最低限 Claude Code は動作するので、後段はフォールバック
+        selected_tool_keys = ["claude_code"]
+
+    with st.expander("ℹ️ 選択ツールごとの起動方法"):
+        if "claude_code" in selected_tool_keys:
+            st.markdown(
+                "**Claude Code**: ZIPを展開 → `claude` 起動 → "
+                "「`capcom_schema/SKILL.md` を読んでレポートを書いて」"
+            )
+        if "codex" in selected_tool_keys:
+            st.markdown(
+                "**Codex CLI**: ZIPを展開 → `codex` 起動 → "
+                "チャットで `$apollo-capcom` または `/skills` から選択"
+            )
+        if "antigravity" in selected_tool_keys:
+            st.markdown(
+                "**Antigravity IDE**: ZIPを展開 → Antigravity IDE でフォルダを開く → "
+                "Review Policy を「Request Review」に設定 → "
+                "チャットで「apollo-capcom スキルでレポート生成」"
+            )
 
     # ==================================================================
     # --- CAPCOM Export（voyager/にMission情報を書き出す） ---
@@ -255,7 +372,26 @@ padding: 10px 12px; text-align: center;">
                     "stopwords_count": len(stopwords_set)
                 },
                 "modules_used": modules_used,
-                "available_data_files": data_files_desc
+                "available_data_files": data_files_desc,
+                # --- 母集団メタ情報（全項目任意） ---
+                # レポート本文・付録の記述に反映される。
+                # 空文字の場合は「未指定」扱いで SKILL.md のフォールバック記述が使われる。
+                "population_meta": {
+                    "query_intent": st.session_state.get('capcom_query_intent', '').strip(),
+                    "query_logic": st.session_state.get('capcom_query_logic', '').strip(),
+                    "coverage_years": st.session_state.get('capcom_coverage_years', '').strip(),
+                    "database_name": st.session_state.get('capcom_database_name', '').strip(),
+                },
+                # --- CAPCOM モジュール選択 ---
+                "capcom_tools": {
+                    "selected": st.session_state.get('capcom_tools_selected', ["Claude Code（Anthropic）"]),
+                    "selected_keys": [
+                        {"Claude Code（Anthropic）": "claude_code",
+                         "Codex CLI（OpenAI）": "codex",
+                         "Antigravity IDE（Google）": "antigravity"}[lbl]
+                        for lbl in st.session_state.get('capcom_tools_selected', ["Claude Code（Anthropic）"])
+                    ],
+                },
             }
             capcom.save_voyager_context(context)
 
@@ -269,21 +405,23 @@ padding: 10px 12px; text-align: center;">
     st.markdown("---")
     st.markdown("### 📦 セッションZIPダウンロード")
     st.markdown("""
-    CAPCOM Export実行後、セッションフォルダ一式をZIPにまとめてダウンロードします。
-    展開してClaude Codeで開いてください。
+    CAPCOM Export 実行後、セッションフォルダ一式を ZIP にまとめてダウンロードします。
+    展開して、選択した CAPCOM モジュール（Claude Code / Codex CLI / Antigravity IDE）で開いてください。
     """)
 
     st.markdown("""
     ```
-    使い方:
+    共通手順:
     1. 下のボタンでZIPをダウンロード
     2. ZIPを任意の場所に展開
-    3. Claude Code でそのフォルダを開く
+    3. 選択したツールでそのフォルダを開く
     4. 「capcom_schema/SKILL.md を読んでレポートを書いて」と指示
+       （Codex/Antigravity では ZIP 直下の AGENTS.md / GEMINI.md が優先される）
     ```
     """)
 
-    zip_bytes, zip_filename = capcom.export_session_zip()
+    # 選択ツール分のパッチ資材を ZIP に同梱する
+    zip_bytes, zip_filename = capcom.export_session_zip(selected_tools=selected_tool_keys)
     if zip_bytes:
         file_size_mb = len(zip_bytes) / (1024 * 1024)
         st.download_button(
@@ -294,11 +432,14 @@ padding: 10px 12px; text-align: center;">
             type="primary",
             key="capcom_page_zip_download",
         )
+        st.caption(
+            f"同梱ツール: {', '.join(selected_tool_labels) if selected_tool_labels else 'Claude Code（フォールバック）'}"
+        )
     else:
         st.warning("セッションフォルダが見つかりません。分析モジュールを実行してデータを蓄積してください。")
 
     # ==================================================================
-    # --- セッション内ファイル一覧 ---
+    # --- セッション内ファイル一覧 (session_state 上の In-Memory store) ---
     # ==================================================================
     st.markdown("---")
     st.markdown("### 📁 セッション内ファイル一覧 (In-Memory)")
@@ -349,7 +490,16 @@ padding: 10px 12px; text-align: center;">
                 st.caption(f"`voyager/evidence/{ev_fname}`")
 
     # capcom_schema (リポジトリから ZIP に同梱される、参考表示)
-    st.caption("ℹ️ ZIP には `capcom_schema/`、`CLAUDE.md`、`.claude/skills/` も同梱されます (リポジトリ資産)")
+    _tool_assets_note = []
+    if "codex" in selected_tool_keys:
+        _tool_assets_note.append("Codex用 (`AGENTS.md` + `.codex/skills/apollo-capcom/`)")
+    if "antigravity" in selected_tool_keys:
+        _tool_assets_note.append("Antigravity用 (`GEMINI.md` + `AGENTS.md` + `.agent/`)")
+    _tool_assets_str = "、加えて " + " と ".join(_tool_assets_note) if _tool_assets_note else ""
+    st.caption(
+        "ℹ️ ZIP には `capcom_schema/`、`CLAUDE.md`、`.claude/skills/` も同梱されます "
+        f"(リポジトリ資産){_tool_assets_str}"
+    )
 
     # ==================================================================
     # --- ツァーリ・ボンバ対策ガイド ---
@@ -364,7 +514,7 @@ padding: 10px 12px; text-align: center;">
         SKILL.md + スキーマ + exemplar + 会話履歴が毎回「再印刷」されるため、
         **トークン消費の90%がキャッシュ読み取り**になりえます。
 
-        #### 対策（APOLLO v7で適用済み）
+        #### APOLLO で適用済みの対策
         1. **4フェーズ構成**: 旧6フェーズから統合し、API呼び出し回数を削減
         2. **サブエージェント禁止**: SKILL.mdで明示。フォーク（コンテキストコピー）を防止
         3. **バッチ処理**: Deep Diveは1回のやり取りで複数モジュールを処理
@@ -407,22 +557,23 @@ Mission Control（Home）で分析エンジンを起動し、CAPCOMセッショ�
     st.markdown("""
     ### CAPCOMとは？
 
-    **CAPCOM** (Capsule Communicator) は APOLLO と Claude Code を繋ぐ通信モジュールです。
+    **CAPCOM** (Capsule Communicator) は APOLLO と AI レポート執筆エージェント
+    （Claude Code / Codex CLI / Antigravity IDE）を繋ぐ通信モジュールです。
 
     ```
     APOLLO（分析・可視化）
         ↓ CAPCOM がデータを構造化してエクスポート
-    ZIP ダウンロード
+    ZIP ダウンロード（選択ツール用パッチが同梱済み）
         ↓ ユーザーが展開
-    Claude Code（レポート執筆）
+    Claude Code / Codex CLI / Antigravity IDE（レポート執筆）
         ↓ 4フェーズで自動進行
     PDF 完成 🎉
     ```
 
     #### ワークフロー
-    1. **Mission Control** でCAPCOMセッションを開始
+    1. **Mission Control** で CAPCOM セッションを開始
     2. 各分析モジュール（ATLAS, Saturn V, MEGA, ...）を実行 → データが自動蓄積
-    3. **VOYAGER** でMission Objective設定 + CAPCOM Export
-    4. **このページ** でZIPダウンロード
-    5. ZIPを展開してClaude Codeで開く → レポート生成
+    3. **VOYAGER** で Mission Objective 設定
+    4. **このページ** で母集団メタ情報（任意）+ 使用ツール（複数可）を選択 → CAPCOM Export → ZIP ダウンロード
+    5. ZIP を展開して選択ツールで開く → レポート生成
     """)
