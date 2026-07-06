@@ -1,5 +1,5 @@
 streamlit==1.41.1
-patiroha[all]
+patiroha[all]>=1.0.1
 numpy<2.0.0
 setuptools
 sentence-transformers>=3.0,<4

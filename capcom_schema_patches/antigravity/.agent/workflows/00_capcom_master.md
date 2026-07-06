@@ -11,10 +11,14 @@ description: >
 
 ## 実行手順
 
-1. **初期化**: Artifact 3ファイルを生成
+1. **初期化**: Artifact 3ファイル + フェーズ間引き継ぎ日誌を生成
    - `cp artifacts_templates/task.md.tmpl task.md`
    - `cp artifacts_templates/implementation_plan.md.tmpl implementation_plan.md`
    - `cp artifacts_templates/walkthrough.md.tmpl walkthrough.md`
+   - `cp capcom_schema/templates/carryover_template.md reports/_carryover.md`（既にあれば上書きしない）
+   - 以降、各フェーズ完了時・`/compact`/タスク中断前に `reports/_carryover.md` を更新（Web は1件ごとに即 出所台帳へ）。詳細は `capcom_schema/SKILL.md` §フェーズ間引き継ぎ日誌
+
+> 🔄 **セッション・チェックポイント（各フェーズ境界で必須・枯渇/クォータの予防）**: 下記ステップ 2〜6 の **各フェーズ完了後、および Phase C（ステップ5）の各モジュール（deep_dive 1本）完了ごと** に、ゲート/Artifact 通過＋`reports/_carryover.md` 更新を確認したうえで、ユーザーに「**新タスクに切り替えますか？**（続行／切替／`/compact`）」と提案して **一旦停止** する。「枯渇しそうな時だけ」ではなく **予防として各境界で必ず出す**。切替時は新タスクが `_carryover.md`＋Artifact から自動再開（→ 後述「実行中断時の復帰」）。詳細はスキル本体 `.agent/skills/apollo-capcom/SKILL.md` の `### 🔄 セッション・チェックポイント`。
 
 2. **Phase A 実行**: `.agent/workflows/01_phase_a_data_intake.md` を呼び出し
    - 🛑 Artifact Review ゲート: **最大 6 つ**
@@ -41,12 +45,15 @@ description: >
 
 6. **Phase D 実行**: `.agent/workflows/05_phase_d_integration.md` を呼び出し
    - 🛑 Artifact Review ゲート: Report Plan 承認
-   - 🛑 Scripted Gate: `bash capcom_schema/scripts/phase_d_gate.sh` — **13 Check** で自動検証
-     - Check 1-9: 行数 / 代表特許 / 4 層モデル / クロス分析 / snapshot / Web 出所 / 用語統一 / J-PlatPat 補完
+   - 🛑 Scripted Gate: `bash capcom_schema/scripts/phase_d_gate.sh` — **20 系統の Check** で自動検証
+     - Check 1-9: 内容量（**非空白文字数 45000字以上**・行数は参考）/ 代表特許15件 / 4 層モデル / クロス分析（120行以上＝5パターン）/ snapshot 8枚 / Web 出所 / 仮説検証 / 用語統一（内部識別子＋**工程ナレーション節 8e**）/ J-PlatPat 補完
      - Check 10: スコープ限定ルール（本母集団 vs 業界全体）
      - Check 11: 母集団タイプ別の不適切表現検出（B/C/D で市場・業界解釈禁止）
      - Check 12: 設計意図の一貫性（意図参照 / 問い形式禁止 / サブクエスチョンキーワード対応）
      - Check 13: NEBULA 戦略検証（モード別検証）
+     - Check 14: メタラベル（4層）の本文露出 / Check 15: 国籍トートロジー（WARN）
+     - Check 16: PPTX 12 項目（存在時）/ Check 17: 過剰修辞（WARN）/ Check 18: 別冊充実度
+     - Check 19: 反復・水増し検出（＋19a 本文スクリプト生成）/ Check 20: スナップショット網羅（WARN）
    - 別冊フラグ ON 時は `reports/report_executive.typ` も生成
 
 7. **最終成果物確認**: `reports/report.pdf` (+ 別冊 `report_executive.pdf`) + `reports/*_deep_dive.typ` + `walkthrough.md` 完成
@@ -60,10 +67,11 @@ description: >
 
 ## 実行中断時の復帰
 
-いずれかの Phase で中断した場合、該当 Phase の workflow を個別に呼び出して再開できます：
-- `task.md` のチェックボックス状態から現在の Phase を判定
-- 不完全な Phase の workflow を個別実行
-- Phase C/D で中断した場合は、最後に成功した `walkthrough.md` のゲート結果から復帰判断
+いずれかの Phase で中断した場合（別タスク・コンテキスト枯渇・`/compact` 含む）、該当 Phase の workflow を個別に呼び出して再開できます：
+- **まず `reports/_carryover.md`（引き継ぎ日誌）を通読** → STATUS で現在地・次アクション、直近フェーズ節・WEB出所台帳・申し送りで分析の記憶を復元
+- `ls reports/` と `task.md` のチェックボックス状態から到達 Phase を判定
+- `reports/_phase_a_decisions.json` で母集団タイプ等の確定値を復元 → Artifact/brain を再ロード
+- 不完全な Phase の workflow を個別実行（Phase C/D は最後に成功した `walkthrough.md` のゲート結果から復帰判断）
 
 ## 参照
 

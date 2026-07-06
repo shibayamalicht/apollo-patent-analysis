@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "apollo",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "streamlit run Home.py --server.port $PORT --server.headless true --server.fileWatcherType none"
+      ],
+      "autoPort": true
+    }
+  ]
+}

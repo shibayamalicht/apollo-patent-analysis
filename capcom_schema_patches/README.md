@@ -1,6 +1,6 @@
 # APOLLO CAPCOM マルチツール対応パッチ集
 
-**APOLLO v7 の CAPCOM 機能を Claude Code 以外の AI coding agent でも快適に使うためのパッチパッケージ。**
+**APOLLO v9 の CAPCOM 機能を Claude Code 以外の AI coding agent でも快適に使うためのパッチパッケージ。**
 
 APOLLO の `capcom_schema/SKILL.md` は Claude Code 固有のツール（`AskUserQuestion`, `/compact`, Agent tool 禁止ルール等）を前提に書かれています。本ディレクトリは、既存の `capcom_schema/` を **一切書き換えず**、各ツール用のファイルをセッションディレクトリに **オーバーレイ（上書き追加）** することで、Codex CLI / Antigravity IDE でも同等の品質で CAPCOM レポート生成を実行できるようにします。
 
@@ -176,7 +176,7 @@ OAS（Open Agent Skills Standard）準拠のツールであれば、SKILL.md 本
 
 ## 📄 ライセンス
 
-本パッチパッケージは APOLLO 本体と同じ MIT License です。
+本パッチパッケージは APOLLO 本体と同じ Apache License 2.0 です。
 
 ---
 

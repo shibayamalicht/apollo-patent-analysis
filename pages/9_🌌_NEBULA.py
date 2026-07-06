@@ -18,11 +18,11 @@ import networkx.algorithms.community as community
 # ==================================================================
 # --- ページ設定 ---
 # ==================================================================
-st.set_page_config(page_title="APOLLO v8 | NEBULA", page_icon="🌌", layout="wide")
+st.set_page_config(page_title="APOLLO v9 | NEBULA", page_icon=utils.module_icon("nebula"), layout="wide")
 st.session_state['current_page'] = 'NEBULA'
 utils.render_sidebar()
 
-st.title("🌌 NEBULA")
+utils.module_header("nebula", "NEBULA")
 st.markdown("論文・ニュース・政策文書と特許を統合した環境分析。Hype Cycle・学術ランドスケープ・成長キーワードで、技術と社会のギャップを可視化します。")
 
 # ==================================================================
@@ -216,7 +216,8 @@ if df_npl is not None and 'year' in df_npl.columns:
         max_y = max(max_y, int(npl_years.max()))
 
 st.markdown("### 🛠️ Global Filters")
-year_range = st.slider("分析期間 (Year)", min_y, max_y, (min_y, max_y))
+year_range = st.slider("分析期間 (Year)", min_y, max_y, (min_y, max_y),
+                       help="環境分析（特許・論文・ニュースの3トレンド比較）の対象期間です。")
 
 # Apply Filter
 df_main_filtered = df_main[(df_main['year'] >= year_range[0]) & (df_main['year'] <= year_range[1])]
@@ -278,7 +279,6 @@ else:
         counts_p = counts_p.reindex(full_range, fill_value=0)
         counts_p.index = counts_p.index.astype(str)
         
-        # 線グラフについて、0へ落ちるのを避けるか？
         # ハイプサイクルは通常0を表示するため、0埋めする。
         if not counts_n.empty:
             counts_n = counts_n.reindex(full_range, fill_value=0)
@@ -375,15 +375,16 @@ else:
         import capcom
         if capcom.is_active():
             # 各トレンドのキーを文字列化（JSONシリアライズ対応）
+            # 件数は NaN 安全化（万一 NaN が混入しても 0 件として保存する）
             hype_json = {
                 "metadata": {"module": "NEBULA", "type": "hype_cycle"},
-                "patent_trend": {str(k): int(v) for k, v in hype_stats.get("patent_trend", {}).items()},
-                "academic_trend": {str(k): int(v) for k, v in hype_stats.get("academic_trend", {}).items()},
-                "news_trend": {str(k): int(v) for k, v in hype_stats.get("news_trend", {}).items()}
+                "patent_trend": {str(k): (int(v) if pd.notna(v) else 0) for k, v in hype_stats.get("patent_trend", {}).items()},
+                "academic_trend": {str(k): (int(v) if pd.notna(v) else 0) for k, v in hype_stats.get("academic_trend", {}).items()},
+                "news_trend": {str(k): (int(v) if pd.notna(v) else 0) for k, v in hype_stats.get("news_trend", {}).items()}
             }
             capcom.save_data("nebula_hype_cycle.json", hype_json)
     except Exception as e:
-        pass
+        st.caption(f"⚠️ ハイプサイクル の CAPCOM 保存に失敗しました（要確認）: {e}")
 
 st.markdown("---")
 
@@ -480,7 +481,7 @@ else:
             }
             capcom.save_data("nebula_macro_events.json", macro_json)
     except Exception as e:
-        pass
+        st.caption(f"⚠️ マクロ環境（政策・市場） の CAPCOM 保存に失敗しました（要確認）: {e}")
 
 
 st.markdown("---")
@@ -510,60 +511,75 @@ def render_growth_ranking(df_target, title_suffix, key_suffix, keywords_col='exp
         st.info(f"単年度データ ({min_y}) のため、成長率分析はスキップします。")
         return None, None
 
-    mid_y = (min_y + max_y) // 2
-    
-    # データの分割
-    df_recent = df_target[df_target['year'] > mid_y]
-    df_past = df_target[df_target['year'] <= mid_y]
-    
+    # Explorer「トレンド分析」と同じ方式に統一:
+    # 直近 N 年窓 と その前の N 年窓 を比較する（N は下のスライダー、既定 5 年）。
+    # （全範囲の半分割ではなく、Explorer の急上昇ランキングと結果が揃う方式。）
+    st.markdown("**📈 急上昇キーワード (成長率ランキング)**")
+    interval = st.slider(
+        "期間の粒度 (年)", 1, 10, 5, key=f"growth_interval_{key_suffix}",
+        help="トレンドを何年ごとに区切って比較するかです。直近 N 年とその前の N 年を比べます（Explorer のトレンド分析と同方式）。粗く（大きく）すると大まかな傾向、細かく（小さく）すると年単位の動きが見えます。"
+    )
+
+    # 直近窓 [recent_start, max_y] と その前の窓 [past_start, past_end]
+    recent_start = max(min_y, max_y - interval + 1)
+    past_end = recent_start - 1
+    if past_end < min_y:
+        st.info("比較対象となる過去データが不足しています。期間の粒度を小さくしてください。")
+        return None, None
+    past_start = max(min_y, past_end - interval + 1)
+
+    st.caption(f"期間比較: 過去 [{past_start}-{past_end}] vs 直近 [{recent_start}-{max_y}]")
+
+    df_recent = df_target[(df_target['year'] >= recent_start) & (df_target['year'] <= max_y)]
+    df_past = df_target[(df_target['year'] >= past_start) & (df_target['year'] <= past_end)]
     if df_recent.empty:
         st.info("比較対象となる直近データが不足しています。")
         return None, None
-
-    # 期間の説明
-    st.markdown(f"**📈 急上昇キーワード (成長率ランキング)**")
-    st.caption(f"期間比較: 過去 [{min_y}-{mid_y}] vs 直近 [{mid_y+1}-{max_y}]")
 
     # キーワードカウント
     from collections import Counter
     c_recent = Counter([w for sublist in df_recent[keywords_col] if isinstance(sublist, list) for w in sublist])
     c_past = Counter([w for sublist in df_past[keywords_col] if isinstance(sublist, list) for w in sublist])
-    
-    # 成長率計算
+
+    # 成長率計算（Explorer と同じ閾値 1% / 上位 20）
     growth_data = []
-    min_freq = max(2, len(df_recent) * 0.005) # 最低0.5%の頻度 または 2回以上
-    
+    min_freq = max(2, len(df_recent) * 0.01)  # 最低 1% の頻度 または 2 回以上（Explorer と一致）
     for word, count_r in c_recent.items():
         if count_r < min_freq: continue
         count_p = c_past.get(word, 0)
-        # 成長スコア: 単純増加率
+        # 成長スコア: 単純増加率（Explorer と同一式）
         growth_rate = (count_r - count_p) / (count_p + 1)
         growth_data.append({"Keyword": word, "Growth Rate": growth_rate, "Recent": count_r, "Past": count_p})
-    
+
     if not growth_data:
         st.warning("急上昇キーワードは見つかりませんでした。")
         return None, None
 
-    df_growth = pd.DataFrame(growth_data).sort_values("Growth Rate", ascending=False).head(15)
-    
+    df_growth = pd.DataFrame(growth_data).sort_values("Growth Rate", ascending=False).head(20)
+
     # チャート描画
     fig_growth = px.bar(
-        df_growth, 
-        x="Growth Rate", 
-        y="Keyword", 
-        orientation='h', 
-        color="Growth Rate", 
+        df_growth,
+        x="Growth Rate",
+        y="Keyword",
+        orientation='h',
+        color="Growth Rate",
         color_continuous_scale="Reds",
         title=f"Top Emerging Keywords ({title_suffix})"
     )
-    fig_growth.update_layout(yaxis={'categoryorder':'total ascending'})
-    fig_growth = update_fig_layout_local(fig_growth, f"急成長キーワード ({title_suffix})", height=400)
+    fig_growth.update_layout(yaxis={'categoryorder': 'total ascending'})
+    # バー数に応じて高さを確保する。固定 height=400 だと最大20本のとき Plotly が
+    # y軸ラベルを自動間引きし、全キーワードのラベルが表示されなくなる（バーだけ残る）。
+    _gh = max(360, 28 * len(df_growth) + 140)
+    fig_growth = update_fig_layout_local(fig_growth, f"急成長キーワード ({title_suffix})", height=_gh)
+    # 1 バー約28px を確保したうえで、長いキーワードラベルが切れないよう automargin を有効化する。
+    fig_growth.update_yaxes(automargin=True)
     st.plotly_chart(fig_growth, use_container_width=True)
-    
+
     # 統合用統計データの返却
     growth_stats = {
-        "period_past": f"{min_y}-{mid_y}",
-        "period_recent": f"{mid_y+1}-{max_y}",
+        "period_past": f"{past_start}-{past_end}",
+        "period_recent": f"{recent_start}-{max_y}",
         "top_growing_keywords": df_growth[['Keyword', 'Growth Rate', 'Recent']].to_dict('records')
     }
     
@@ -649,8 +665,10 @@ with tab_pat:
     st.write("企業の技術実装、製品化に近い用語の関係性を可視化します。")
     
     cp1, cp2 = st.columns(2)
-    with cp1: top_n_p = st.slider("ノード数 (Patent)", 20, 100, 70, key="net_p_n")
-    with cp2: th_p = st.slider("共起閾値 (Patent)", 0.01, 0.3, 0.03, 0.01, key="net_p_th")
+    with cp1: top_n_p = st.slider("ノード数 (Patent)", 20, 100, 70, key="net_p_n",
+                                  help="ネットワークに表示するキーワード（ノード）の数です。出現頻度の上位から何語を使うかを決めます。多いほど網羅的ですが密集して読みにくく、少ないほど主要語に絞られ見やすくなります。")
+    with cp2: th_p = st.slider("共起閾値 (Patent)", 0.01, 0.3, 0.03, 0.01, key="net_p_th",
+                               help="2つのキーワードを線（エッジ）で結ぶ基準の強さです。共起の強さを0〜1で表すJaccard係数がこの値以上のペアだけを結びます。高くすると強い関係だけが残ってスッキリし、低くすると弱い関係も含め線が増えて密になります。")
     
     fig_net_p, stats_net_p = render_network(df_main_filtered, "特許ネットワーク (Patent)", top_n_p, th_p)
 
@@ -670,13 +688,13 @@ with tab_pat:
             "methodology": methodology_p,
             "module": "NEBULA",
             "representatives_raw": reps_p,
-            "representatives": [f"- 【{r['title']}】 (出願: {r['year']}, {r['applicant']}) {r['abstract'][:100]}..." for r in reps_p]
+            "representatives": [f"- 【{r['title']}】[{r.get('number','N/A')}] (出願: {r['year']}, {r['applicant']}) {r['abstract'][:100]}..." for r in reps_p]
         }
         
         # グラフリスト
         figs_p = [f for f in [fig_growth_p, fig_net_p] if f is not None]
 
-        # AI Insight コンテキストの準備 (上に移動)
+        # AI Insight コンテキストの準備
         insight_context_p = f"""
         **チャートタイプ**: 技術トレンド構造分析 (Patent / NEBULA)
         **対象データ**: 全特許データの急上昇キーワード(Growth) と 共起ネットワーク(Network)。
@@ -708,7 +726,7 @@ with tab_pat:
         utils.render_snapshot_button(
             title="NEBULA: 技術トレンド構造 (特許)",
             description="[統合分析] 急上昇キーワードランキング(Growth) と 共起ネットワーク構造(Network) の包含データ。",
-            fig=None, # Legacy unused
+            fig=None,
             figs=figs_p, # Multi-Image
             data_summary=consolidated_p,
             key="nebula_consol_pat"
@@ -752,8 +770,10 @@ with tab_aca:
             st.write("研究段階の技術用語、基礎研究のトレンド関係性を可視化します。")
     
             ca1, ca2 = st.columns(2)
-            with ca1: top_n_a = st.slider("ノード数 (Academic)", 20, 100, 70, key="net_a_n")
-            with ca2: th_a = st.slider("共起閾値 (Academic)", 0.01, 0.3, 0.03, 0.01, key="net_a_th")
+            with ca1: top_n_a = st.slider("ノード数 (Academic)", 20, 100, 70, key="net_a_n",
+                                          help="ネットワークに表示するキーワード（ノード）の数です。出現頻度の上位から何語を使うかを決めます。多いほど網羅的ですが密集して読みにくく、少ないほど主要語に絞られ見やすくなります。")
+            with ca2: th_a = st.slider("共起閾値 (Academic)", 0.01, 0.3, 0.03, 0.01, key="net_a_th",
+                                       help="2つのキーワードを線（エッジ）で結ぶ基準の強さです。共起の強さを0〜1で表すJaccard係数がこの値以上のペアだけを結びます。高くすると強い関係だけが残ってスッキリし、低くすると弱い関係も含め線が増えて密になります。")
             
             fig_net_a, stats_net_a = render_network(df_aca, "論文ネットワーク (Academic)", top_n_a, th_a)
             
@@ -773,10 +793,10 @@ with tab_aca:
                     "methodology": "学術論文のAbstract分析",
                     "module": "NEBULA",
                     "representatives_raw": reps_a,
-                    "representatives": [f"- 【{r['title']}】 ({r['year']}, {r['applicant']}) {r['abstract'][:100]}..." for r in reps_a]
+                    "representatives": [f"- 【{r['title']}】[{r.get('number','N/A')}] ({r['year']}, {r['applicant']}) {r['abstract'][:100]}..." for r in reps_a]
                 }
                  figs_a = [f for f in [fig_growth_a, fig_net_a] if f is not None]
-                 # AI Insight コンテキストの準備 (上に移動)
+                 # AI Insight コンテキストの準備
                  insight_context_a = f"""
                  **チャートタイプ**: 研究トレンド構造分析 (Academic / NEBULA)
                  **対象データ**: 学術論文の急上昇キーワード(Growth) と 共起ネットワーク(Network)。
@@ -851,8 +871,10 @@ with tab_news:
             st.write("市場動向、ニュース、プレスリリース等における用語の関係性を可視化します。") 
     
             cn1, cn2 = st.columns(2)
-            with cn1: top_n_n = st.slider("ノード数 (News)", 20, 100, 70, key="net_n_n")
-            with cn2: th_n = st.slider("共起閾値 (News)", 0.01, 0.3, 0.03, 0.01, key="net_n_th")
+            with cn1: top_n_n = st.slider("ノード数 (News)", 20, 100, 70, key="net_n_n",
+                                          help="ネットワークに表示するキーワード（ノード）の数です。出現頻度の上位から何語を使うかを決めます。多いほど網羅的ですが密集して読みにくく、少ないほど主要語に絞られ見やすくなります。")
+            with cn2: th_n = st.slider("共起閾値 (News)", 0.01, 0.3, 0.03, 0.01, key="net_n_th",
+                                       help="2つのキーワードを線（エッジ）で結ぶ基準の強さです。共起の強さを0〜1で表すJaccard係数がこの値以上のペアだけを結びます。高くすると強い関係だけが残ってスッキリし、低くすると弱い関係も含め線が増えて密になります。")
             
             fig_net_n, stats_net_n = render_network(df_news, "ニュース共起ネットワーク (News)", top_n_n, th_n)
             
@@ -872,10 +894,10 @@ with tab_news:
                     "methodology": "ニュース・市場レポートの分析",
                     "module": "NEBULA",
                     "representatives_raw": reps_n,
-                    "representatives": [f"- 【{r['title']}】 ({r['year']}, {r['applicant']}) {r['abstract'][:100]}..." for r in reps_n]
+                    "representatives": [f"- 【{r['title']}】[{r.get('number','N/A')}] ({r['year']}, {r['applicant']}) {r['abstract'][:100]}..." for r in reps_n]
                 }
                  figs_n = [f for f in [fig_growth_n, fig_net_n] if f is not None]
-                 # AI Insight コンテキストの準備（上に移動）
+                 # AI Insight コンテキストの準備
                  insight_context_n = f"""
                  **チャートタイプ**: 市場トレンド構造分析 (News / NEBULA)
                  **対象データ**: ビジネスニュース/レポートの急上昇キーワード と 共起ネットワーク。
@@ -916,8 +938,6 @@ with tab_news:
                  utils_ai.render_ai_insight_button(prompt_n, "nebula_insight_news")
 
 
-# リクエストにより "About this analysis" セクションを削除
-
 # ==================================================================
 # --- 学術ランドスケープ (Academic Landscape) ---
 # ==================================================================
@@ -927,12 +947,20 @@ st.markdown("学術論文のセマンティック・クラスタリングを行�
 
 # Academic論文のみ抽出
 if df_npl is not None and not df_npl.empty:
-    df_academic = df_npl[df_npl.get('data_sub_type', pd.Series()) == 'Academic'].copy()
+    # reset_index で位置インデックスに揃える（SBERT埋め込みは位置配列のため、
+    # df_npl のラベルのまま索引すると代表論文抽出がずれる/IndexErrorになる）
+    df_academic = df_npl[df_npl.get('data_sub_type', pd.Series()) == 'Academic'].reset_index(drop=True).copy()
 
     if len(df_academic) >= 10:
         # --- パラメータ設定 ---
         st.markdown("##### パラメータ設定")
         n_papers = len(df_academic)
+
+        # 🤖 自動最適化モード（Saturn V と同じ: 2パラメータを掃引してクラスタ数を適正化）
+        acad_auto = st.checkbox(
+            "🤖 自動最適化（最小クラスタサイズ・最小サンプル数を掃引してクラスタ数を適正化）",
+            key="acad_auto_hdbscan",
+            help="論文の母集団に合わせて HDBSCAN の2パラメータを自動掃引し、クラスタ数が少なすぎ(2,3)も多すぎもしない設定を選びます。")
 
         # データサイズに応じたデフォルト値（Saturn Vの知見を反映）
         # 小規模(〜100件): 細かいクラスタを検出 → min_cs=5, min_s=3
@@ -948,21 +976,49 @@ if df_npl is not None and not df_npl.empty:
         col_p1, col_p2, col_p3 = st.columns(3)
         with col_p1:
             acad_min_cluster = st.slider(
-                "最小クラスタサイズ", 3, 50, default_min_cs, key="acad_min_cs",
+                "最小クラスタサイズ", 3, 50, default_min_cs, key="acad_min_cs", disabled=acad_auto,
                 help=f"論文{n_papers}件に対する推奨値: {default_min_cs}。小さいほど細かく分割、大きいほど大テーマにまとまる")
         with col_p2:
             acad_min_samples = st.slider(
-                "最小サンプル数", 2, 30, default_min_s, key="acad_min_samp",
+                "最小サンプル数", 2, 30, default_min_s, key="acad_min_samp", disabled=acad_auto,
                 help="クラスタのコアポイント判定閾値。小さいほどノイズが減るが、不安定なクラスタも生まれやすい")
         with col_p3:
-            acad_label_top_n = st.slider("ラベル語数", 2, 5, 3, key="acad_label_n")
+            acad_label_top_n = st.slider("ラベル語数", 2, 5, 3, key="acad_label_n",
+                help="各クラスタの自動命名に使う特徴語の数です。多いほど内容を詳しく表せますが冗長になり、少ないほど簡潔になります。")
 
-        # SBERTベクトルがキャッシュ済みかどうかで処理を分岐
-        has_cached_vectors = 'nebula_academic_embeddings' in st.session_state and st.session_state['nebula_academic_embeddings'] is not None
+        acad_target_k = None
+        if acad_auto:
+            acad_target_k = st.number_input(
+                "目標クラスタ数（目安）", min_value=2, max_value=60,
+                value=utils.suggest_target_k(n_papers), key="acad_auto_target_k",
+                help="この数に近づくよう2パラメータを掃引します（母集団規模から自動初期化）。"
+                     "結果のクラスタ数や粒度に満足できない場合は、この値を増減して「学術ランドスケープを構築（再計算）」を押し直してください。"
+                     "実際の値は密度構造に依存するため、目標ちょうどにならないこともあります（品質 DBCV を優先して選びます）。")
+            utils.render_dbcv_help()
+            if st.session_state.get('nebula_acad_auto_result'):
+                _ar = st.session_state['nebula_acad_auto_result']
+                _rv = _ar.get('validity')
+                _rv_txt = f"・品質DBCV={_rv:.2f}" if isinstance(_rv, (int, float)) else ""
+                st.info(
+                    f"🤖 前回の自動決定: 最小クラスタサイズ=**{_ar['mcs']}** / 最小サンプル数=**{_ar['ms']}** "
+                    f"→ クラスタ数 **{_ar['k']}**・ノイズ {_ar['noise'] * 100:.1f}%（目標≈{_ar['target_k']}{_rv_txt}）。"
+                    f"　数が合わない/粒度が好みでない場合は上の「目標クラスタ数」を変えて再構築してください。")
+
+        # 文埋め込みモデルは Home フェーズ4 で選択したものを使う（特許と同一モデルで整合）
+        _sbert_model_name = st.session_state.get('sbert_model_name') or utils.SBERT_MODEL_NAME
+
+        # SBERTベクトルがキャッシュ済みかどうかで処理を分岐。
+        # ただしモデルを切り替えた場合（次元・空間が変わる）はキャッシュを無効化して再計算する。
+        has_cached_vectors = (
+            st.session_state.get('nebula_academic_embeddings') is not None
+            and st.session_state.get('nebula_academic_embeddings_model') == _sbert_model_name
+        )
 
         btn_label = "🔄 クラスタリング再計算（パラメータ変更）" if has_cached_vectors else "🚀 学術ランドスケープを構築"
         if has_cached_vectors:
-            st.caption("💡 SBERTベクトルはキャッシュ済み。パラメータ変更時はクラスタリングのみ再計算します。")
+            st.caption(f"💡 SBERTベクトルはキャッシュ済み（`{_sbert_model_name}`）。パラメータ変更時はクラスタリングのみ再計算します。")
+        else:
+            st.caption(f"使用モデル: `{_sbert_model_name}`（Home フェーズ4 の選択に追従）")
 
         if st.button(btn_label, key="nebula_academic_landscape_btn"):
             # SBERT: キャッシュがなければ計算、あればスキップ
@@ -970,7 +1026,8 @@ if df_npl is not None and not df_npl.empty:
                 academic_vectors = st.session_state['nebula_academic_embeddings']
             else:
                 with st.spinner("SBERTベクトル化中...（初回のみ）"):
-                    embedder = patiroha.SBERTEmbedder()
+                    # 特許(Home)と同一の文埋め込みモデルを共有（選択モデルに追従）
+                    embedder = utils.load_sbert_embedder(_sbert_model_name)
                     academic_vectors = embedder.encode(
                         df_academic,
                         text_columns=['unified_title', 'unified_content'],
@@ -978,6 +1035,7 @@ if df_npl is not None and not df_npl.empty:
                         normalize_embeddings=True,
                     )
                     st.session_state['nebula_academic_embeddings'] = academic_vectors
+                    st.session_state['nebula_academic_embeddings_model'] = _sbert_model_name
 
             with st.spinner("UMAP + HDBSCAN クラスタリング中..."):
                 landscape = patiroha.build_landscape(
@@ -987,15 +1045,31 @@ if df_npl is not None and not df_npl.empty:
                     min_samples=acad_min_samples,
                 )
                 st.session_state['nebula_academic_landscape'] = landscape
+                _coords = landscape.coords
 
-                df_academic['acad_cluster'] = landscape.labels
-                df_academic['acad_umap_x'] = landscape.coords[:, 0]
-                df_academic['acad_umap_y'] = landscape.coords[:, 1]
+                # 自動最適化: build_landscape で得た 2D UMAP 座標上で HDBSCAN を掃引して
+                # クラスタ数を適正化する（UMAP は 1 回のみ。掃引は 2D 上なので軽い）
+                if acad_auto:
+                    _sweep = utils.sweep_hdbscan_params(_coords, target_k=int(acad_target_k))
+                    _acad_labels = _sweep['labels']
+                    st.session_state['nebula_acad_auto_result'] = {
+                        'mcs': _sweep['min_cluster_size'], 'ms': _sweep['min_samples'],
+                        'k': _sweep['n_clusters'], 'noise': _sweep['noise_ratio'],
+                        'target_k': _sweep['target_k'], 'validity': _sweep.get('validity')}
+                else:
+                    _acad_labels = landscape.labels
+                    st.session_state.pop('nebula_acad_auto_result', None)
+                # 実際に使うクラスタ数（タイトル表示等で landscape.n_clusters の代わりに使う）
+                st.session_state['nebula_academic_n_clusters'] = int(len(set(_acad_labels.tolist()) - {-1}))
+
+                df_academic['acad_cluster'] = _acad_labels
+                df_academic['acad_umap_x'] = _coords[:, 0]
+                df_academic['acad_umap_y'] = _coords[:, 1]
 
                 texts = (df_academic['unified_title'].fillna('') + ' ' +
                         df_academic['unified_content'].fillna(''))
-                labels_map = patiroha.auto_label(
-                    texts, landscape.labels,
+                labels_map = utils.safe_auto_label(
+                    texts, _acad_labels,
                     stopwords=patiroha.get_stopwords("npl"),
                     method='c-tfidf', top_n=acad_label_top_n)
                 st.session_state['nebula_academic_labels_map'] = labels_map
@@ -1014,12 +1088,24 @@ if df_npl is not None and not df_npl.empty:
             df_acad = st.session_state['df_nebula_academic']
             labels_map = st.session_state.get('nebula_academic_labels_map', {})
             landscape_result = st.session_state.get('nebula_academic_landscape')
+            # 実際に使用中のクラスタ数（自動最適化で掃引した場合は landscape.n_clusters と異なるため、
+            # 実データから数える方を正とする）。タイトル/スナップショット/CAPCOM 出力で共通利用。
+            if 'acad_cluster' in df_acad.columns:
+                _acad_n_clusters = int(df_acad[df_acad['acad_cluster'] != -1]['acad_cluster'].nunique())
+            else:
+                _acad_n_clusters = landscape_result.n_clusters if landscape_result else 0
 
-            # 表示モード切替
-            acad_display_mode = st.radio(
-                "表示モード:", ["Scatter", "Density", "Convex Hull"],
-                horizontal=True, key="acad_display_mode"
+            # 表示モード切替（Saturn V と同じ表記・既定＝クラスタ領域(凸包)）
+            _acad_mode_lbl = st.radio(
+                "表示モード:", ["クラスタ領域 (Clusters)", "密度マップ (Density)", "散布図 (Scatter)"],
+                horizontal=True, key="acad_display_mode_v2",
+                help="俯瞰図の描き方を切り替えます。クラスタ領域＝各クラスタを色付きの領域(凸包)で表示、密度マップ＝混み具合をヒートマップで表示、散布図＝個々の論文を点で表示。"
             )
+            acad_display_mode = {
+                "クラスタ領域 (Clusters)": "Convex Hull",
+                "密度マップ (Density)": "Density",
+                "散布図 (Scatter)": "Scatter",
+            }.get(_acad_mode_lbl, "Convex Hull")
 
             fig_acad = go.Figure()
 
@@ -1105,6 +1191,7 @@ if df_npl is not None and not df_npl.empty:
                         line=marker_line,
                     ),
                     hoverinfo='text', hovertext=df_clustered['hover_text'],
+                    customdata=df_clustered.index,
                     name='論文 (Valid)', showlegend=False,
                 ))
 
@@ -1116,6 +1203,7 @@ if df_npl is not None and not df_npl.empty:
                     mode='markers',
                     marker=dict(color='#999999', size=3, opacity=0.3, line=dict(width=0)),
                     hoverinfo='text', hovertext=noise_hover,
+                    customdata=df_noise.index,
                     name='Noise', showlegend=False,
                 ))
 
@@ -1140,7 +1228,7 @@ if df_npl is not None and not df_npl.empty:
                 )
 
             # レイアウト（Saturn V と同じ APOLLO テンプレート + height=1200 + aspect 1:1）
-            title_txt = f"学術論文ランドスケープ ({landscape_result.n_clusters if landscape_result else '?'}クラスタ / ノイズ {len(df_noise)}件)"
+            title_txt = f"学術論文ランドスケープ ({_acad_n_clusters}クラスタ / ノイズ {len(df_noise)}件)"
             utils.update_fig_layout(fig_acad, title_txt, height=1200, show_legend=False)
 
             # aspect 1:1 を強制
@@ -1150,27 +1238,48 @@ if df_npl is not None and not df_npl.empty:
                 pad_factor = 0.02
                 x_pad = (x_max - x_min) * pad_factor if x_max > x_min else 1.0
                 y_pad = (y_max - y_min) * pad_factor if y_max > y_min else 1.0
+                # constrain="domain": 1:1 アスペクトをプロット領域側で調整し、
+                # ラベル(注釈)の有無で表示範囲が広がって俯瞰図が縮む現象を防ぐ（Saturn V と同じ）。
+                # Saturn V と完全一致させる: height=1200 を再設定し、yaxis にも constrain="domain" を付ける。
+                #   これが欠けるとアスペクト計算がコンテナ寸法に依存し、初回レンダリングで俯瞰図が小さく
+                #   表示され、ラベル編集等の再実行までは正しい大きさにならない。
                 fig_acad.update_layout(
-                    xaxis=dict(range=[x_min - x_pad, x_max + x_pad], autorange=False),
+                    height=1200,
+                    xaxis=dict(range=[x_min - x_pad, x_max + x_pad], autorange=False, constrain="domain"),
                     yaxis=dict(
                         range=[y_min - y_pad, y_max + y_pad],
                         autorange=False,
                         scaleanchor="x", scaleratio=1,
+                        constrain="domain",
                     ),
                 )
 
-            st.plotly_chart(fig_acad, use_container_width=True, config={
-                'editable': True,
-                'edits': {
-                    'annotationPosition': True,
-                    'annotationText': False,
-                    'axisTitleText': False,
-                    'legendPosition': False,
-                    'legendText': False,
-                    'shapePosition': False,
-                    'titleText': False,
-                },
-            })
+            @st.fragment
+            def _nebula_click_acad():
+                utils.disable_selection_fade(fig_acad)
+                acad_selection = st.plotly_chart(
+                    fig_acad, use_container_width=True,
+                    on_select="rerun", selection_mode="points", key="nebula_acad_map",
+                    config={
+                        'editable': True,
+                        'edits': {
+                            'annotationPosition': True,
+                            'annotationText': False,
+                            'axisTitleText': False,
+                            'legendPosition': False,
+                            'legendText': False,
+                            'shapePosition': False,
+                            'titleText': False,
+                        },
+                    },
+                )
+                # 論文点クリック → 詳細ダイアログ（customdata は df_acad のインデックス）
+                utils.handle_map_click(
+                    acad_selection, "nebula_acad",
+                    title="クリックした論文", df=df_acad,
+                    card_renderer=utils.render_paper_card,
+                )
+            _nebula_click_acad()
 
             # --- CSV ダウンロード（Saturn V と同じ運用） ---
             # クラスタID・ラベル・UMAP 座標を含む学術論文データを出力
@@ -1196,27 +1305,56 @@ if df_npl is not None and not df_npl.empty:
             # スナップショット
             utils.render_snapshot_button(
                 title="NEBULA 学術論文ランドスケープ",
-                description=f"学術論文{len(df_acad)}件, {landscape_result.n_clusters if landscape_result else '?'}クラスタ, ノイズ{len(df_noise)}件",
+                description=f"学術論文{len(df_acad)}件, {_acad_n_clusters}クラスタ, ノイズ{len(df_noise)}件",
                 key="snap_nebula_academic_landscape",
                 fig=fig_acad,
                 data_summary={
                     'type': 'academic_landscape',
                     'total_papers': len(df_acad),
-                    'n_clusters': landscape_result.n_clusters if landscape_result else 0,
+                    'n_clusters': _acad_n_clusters,
                     'noise_count': len(df_noise),
                     'clusters': [{'id': int(cid), 'label': lbl, 'count': len(df_acad[df_acad['acad_cluster'] == cid])}
                                  for cid, lbl in labels_map.items() if cid != -1],
                 },
             )
 
+            # 🖼️ 整理版ランドスケープ（スライド/レポート用・上位クラスタのみ）
+            if st.checkbox("🖼️ 整理版ランドスケープ（スライド/レポート用・上位クラスタのみ）を表示", key="nebula_curated_show"):
+                st.caption("全クラスタを密にラベルすると重なるため、件数上位の学術クラスタだけを大きく示したスライド向けの俯瞰図です。")
+                _ncl_topn = st.slider("ラベル表示するクラスタ数（件数上位）", 3, 15, 8, key="nebula_curated_topn",
+                    help="整理版（スライド/レポート用）の俯瞰図で、件数が多い上位何クラスタにだけ大きなラベルを付けるかです。全クラスタに付けると重なって読めないため、主要クラスタだけを強調します。")
+                _ncl_style_lbl = st.radio("表示モード:", ["クラスタ領域 (Clusters)", "密度マップ (Density)", "散布図 (Scatter)"],
+                                          horizontal=True, key="nebula_curated_style",
+                                          help="俯瞰図の描き方を切り替えます。クラスタ領域＝色付き領域で表示、密度マップ＝混み具合をヒートマップで表示、散布図＝個々の特許を点で表示。")
+                _ncl_style = {"クラスタ領域 (Clusters)": "hull", "密度マップ (Density)": "density", "散布図 (Scatter)": "points"}.get(_ncl_style_lbl, "hull")
+                try:
+                    _ncl_fig = utils.build_curated_landscape(
+                        df_acad, cluster_col='acad_cluster', label_col='acad_cluster_label',
+                        x_col='acad_umap_x', y_col='acad_umap_y', top_n=_ncl_topn, region_style=_ncl_style)
+                    st.plotly_chart(_ncl_fig, use_container_width=True, config={'editable': False})
+                    _ncl_nall = int(df_acad[df_acad['acad_cluster'] != -1]['acad_cluster'].nunique()) if 'acad_cluster' in df_acad.columns else 0
+                    # CAPCOMアクティブ時はクリーンPNGをZIPに同梱（スライド/レポート用の整理版を下流へ）
+                    utils.save_curated_to_capcom(
+                        _ncl_fig, snap_id="nebula_academic_curated_landscape",
+                        cache_token=f"{_ncl_topn}_{_ncl_style}")
+                    utils.render_report_png_button(
+                        _ncl_fig, key="nebula_curated_report",
+                        default_title="学術ランドスケープ：主要クラスタ",
+                        default_subtitle=f"学術論文 {len(df_acad):,}件 / 上位{_ncl_topn}クラスタ（全{_ncl_nall}クラスタ）",
+                        default_caption="",
+                        label="🎨 整理版をスライド/レポート用PNGに書き出す")
+                except Exception as _e:
+                    st.warning(f"整理版ランドスケープの生成に失敗しました: {_e}")
+
             # --- ラベル編集 + AIアシスト ---
             st.markdown("#### クラスタラベル編集")
 
             # 学術テキスト用TF-IDF（AIラベルアシスト・ラベル編集に必要）
+            # utils.safe_build_tfidf で Janome 例外耐性を確保
             if 'nebula_academic_tfidf' not in st.session_state:
                 acad_texts = (df_acad['unified_title'].fillna('') + ' ' +
                               df_acad['unified_content'].fillna('')).tolist()
-                _tfidf_mat, _feat_names = patiroha.build_tfidf(
+                _tfidf_mat, _feat_names = utils.safe_build_tfidf(
                     acad_texts, stopwords=patiroha.get_stopwords("npl"),
                     min_df=2, max_df=0.90)
                 st.session_state['nebula_academic_tfidf'] = _tfidf_mat
@@ -1232,11 +1370,11 @@ if df_npl is not None and not df_npl.empty:
                 'applicant': 'unified_source',
             }
 
-            # AIラベルサジェスト
+            # AIラベルサジェスト（学術論文ドメイン: 命名プロンプトを論文用語にする）
             utils.render_ai_label_assistant(
                 df_acad, 'acad_cluster', 'nebula_academic_labels_map',
                 acad_col_map, acad_tfidf, acad_features,
-                widget_key_prefix="nebula_acad_label"
+                widget_key_prefix="nebula_acad_label", domain="academic"
             )
 
             # オリジナルラベルの保存（初回のみ）
@@ -1320,7 +1458,7 @@ if df_npl is not None and not df_npl.empty:
                                     })
 
                         cluster_export.append({
-                            'cluster_id': int(cid),
+                            'cluster_id': int(cid) if pd.notna(cid) else -1,
                             'label': label,
                             'count': len(df_c),
                             'centroid': [round(cx, 4), round(cy, 4)],
@@ -1330,7 +1468,7 @@ if df_npl is not None and not df_npl.empty:
                     export_data = {
                         'type': 'nebula_academic_landscape',
                         'total_papers': len(df_acad),
-                        'n_clusters': landscape_result.n_clusters if landscape_result else 0,
+                        'n_clusters': _acad_n_clusters,
                         'noise_count': landscape_result.noise_count if landscape_result else 0,
                         'clusters': cluster_export,
                         'spatial_context': acad_spatial_info if acad_spatial_info else "",
@@ -1338,8 +1476,54 @@ if df_npl is not None and not df_npl.empty:
                     if dyn_data:
                         export_data['cluster_dynamics'] = dyn_data
                     capcom.save_data('nebula_academic_clusters', export_data)
-            except Exception:
-                pass
+            except Exception as e:
+                st.caption(f"⚠️ 学術ランドスケープ（クラスタ） の CAPCOM 保存に失敗しました（要確認）: {e}")
+
+            # --- AI Insight: 学術ランドスケープ分析 ---
+            _acad_clusters = sorted(
+                [{'label': lbl, 'count': int((df_acad['acad_cluster'] == cid).sum())}
+                 for cid, lbl in labels_map.items() if cid != -1],
+                key=lambda d: d['count'], reverse=True)
+            _acad_cluster_str = utils_ai.df_to_markdown(
+                pd.DataFrame(_acad_clusters).rename(columns={'label': '研究テーマ', 'count': '件数'}),
+                index=False) if _acad_clusters else "（クラスタなし）"
+            _acad_noise_n = int(len(df_noise))
+            _acad_meta = {
+                '分析単位': '学術論文 (NPL)',
+                '学術論文件数': len(df_acad),
+                'クラスタ数': len(_acad_clusters),
+                'ノイズ件数': _acad_noise_n,
+                '手法': 'SBERT + UMAP + HDBSCAN',
+            }
+            if 'year' in df_acad.columns and df_acad['year'].notna().any():
+                _yy = df_acad['year'].dropna()
+                _acad_meta['期間'] = f"{int(_yy.min())}年 ～ {int(_yy.max())}年"
+            # クラスタ動態・ノイズ（萌芽研究）の追加コンテキストと指示
+            _acad_extra, _acad_inst = utils_ai.build_map_dynamics_noise_addon(
+                dynamics_data=dyn_data, noise_count=_acad_noise_n, total_count=len(df_acad))
+            _acad_prompt = utils_ai.generate_ai_insight_prompt(
+                role="学術ランドスケープ・研究動向分析の専門家として、学術論文のクラスタ構造から研究トレンドと技術機会を分析してください。",
+                context=("SBERT（意味ベクトル化）+ UMAP + HDBSCAN で学術論文（NPL）を自動クラスタリングした"
+                         "『学術ランドスケープ』です。各クラスタ=研究テーマ群、点=論文、近接=意味的類似を表します。"
+                         "クラスタ動態（累積件数×CAGR）と空間配置（クラスタ間の近接関係）も併せて提示します。"),
+                data_summary=(f"学術論文 全{len(df_acad)}件 / {len(_acad_clusters)}クラスタ / ノイズ{_acad_noise_n}件\n"
+                              f"[研究テーマ クラスタ別件数]\n{_acad_cluster_str}"),
+                instructions="""\
+以下の観点で分析してください:
+1. **研究テーマ構成**: 主要な研究クラスタ（テーマ）を名指しし、学術コミュニティの関心の重心を特定
+2. **注目・主要テーマ**: 件数上位クラスタの研究的意義と、産業・技術への波及可能性
+3. **萌芽研究**: ノイズ（既存テーマに属さない論文）に潜む新規・学際的研究の芽
+4. **研究動態**: クラスタ動態から、新興/成長中の研究領域と、成熟・停滞領域を区別
+5. **学際・融合領域**: 空間配置で近接するクラスタ間の融合・境界領域の研究機会
+6. **学術と特許のギャップ**: 学術で先行するテーマと、特許化（実用化）が追いついていない領域の差を示唆
+
+各主張には必ずクラスタ名と具体的な数値を1つ以上含めてください。""" + _acad_inst,
+                metadata=_acad_meta,
+                constraints="学術（NPL）と特許は母集団・性質が非対称（学術=新規性・基礎研究が先行、特許=実用化・権利化視点）。この非対称性を前提に論じること。",
+                output_format="Markdown形式。見出し付きの構造化された分析レポート。",
+                extra_content=f"\n# 空間配置情報 (Spatial Context)\n{acad_spatial_info}\n{_acad_extra}"
+            )
+            utils_ai.render_ai_insight_button(_acad_prompt, "nebula_academic_insight")
     else:
         st.info(f"学術論文が{len(df_academic)}件のみです（最低10件必要）。")
 else:

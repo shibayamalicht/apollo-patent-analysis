@@ -92,7 +92,7 @@ session_YYYYMMDD_HHMMSS/
 - ✅ `codex` → TUI 起動 → チャットで `$apollo-capcom`
 - ❌ `codex exec "レポート書いて"` → `ask_user_question` が使えないため Phase A-2 で停止
 
-非対話モード（CI/CD等）での実行は初版では非推奨です。将来拡張の詳細は [`exec_mode_addendum.md`](exec_mode_addendum.md) を参照してください。
+フルパイプラインの非対話（`codex exec`）実行は**非推奨**（判断ゲートが TUI 必須）。ただし `codex exec resume` を使えば **A/B を対話で通過 → C/D を非対話で再開**する部分自動化は可能。詳細は [`exec_mode_addendum.md`](exec_mode_addendum.md) を参照してください。
 
 ### サブエージェント起動禁止
 

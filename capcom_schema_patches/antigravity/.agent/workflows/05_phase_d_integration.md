@@ -109,8 +109,9 @@ description: >
     - 日本語フォントが埋め込まれているか
 
 14. **PPTX 出力（任意）**: 
+    - 🔑 **デッキは完成レポート `reports/report.typ` を土台に**作る（evidence の寄せ集め禁止）。各章の主張→根拠→示唆を凝縮し章順に沿わせ、出所はモジュール名でなくデータにする
     - `capcom_schema/templates/apollo_template.pptx` を `reports/` にコピー
-    - `capcom_schema/templates/slides_spec.md` を熟読
+    - `capcom_schema/templates/slides_spec.md` を熟読（とくに §0.9「レポートを土台にする」）
     - python-pptx で 25-40 枚のスライド生成
     - 出力: `reports/presentation.pptx`
 

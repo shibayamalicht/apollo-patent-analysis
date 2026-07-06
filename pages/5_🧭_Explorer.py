@@ -7,7 +7,7 @@ import string
 import os
 import platform
 import unicodedata
-from collections import Counter
+from collections import Counter, defaultdict
 from itertools import combinations
 import datetime
 
@@ -30,8 +30,8 @@ utils.configure_matplotlib_font()
 warnings.filterwarnings('ignore')
 
 st.set_page_config(
-    page_title="APOLLO v8 | Explorer",
-    page_icon="🧭",
+    page_title="APOLLO v9 | Explorer",
+    page_icon=utils.module_icon("explorer"),
     layout="wide"
 )
 
@@ -130,14 +130,10 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_k
     if not words: return None
     word_freq = Counter(words)
     try:
-        wc = WordCloud(
-            width=800, height=400, background_color='white',
-            font_path=font_path, collocations=False,
-            max_words=100
-        ).generate_from_frequencies(word_freq)
+        wc_array = utils.compute_wordcloud_array(tuple(sorted(word_freq.items())), font_path)
 
         fig, ax = plt.subplots(figsize=(12, 6))
-        ax.imshow(wc, interpolation='bilinear')
+        ax.imshow(wc_array, interpolation='bilinear')
         ax.set_title(title, fontsize=20)
         ax.axis('off')
         st.pyplot(fig)
@@ -157,8 +153,8 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_k
                     fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
                     buf.seek(0)
                     capcom.save_snapshot_image(f"{capcom_key}_wordcloud", buf.read())
-            except Exception:
-                pass
+            except Exception as e:
+                st.caption(f"⚠️ ワードクラウド の CAPCOM 保存に失敗しました（要確認）: {e}")
 
         # VOYAGERスナップショットボタン
         if capcom_key:
@@ -183,7 +179,7 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_k
 
 utils.render_sidebar()
 
-st.title("🧭 Explorer")
+utils.module_header("explorer", "Explorer")
 st.markdown("キーワード共起ネットワーク・急上昇トレンド・競合比較トルネードチャートで、技術キーワードの戦略的ポジションを分析します。")
 st.markdown("""
 Explorer (戦略的キーワード探索) は、特許文書内の専門用語を抽出し、市場全体のトレンド変遷や競合他社との戦略的差異を多角的に分析するモジュールです。
@@ -240,7 +236,7 @@ st.markdown("---")
 if selected_tab == "全体俯瞰 (Global Overview)":
     st.subheader("Global Overview")
     
-    top_n_cloud = st.number_input("ワードクラウド単語数", 10, 100, 50, key="go_cloud_n")
+    top_n_cloud = st.number_input("ワードクラウド単語数", 10, 100, 50, key="go_cloud_n", help="ワードクラウドに表示する単語数です。多いほど多くの語が出ますが小さい語は読みにくく、少ないほど主要語が大きく目立ちます。")
     all_keywords = [w for sublist in df_main['explorer_keywords'] for w in sublist]
     word_counts = Counter(all_keywords)
     
@@ -252,8 +248,8 @@ if selected_tab == "全体俯瞰 (Global Overview)":
 
         st.markdown("##### 2. 全体共起ネットワーク (技術クラスター)")
         col_net1, col_net2 = st.columns(2)
-        with col_net1: global_net_top_n = st.slider("抽出単語数 (Top N)", 30, 100, 70, key="global_net_n")
-        with col_net2: global_net_threshold = st.slider("共起閾値 (Jaccard)", 0.01, 0.3, 0.03, 0.01, key="global_net_th")
+        with col_net1: global_net_top_n = st.slider("抽出単語数 (Top N)", 30, 100, 70, key="global_net_n", help="ネットワークに表示するキーワード（ノード）の数です。出現頻度の上位から何語を使うかを決めます。多いほど網羅的ですが密集して読みにくく、少ないほど主要語に絞られ見やすくなります。")
+        with col_net2: global_net_threshold = st.slider("共起閾値 (Jaccard)", 0.01, 0.3, 0.03, 0.01, key="global_net_th", help="2つのキーワードを線（エッジ）で結ぶ基準の強さです。共起の強さを0〜1で表すJaccard係数がこの値以上のペアだけを結びます。高くすると強い関係だけが残ってスッキリし、低くすると弱い関係も含め線が増えて密になります。")
 
         with st.spinner("全体ネットワーク計算中..."):
             c_all = Counter(all_keywords)
@@ -296,8 +292,9 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                 node_trace_g = go.Scatter(
                     x=node_x, y=node_y, mode='markers+text',
                     text=[n for n in G_global.nodes()], textposition="top center",
+                    textfont=dict(size=15, color="#222222"),
                     hovertext=node_text, hoverinfo="text",
-                    marker=dict(showscale=False, colorscale='Turbo', color=node_color, size=[np.log(c_all[n]+1)*8 for n in G_global.nodes()], line_width=1)
+                    marker=dict(color=[utils.APOLLO_COLORS[cid % len(utils.APOLLO_COLORS)] for cid in node_color], size=[np.log(c_all[n]+1)*10 for n in G_global.nodes()], line_width=2)
                 )
                 fig_net_g = go.Figure(data=[edge_trace_g, node_trace_g])
                 fig_net_g.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
@@ -370,7 +367,7 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                 # Format for summary
                 rep_lines = ["\n**代表的特許 (ネットワーク中心性ベース):**"]
                 for i, r in enumerate(network_reps):
-                     rep_lines.append(f"{i+1}. 【{r['title']}】 ({r['applicant']}) - {r['abstract'][:80]}...")
+                     rep_lines.append(f"{i+1}. 【{r['title']}】[{r.get('number','N/A')}] ({r['applicant']}) - {r['abstract'][:80]}...")
 
                 snap_data = utils.generate_rich_summary(df_main, title_col=col_map['title'], abstract_col=col_map['abstract'])
                 snap_data['module'] = 'Explorer'
@@ -388,7 +385,7 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                 if network_reps:
                     snap_data['cluster_summary'] = (snap_data.get('cluster_summary', '') + "\n".join(rep_lines))
 
-                # AIインサイト (全体) - 上部へ移動
+                # AIインサイト (全体)
                 insight_context_g = f"""
                 **チャートタイプ**: 全体共起ネットワーク (Explorer)
                 **対象データ**: 全データの共起頻度上位 {global_net_top_n} キーワード。
@@ -468,7 +465,7 @@ if selected_tab == "全体俯瞰 (Global Overview)":
                         }
                         capcom.save_data("explorer_global_network.json", capcom_nw_data)
                 except Exception as e:
-                    pass
+                    st.caption(f"⚠️ 共起ネットワーク（全体） の CAPCOM 保存に失敗しました（要確認）: {e}")
 
             else: st.warning("条件に一致する共起関係が見つかりませんでした。")
 
@@ -499,10 +496,12 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
     if df_target.empty:
         st.warning("データがありません。")
     else:
-        current_year = int(df_target['year'].max())
-        min_year = int(df_target['year'].min())
+        _y_max = df_target['year'].max()
+        _y_min = df_target['year'].min()
+        current_year = int(_y_max) if pd.notna(_y_max) else 0
+        min_year = int(_y_min) if pd.notna(_y_min) else 0
         
-        interval_years = st.slider("期間の粒度 (年)", 1, 10, 5, key="ta_interval")
+        interval_years = st.slider("期間の粒度 (年)", 1, 10, 5, key="ta_interval", help="トレンドを何年ごとに区切って集計するかです。粗く（大きく）すると大まかな傾向、細かく（小さく）すると年単位の動きが見えます。")
         
         periods = []
         c_end = current_year
@@ -543,7 +542,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
                     description=f"直近期間 [{periods[0][0]}-{periods[0][1]}] で急増したキーワード。",
                     key="exp_growth_snap",
                     fig=fig_growth,
-                    data_summary=df_growth.to_string(index=False)
+                    data_summary=utils_ai.df_to_markdown(df_growth, index=False)
                 )
         else:
             st.warning("比較対象となる過去のデータ期間が不足しています。")
@@ -561,8 +560,8 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
         # 3. トレンド・ネットワーク
         st.markdown(f"##### 3. トレンド・共起ネットワーク (赤=急上昇 / 青=停滞)")
         col_net1, col_net2 = st.columns(2)
-        with col_net1: ta_net_n = st.slider("抽出単語数", 30, 100, 70, key="ta_net_n")
-        with col_net2: ta_net_th = st.slider("共起閾値", 0.01, 0.3, 0.03, 0.01, key="ta_net_th")
+        with col_net1: ta_net_n = st.slider("抽出単語数", 30, 100, 70, key="ta_net_n", help="ネットワークに表示するキーワード（ノード）の数です。出現頻度の上位から何語を使うかを決めます。多いほど網羅的ですが密集して読みにくく、少ないほど主要語に絞られ見やすくなります。")
+        with col_net2: ta_net_th = st.slider("共起閾値", 0.01, 0.3, 0.03, 0.01, key="ta_net_th", help="2つのキーワードを線（エッジ）で結ぶ基準の強さです。共起の強さを0〜1で表すJaccard係数がこの値以上のペアだけを結びます。高くすると強い関係だけが残ってスッキリし、低くすると弱い関係も含め線が増えて密になります。")
         
         all_target_kw = [w for sublist in df_target['explorer_keywords'] for w in sublist]
         c_all = Counter(all_target_kw)
@@ -610,8 +609,9 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
             node_trace = go.Scatter(
                 x=[pos[n][0] for n in G.nodes()], y=[pos[n][1] for n in G.nodes()],
                 mode='markers+text', text=list(G.nodes()), textposition="top center",
+                textfont=dict(size=15, color="#222222"),
                 hovertext=node_texts, hoverinfo="text",
-                marker=dict(showscale=True, colorscale='RdBu_r', color=node_colors, size=[np.log(G.nodes[n]['size']+1)*8 for n in G.nodes()], line_width=1, colorbar=dict(title="Growth"))
+                marker=dict(showscale=True, colorscale='RdBu_r', color=node_colors, size=[np.log(G.nodes[n]['size']+1)*10 for n in G.nodes()], line_width=2, colorbar=dict(title="Growth"))
             )
             fig_net = go.Figure(data=[edge_trace, node_trace])
             fig_net.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
@@ -679,7 +679,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
 
             rep_lines_t = ["\n**代表的特許 (成長領域・キーワードベース):**"]
             for i, r in enumerate(trend_reps):
-                 rep_lines_t.append(f"{i+1}. 【{r['title']}】 ({r['applicant']}) - {r['abstract'][:80]}...")
+                 rep_lines_t.append(f"{i+1}. 【{r['title']}】[{r.get('number','N/A')}] ({r['applicant']}) - {r['abstract'][:80]}...")
 
             snap_data = utils.generate_rich_summary(df_target, title_col=col_map['title'], abstract_col=col_map['abstract'])
             snap_data['module'] = 'Explorer'
@@ -692,7 +692,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
                 "edges_ranked": trend_edges_ranked,
                 "notes": "Nodes colored by Growth Rate (Red=High, Blue=Low)."
             }
-            # トレンド分析データ（順序バグ修正: render_snapshot_buttonの前に追加）
+            # トレンド分析データ（render_snapshot_button の前に追加する必要がある）
             snap_data['trend_analysis'] = {
                 "period_past": period_past_str,
                 "period_recent": period_recent_str,
@@ -767,7 +767,7 @@ elif selected_tab == "トレンド分析 (Trend Analysis)":
                     }
                     capcom.save_data("explorer_trend.json", capcom_trend_data)
             except Exception as e:
-                pass
+                st.caption(f"⚠️ トレンド共起ネットワーク の CAPCOM 保存に失敗しました（要確認）: {e}")
 
 
 # ==================================================================
@@ -850,7 +850,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
                 title=f"Tornado Chart ({my_comp} vs {target_comp})",
                 description="キーワード出現頻度の直接比較。左右への突出が各社の特徴を示す。",
                 fig=fig_tornado,
-                data_summary=df_tornado[['Keyword', 'My Abs', 'Competitor Count']].tail(20).to_string(index=False),
+                data_summary=utils_ai.df_to_markdown(df_tornado[['Keyword', 'My Abs', 'Competitor Count']].tail(20), index=False),
                 key="exp_tornado_snap"
             )
 
@@ -867,8 +867,8 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
         # 3. 支配率ネットワーク
         st.markdown(f"##### 3. 支配率ネットワーク (青=自社優勢 / 赤=競合優勢)")
         col_cs1, col_cs2 = st.columns(2)
-        with col_cs1: cs_net_n = st.slider("抽出単語数", 30, 100, 70, key="cs_net_n")
-        with col_cs2: cs_net_th = st.slider("共起閾値", 0.01, 0.3, 0.03, 0.01, key="cs_net_th")
+        with col_cs1: cs_net_n = st.slider("抽出単語数", 30, 100, 70, key="cs_net_n", help="ネットワークに表示するキーワード（ノード）の数です。出現頻度の上位から何語を使うかを決めます。多いほど網羅的ですが密集して読みにくく、少ないほど主要語に絞られ見やすくなります。")
+        with col_cs2: cs_net_th = st.slider("共起閾値", 0.01, 0.3, 0.03, 0.01, key="cs_net_th", help="2つのキーワードを線（エッジ）で結ぶ基準の強さです。共起の強さを0〜1で表すJaccard係数がこの値以上のペアだけを結びます。高くすると強い関係だけが残ってスッキリし、低くすると弱い関係も含め線が増えて密になります。")
         
         combined_keywords = words_my + words_target
         c_combined = Counter(combined_keywords)
@@ -917,8 +917,9 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
             node_trace = go.Scatter(
                 x=[pos[n][0] for n in G.nodes()], y=[pos[n][1] for n in G.nodes()],
                 mode='markers+text', text=list(G.nodes()), textposition="top center",
+                textfont=dict(size=15, color="#222222"),
                 hovertext=node_texts, hoverinfo="text",
-                marker=dict(showscale=True, colorscale='RdBu', color=node_colors, size=[np.log(G.nodes[n]['size']+1)*8 for n in G.nodes()], line_width=1, colorbar=dict(title="Dominance"))
+                marker=dict(showscale=True, colorscale='RdBu', color=node_colors, size=[np.log(G.nodes[n]['size']+1)*10 for n in G.nodes()], line_width=2, colorbar=dict(title="Dominance"))
             )
             fig_net = go.Figure(data=[edge_trace, node_trace])
             fig_net.update_layout(showlegend=False, xaxis=dict(visible=False), yaxis=dict(visible=False))
@@ -982,7 +983,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
             dom_reps = utils.get_keyword_centric_representatives(df_2, list(G.nodes()), n_reps=10)
             rep_lines_d = ["\n**代表的特許 (支配率ネットワーク・キーワードベース):**"]
             for i, r in enumerate(dom_reps):
-                 rep_lines_d.append(f"{i+1}. 【{r['title']}】 ({r['applicant']}) - {r['abstract'][:80]}...")
+                 rep_lines_d.append(f"{i+1}. 【{r['title']}】[{r.get('number','N/A')}] ({r['applicant']}) - {r['abstract'][:80]}...")
 
             snap_data = utils.generate_rich_summary(df_2, title_col=col_map['title'], abstract_col=col_map['abstract'])
             snap_data['module'] = 'Explorer'
@@ -995,7 +996,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
                 "edges_ranked": dom_edges_ranked,
                 "notes": f"Dominance: {my_comp} vs {target_comp}. Blue favorable to {my_comp}, Red favorable to {target_comp}."
             }
-            # 支配率分析データ（順序バグ修正: render_snapshot_buttonの前に追加）
+            # 支配率分析データ（render_snapshot_button の前に追加する必要がある）
             snap_data['dominance_analysis'] = {
                 "my_company": my_comp,
                 "target_company": target_comp,
@@ -1073,7 +1074,7 @@ elif selected_tab == "競合比較戦略 (Comparative Strategy)":
                     }
                     capcom.save_data("explorer_dominance.json", capcom_dom_data)
             except Exception as e:
-                pass
+                st.caption(f"⚠️ 支配率共起ネットワーク の CAPCOM 保存に失敗しました（要確認）: {e}")
 
 
 # ==================================================================

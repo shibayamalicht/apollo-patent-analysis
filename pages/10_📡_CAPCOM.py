@@ -1,5 +1,5 @@
 # ==================================================================
-# 10_📡_CAPCOM.py — APOLLO v8.0.0 CAPCOM (Capsule Communicator)
+# 10_📡_CAPCOM.py — APOLLO v9.0.0 CAPCOM (Capsule Communicator)
 # セッション管理・ZIPエクスポート・マルチツール連携
 # （Claude Code / Codex CLI / Antigravity IDE を複数選択可能）
 # ==================================================================
@@ -8,11 +8,12 @@ import streamlit as st
 import os
 import json
 import datetime
+# page_icon に実写アイコンを使うため、set_page_config より前に utils を import する
+import utils
 
-st.set_page_config(page_title="APOLLO v8 | CAPCOM", page_icon="📡", layout="wide")
+st.set_page_config(page_title="APOLLO v9 | CAPCOM", page_icon=utils.module_icon("capcom"), layout="wide")
 st.session_state['current_page'] = 'CAPCOM'
 
-import utils
 import capcom
 
 utils.render_sidebar()
@@ -20,7 +21,7 @@ utils.render_sidebar()
 # ==================================================================
 # --- ヘッダー ---
 # ==================================================================
-st.title("📡 CAPCOM — Capsule Communicator")
+utils.module_header("capcom", "CAPCOM — Capsule Communicator")
 st.markdown("全モジュールの分析結果をセッションZIPにパッケージングし、Claude Codeによる本格レポート生成に橋渡しします。")
 
 # ==================================================================
@@ -193,6 +194,23 @@ padding: 10px 12px; text-align: center;">
         )
         st.session_state['capcom_database_name'] = capcom_database_name
 
+    # --- 画像・スライドに関する指示（任意） ---
+    capcom_image_directive = st.text_area(
+        "🖼️ 画像・スライドに関する指示（任意）",
+        value=st.session_state.get('capcom_image_directive', ''),
+        placeholder="例: 表紙にクラスタ動態マップを使う / 権利化率マップはスライド必須 / CREWは媒介中心性の図を優先 など。",
+        key="capcom_image_directive_input",
+        height=90,
+        help="どの画像をどこで使うか等の指示をAIに渡せます。context.json 経由でレポート/スライド生成に反映されます。レポート本文の図キャプションはAIが執筆するため要点記入は不要、スライドの要点はAIが本指示に沿って作成します。",
+    )
+    st.session_state['capcom_image_directive'] = capcom_image_directive
+    # 収集済みスナップショット一覧（指示でタイトルを参照できるよう提示）
+    _snaps_for_list = st.session_state.get('snapshots', [])
+    if _snaps_for_list:
+        with st.expander(f"🖼️ 収集済みスナップショット {len(_snaps_for_list)} 枚（上の指示で名前を参照できます）"):
+            for _s in _snaps_for_list:
+                st.caption(f"・{_s.get('module', '?')}: {_s.get('title', '(無題)')}")
+
     # ==================================================================
     # --- CAPCOM モジュール選択（複数選択可） ---
     # 選択されたツールに対応する capcom_schema_patches/ 配下の資材が
@@ -287,42 +305,50 @@ padding: 10px 12px; text-align: center;">
                 desc_map = {
                     "patents.csv": "全特許データ（タイトル・要約・出願人・クラスタ情報等）",
                     "atlas_statistics.json": "ATLAS マクロ統計（時系列・ランキング・HHI/Entropy/Gini）",
+                    "atlas_grant_rate.json": "ATLAS 権利化率マップ（出願数×権利化率の象限分析）",
                     "core_classification.json": "CORE ルールベース分類結果",
                     "saturnv_clusters.json": "Saturn V AIクラスタリング結果（ノイズ分析・動態マップ含む）",
                     "saturnv_drilldown.json": "Saturn V ドリルダウン分析（PROBE）",
                     "mega_momentum.json": "MEGA 動態分析（CAGR×活動量4象限）",
                     "mega_drilldown.json": "MEGA ポートフォリオ詳細",
                     "explorer_global_network.json": "Explorer グローバル共起ネットワーク",
-                    "explorer_trend_network.json": "Explorer トレンドネットワーク",
-                    "explorer_dominance_network.json": "Explorer ドミナンスネットワーク",
+                    "explorer_trend.json": "Explorer トレンドネットワーク",
+                    "explorer_dominance.json": "Explorer ドミナンスネットワーク",
                     "eagle_clusters.json": "EAGLE 探索的クラスタリング結果",
                     "eagle_cluster_dynamics.json": "EAGLE クラスタ動態マップ",
                     "nebula_hype_cycle.json": "NEBULA ハイプサイクル分析",
                     "nebula_macro_events.json": "NEBULA マクロイベント分析",
                     "nebula_academic_clusters.json": "NEBULA 学術ランドスケープ",
+                    "crew_network.json": "CREW ネットワーク分析（媒介中心性・コミュニティ）",
                 }
                 return desc_map.get(filename, filename)
 
-            # 各Evidenceを個別ファイルで保存
+            # 各Evidenceを個別ファイルで保存。
+            # Export は現在の snapshots から evidence を作り直すので、まず古い evidence を一掃する
+            # （スナップショットを削除/追加して再 Export すると順序・id が変わり、ev{N}_{module}.json が
+            #  上書きされず累積→id 重複・mission.json と evidence/ の件数不整合になるのを防ぐ）。
+            capcom.clear_voyager_evidence()
             evidence_list = []
             for i, snap in enumerate(snapshots):
                 ev_id = i + 1
                 module_name = snap.get('module', 'Unknown').lower().replace(' ', '_')
 
+                # 画像は撮影時に render_snapshot_button が「本来名」（snap['id']＝
+                # atlas_* / saturn_* / core_* など）で snapshots/ に保存済み。ここで
+                # voyager_ev* として再保存すると同一画像が二重に ZIP へ入り、レポートの
+                # マップ重複の原因になる。そのため再保存はせず、evidence の画像参照を
+                # 撮影済みの本来名スナップショットへ向ける（snapshot_logical_path）。
                 image_paths = []
                 try:
-                    if snap.get('image'):
-                        img_path = capcom.save_snapshot_image(f"voyager_ev{ev_id}", snap['image'], index=0)
-                        if img_path:
-                            image_paths.append(img_path)
-                    elif snap.get('images'):
-                        for j, img in enumerate(snap['images']):
-                            img_path = capcom.save_snapshot_image(f"voyager_ev{ev_id}", img, index=j)
-                            if img_path:
-                                image_paths.append(img_path)
-                    capcom.increment_snap_count()
-                except Exception:
-                    pass
+                    imgs = snap.get('images') or ([snap['image']] if snap.get('image') else [])
+                    snap_key = snap.get('id')
+                    for j in range(len(imgs)):
+                        suffix = j if len(imgs) > 1 else None
+                        p = capcom.snapshot_logical_path(snap_key, index=suffix)
+                        if p:
+                            image_paths.append(p)
+                except Exception as e:
+                    st.caption(f"⚠️ WARN Evidence画像パスの解決に失敗しました（要確認）: {e}")
 
                 ev_filename = f"ev{ev_id}_{module_name}"
                 ev_data = {
@@ -382,6 +408,10 @@ padding: 10px 12px; text-align: center;">
                     "coverage_years": st.session_state.get('capcom_coverage_years', '').strip(),
                     "database_name": st.session_state.get('capcom_database_name', '').strip(),
                 },
+                # --- 画像・スライドの指示（任意・レポート/スライド生成で考慮） ---
+                "report_directives": {
+                    "image_slide_instruction": st.session_state.get('capcom_image_directive', '').strip(),
+                },
                 # --- CAPCOM モジュール選択 ---
                 "capcom_tools": {
                     "selected": st.session_state.get('capcom_tools_selected', ["Claude Code（Anthropic）"]),
@@ -421,7 +451,20 @@ padding: 10px 12px; text-align: center;">
     """)
 
     # 選択ツール分のパッチ資材を ZIP に同梱する
-    zip_bytes, zip_filename = capcom.export_session_zip(selected_tools=selected_tool_keys)
+    # ZIP をキャッシュ（telemetry＋ツール選択をキーに、ページ再描画のたびのフル構築を回避）
+    # voyager の Export 状態もキャッシュキーに含める。voyager_ev は snapshots に出力しないため、
+    # CAPCOM Export しても get_telemetry（= snapshots/prompts/data の件数）は変わらず、件数だけを
+    # キーにすると Export 後も voyager 無しの古い ZIP が返ってしまうため。
+    # export_session_zip の voyager 書き出し条件（mission / context / evidence）と一致させる。
+    _voy_store = st.session_state.get('capcom_store', {}).get('voyager', {})
+    _voy_gen = (bool(_voy_store.get('mission')), bool(_voy_store.get('context')), len(_voy_store.get('evidence', {})))
+    _zip_cache_key = (str(capcom.get_telemetry()), _voy_gen, tuple(sorted(selected_tool_keys)))
+    if st.session_state.get('_capcom_zip_key') != _zip_cache_key:
+        zip_bytes, zip_filename = capcom.export_session_zip(selected_tools=selected_tool_keys)
+        st.session_state['_capcom_zip_key'] = _zip_cache_key
+        st.session_state['_capcom_zip_cache'] = (zip_bytes, zip_filename)
+    else:
+        zip_bytes, zip_filename = st.session_state['_capcom_zip_cache']
     if zip_bytes:
         file_size_mb = len(zip_bytes) / (1024 * 1024)
         st.download_button(

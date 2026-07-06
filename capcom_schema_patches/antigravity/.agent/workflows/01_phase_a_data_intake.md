@@ -123,7 +123,7 @@ description: >
 33. **`reports/_phase_a_decisions.json` への保存**:
     ```json
     {
-      "phase_a_version": "v8.0",
+      "phase_a_version": "v9.0",
       "phase_a_completed_at": "{ISO8601}",
       "population_type": { "code": "...", "label": "...", "confirmed_by_user": true },
       "query_intent_summary": { "purpose": "...", "population_outline": "...", "perspective": "..." },

@@ -1,8 +1,10 @@
 # ==================================================================
-# openalex.py -- APOLLO v8.0.0 OpenALEX API通信モジュール
-# OpenALEX_Collector.html のJSロジックをPython移植
+# openalex.py -- APOLLO v9.0.0 OpenALEX API通信モジュール
+# OpenALEX Collector 互換の検索・取得ロジック（Python 実装）
 # ==================================================================
 
+import re
+import html
 import time
 import math
 import requests
@@ -19,6 +21,50 @@ class OpenAlexCollector:
     MAILTO = "apollo-v7@example.com"  # polite pool
     MAX_RETRIES = 5
     PER_PAGE = 200             # API最大値
+
+    def __init__(self, api_key: str = None):
+        # OpenAlex API は 2026-02-13 より API キーが必須（従来の mailto / polite pool 方式は廃止）。
+        # キーは UI（各ユーザーが自分のキーを入力）からのみ受け取る。サーバ既定キー
+        # （環境変数フォールバック）は意図的に持たない＝公開時に全訪問者が運用者キーを
+        # 共有してしまうのを防ぐ。アプリ側でキー入力を必須とし（未入力では検索不可）、
+        # キーなしのお試し枠運用は行わない。
+        self.api_key = (api_key or "").strip()
+
+    def _auth_params(self) -> dict:
+        """認証用の共通パラメータ。api_key を優先し、後方互換のため mailto も併記する。"""
+        params = {"mailto": self.MAILTO}
+        if self.api_key:
+            params["api_key"] = self.api_key
+        return params
+
+    def _redact(self, text) -> str:
+        """エラーメッセージ等から API キーを伏せる。
+
+        requests の例外メッセージには失敗 URL（`...?api_key=<キー>`）が平文で含まれるため、
+        UI 表示やサーバログに API キーが漏れないようマスクする（公開 Web アプリ対策）。
+        """
+        s = str(text)
+        # クエリ文字列の api_key=... を伏せる（URL がキー値と異なる表現でも確実に消す）
+        s = re.sub(r"(api_key=)[^&\s'\"]+", r"\1***", s, flags=re.IGNORECASE)
+        # 念のためキー実値そのものも伏せる
+        if self.api_key:
+            s = s.replace(self.api_key, "***")
+        return s
+
+    def test_connection(self) -> tuple:
+        """API キーの有効性を確認する。(成功フラグ, メッセージ) を返す。"""
+        try:
+            params = {"per_page": 1, **self._auth_params()}
+            resp = requests.get(self.BASE_URL, params=params, timeout=30)
+            if resp.status_code == 200:
+                if self.api_key:
+                    return True, "接続成功（API キーは有効です）"
+                return False, "API キーが未設定です。本アプリは API キーが必須です。"
+            if resp.status_code in (401, 403):
+                return False, f"認証エラー（{resp.status_code}）: API キーが無効か、上限を超過しています。"
+            return False, f"接続失敗（HTTP {resp.status_code}）"
+        except Exception as exc:
+            return False, self._redact(f"接続エラー: {exc}")
 
     # ------------------------------------------------------------------
     # Institution resolution
@@ -40,10 +86,14 @@ class OpenAlexCollector:
         params = {
             "search": name.strip(),
             "per_page": 5,
-            "mailto": self.MAILTO,
+            **self._auth_params(),
         }
         resp = requests.get(self.INST_URL, params=params, timeout=30)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except requests.exceptions.RequestException as exc:
+            # 例外メッセージに失敗 URL（api_key を含む）が載るため伏せて再送出
+            raise RuntimeError(self._redact(f"機関検索エラー: {exc}")) from None
         data = resp.json()
         results = data.get("results", [])
         if not results:
@@ -67,7 +117,7 @@ class OpenAlexCollector:
             "search": query,
             "per_page": min(params.get("per_page", self.PER_PAGE), self.PER_PAGE),
             "cursor": cursor,
-            "mailto": self.MAILTO,
+            **self._auth_params(),
         }
 
         # sort
@@ -112,6 +162,18 @@ class OpenAlexCollector:
                 f"authorships.institutions.lineage:{('|').join(institution_ids)}"
             )
 
+        # フィールド限定検索（コマンドラインモード）: top-level search= の代わりに
+        # <field>.search フィルタを使う。query 中のカンマは filter 区切りと衝突するため空白化。
+        scope_key = {
+            "title": "title.search",
+            "abstract": "abstract.search",
+            "title_and_abstract": "title_and_abstract.search",
+            "fulltext": "fulltext.search",
+        }.get(params.get("search_scope"))
+        if scope_key and query:
+            filters.append(f"{scope_key}:{query.replace(',', ' ')}")
+            url_params.pop("search", None)
+
         if filters:
             url_params["filter"] = ",".join(filters)
 
@@ -128,6 +190,20 @@ class OpenAlexCollector:
                         "レート制限です。少し待ってから再試行してください。"
                     )
 
+                # 429 以外の 4xx（不正なクエリ・無効なキー等）はリトライしても直らない。
+                # 5 回の無駄な待機を避け、OpenAlex のエラーメッセージを添えて即時に失敗させる。
+                if 400 <= resp.status_code < 500:
+                    detail = ""
+                    try:
+                        _j = resp.json()
+                        detail = _j.get("message") or _j.get("error") or ""
+                    except Exception:
+                        detail = (resp.text or "")[:300]
+                    # detail は OpenAlex 由来でキーを含まないが、念のため伏せる
+                    raise RuntimeError(
+                        self._redact(f"APIリクエストエラー（HTTP {resp.status_code}）: {detail}".strip())
+                    ) from None
+
                 resp.raise_for_status()
                 data = resp.json()
                 meta = data.get("meta", {})
@@ -141,7 +217,9 @@ class OpenAlexCollector:
                 if attempt < self.MAX_RETRIES - 1:
                     time.sleep(3.0 * (attempt + 1))
                     continue
-                raise RuntimeError(f"API通信エラー: {exc}") from exc
+                # 例外メッセージに失敗 URL（api_key を含む）が載るため伏せて再送出
+                # （from None で原例外チェーンも切り、トレースバック経由の漏洩も防ぐ）
+                raise RuntimeError(self._redact(f"API通信エラー: {exc}")) from None
 
         # should not reach here
         raise RuntimeError("API通信に失敗しました（最大リトライ回数超過）")
@@ -162,9 +240,14 @@ class OpenAlexCollector:
         institution_ids: list = None,
         has_abstract: bool = False,
         language: str = None,
+        search_scope: str = None,
         on_progress: Callable = None,
     ) -> list[dict]:
         """単一クエリで論文を検索する（cursor-based pagination）
+
+        search_scope を指定すると、top-level の search= ではなく
+        title.search / abstract.search / title_and_abstract.search / fulltext.search
+        フィルタで検索する（コマンドラインモードのフィールド限定用）。
 
         Parameters
         ----------
@@ -201,9 +284,11 @@ class OpenAlexCollector:
             "institution_ids": institution_ids,
             "has_abstract": has_abstract,
             "language": language,
+            "search_scope": search_scope,
         }
 
         all_papers: list[dict] = []
+        seen_ids: set = set()
         cursor = "*"
         total = None
 
@@ -219,7 +304,14 @@ class OpenAlexCollector:
             if not page["results"]:
                 break
 
-            all_papers.extend(page["results"])
+            # 重複除去（cursor の揺らぎやリトライ境界での二重取得を防ぐ。search_by_year / search_multi_query と整合）
+            for _p in page["results"]:
+                _pid = _p.get("id")
+                if _pid and _pid in seen_ids:
+                    continue
+                if _pid:
+                    seen_ids.add(_pid)
+                all_papers.append(_p)
 
             if on_progress:
                 on_progress(len(all_papers), total)
@@ -280,6 +372,8 @@ class OpenAlexCollector:
                 "institution_ids": kwargs.get("institution_ids"),
                 "has_abstract": kwargs.get("has_abstract", False),
                 "language": kwargs.get("language"),
+                # コマンドライン検索式の候補取得で <field>.search を年別にも効かせる
+                "search_scope": kwargs.get("search_scope"),
             }
 
             while year_count < max_per_year:
@@ -374,8 +468,145 @@ class OpenAlexCollector:
         return all_papers
 
     # ------------------------------------------------------------------
+    # Command-line search (TI=/AB=/TA=/TX=/FT= + AND/OR/NOT + near/adj + wildcard)
+    # ------------------------------------------------------------------
+    def search_command_query(
+        self,
+        raw_query: str,
+        year_from: int = None,
+        year_to: int = None,
+        max_results: int = 200,
+        sort: str = "relevance",
+        min_citations: int = 0,
+        pub_types: list = None,
+        oa_only: bool = False,
+        institution_ids: list = None,
+        has_abstract: bool = False,
+        language: str = None,
+        on_progress: Callable = None,
+        by_year: bool = False,
+        max_per_year: int = 10000,
+    ) -> list[dict]:
+        """コマンドライン検索式で論文を取得する（OpenALEX Collector 互換）。
+
+        2フェーズ方式:
+          ① 検索式を AST に解析し、フィールドに応じた scope（title/abstract/title_and_abstract/
+             all/fulltext）で OpenAlex 候補クエリを構築・取得（OR は代替案に展開、NOT は除外して取得）。
+          ② near/adj・NOT・ワイルドカードを含む場合は、取得した候補をローカルで厳密照合して絞り込む。
+
+        by_year=True のときは、各候補クエリを年別取得（search_by_year）して 10,000 件/クエリ
+        制限を回避する。この場合 max_results は無視し、年範囲全体で一致した論文を全件返す
+        （通常モードの search_by_year と整合）。on_progress は
+        (cand_index, n_cand, year_index, total_years, year, year_count, year_total, all_count) で呼ぶ。
+
+        by_year=False のとき on_progress は (current, total) で呼ぶ（従来通り）。
+
+        Returns: OpenAlex raw 論文 dict のリスト（search() と同形式）。
+        構文エラー時は openalex_query.QueryError を送出する。
+        """
+        import openalex_query as oq
+
+        plan = oq.compile_command_query(raw_query)   # QueryError を送出しうる
+        scope = plan["scope"]
+        cand_queries = plan["candidate_queries"]
+        needs_filter = plan["needs_local_filter"]
+        ast = plan["ast"]
+        default_field = plan["default_field"]
+
+        def _apply_local_filter(plist: list[dict]) -> list[dict]:
+            """② near/adj・NOT・ワイルドカードのローカル厳密照合（必要時のみ）。"""
+            if not needs_filter:
+                return plist
+            out = []
+            for p in plist:
+                title = self._strip_tags(p.get("title", "") or "")
+                abstract = self.reconstruct_abstract(p.get("abstract_inverted_index"))
+                if oq.paper_matches(ast, title, abstract, default_field):
+                    out.append(p)
+            return out
+
+        # 各候補クエリに渡す共通フィルタ引数
+        _kw = dict(
+            sort=sort, min_citations=min_citations, pub_types=pub_types,
+            oa_only=oa_only, institution_ids=institution_ids,
+            has_abstract=has_abstract, language=language,
+        )
+
+        seen = set()
+        papers: list[dict] = []
+        cand_list = [cq for cq in cand_queries if cq]
+        n_cand = max(1, len(cand_list))
+
+        # --- 年別取得モード（候補クエリごとに年別取得し、10,000 件/クエリ制限を回避） ---
+        if by_year:
+            for ci, cq in enumerate(cand_list):
+                def _year_cb(yi, total_years, year, year_count, year_total, cand_count,
+                             _ci=ci, _nc=n_cand):
+                    if on_progress:
+                        # 統合累計 = 確定済み候補ぶん(len(papers)) + 当候補の実時間取得数(cand_count)
+                        on_progress(_ci, _nc, yi, total_years, year,
+                                    year_count, year_total, len(papers) + cand_count)
+                batch = self.search_by_year(
+                    cq, year_from, year_to, max_per_year=max_per_year,
+                    search_scope=scope, on_progress=_year_cb, **_kw,
+                )
+                for p in batch:
+                    pid = p.get("id")
+                    if pid and pid in seen:
+                        continue
+                    if pid:
+                        seen.add(pid)
+                    papers.append(p)
+            return _apply_local_filter(papers)
+
+        # --- 通常モード（年範囲を合算して取得上限まで） ---
+        # ローカル絞り込みがある場合は取り溢れ対策で多めに集める（上限は API 負荷のため抑制）
+        accum_cap = max_results * 4 if needs_filter else max_results
+        for cq in cand_list:
+            results = self.search(
+                cq, year_from=year_from, year_to=year_to,
+                max_results=max_results, search_scope=scope, **_kw,
+            )
+            for p in results:
+                pid = p.get("id")
+                if pid and pid in seen:
+                    continue
+                if pid:
+                    seen.add(pid)
+                papers.append(p)
+            if on_progress:
+                on_progress(min(len(papers), accum_cap), accum_cap)
+            if len(papers) >= accum_cap:
+                break
+
+        return _apply_local_filter(papers)[:max_results]
+
+    # ------------------------------------------------------------------
     # Abstract reconstruction
     # ------------------------------------------------------------------
+    @staticmethod
+    def _strip_tags(s) -> str:
+        """要旨・タイトルに残る HTML/JATS タグの残骸と文字実体参照を除去し、空白を正規化する。
+
+        OpenAlex の abstract_inverted_index やタイトルには <i> / <sub> / <jats:p> 等のタグや
+        &amp; 等の実体参照が混入することがあるため、SBERT 埋め込み前にクリーニングする
+        （参考: OpenALEX Collector の _stripTags 相当）。
+        """
+        if s is None or s == "":
+            return ""
+        s = str(s)
+        # 1) 文字実体参照を先に復元する（&lt;p&gt; → <p>、&#x0D;/&#13; → CR、&amp; → & 等）。
+        #    順序が重要: 先にタグ除去すると、エスケープされたタグ（&lt;p class="..."&gt; 等）が
+        #    後段の復元で <p ...> として復活し残ってしまう。html.unescape は名前付き・10進・16進
+        #    （&#x0D; 等）の全実体を一括復元する。
+        s = html.unescape(s)
+        # 2) HTML/JATS タグを除去（<p>, </p>, <p class="E-JOURNAL...">, <jats:p>, <sub>, <i> 等）。
+        #    数式の "a < b" を誤除去しないよう、開始は英字またはスラッシュに限定する。
+        s = re.sub(r"</?[a-zA-Z][^>]*>", "", s)
+        # 3) 復元された制御文字（CR/LF/タブ・&#x0D; 由来の \r 等）と連続空白を 1 つの空白へ正規化
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
+
     @staticmethod
     def reconstruct_abstract(inverted_index: dict) -> str:
         """OpenAlexのabstract_inverted_indexから原文を復元する
@@ -396,7 +627,7 @@ class OpenAlexCollector:
             for pos in positions:
                 pairs.append((pos, word))
         pairs.sort(key=lambda p: p[0])
-        return " ".join(p[1] for p in pairs)
+        return OpenAlexCollector._strip_tags(" ".join(p[1] for p in pairs))
 
     # ------------------------------------------------------------------
     # Paper transformation
@@ -454,7 +685,7 @@ class OpenAlexCollector:
 
         return {
             "paper_id": paper_id,
-            "title": raw.get("title", "") or "",
+            "title": self._strip_tags(raw.get("title", "") or ""),
             "abstract": abstract,
             "year": raw.get("publication_year"),
             "authors": authors,

@@ -1,0 +1,6 @@
+fonts-ipafont-gothic
+fonts-ipafont-mincho
+fonts-noto-cjk
+fonts-noto-cjk-extra
+chromium
+chromium-driver

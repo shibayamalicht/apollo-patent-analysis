@@ -21,6 +21,14 @@ description: >
 4. **指示の長さで手順を変えない**: ユーザー指示が「レポートを書いて」のように短くても、本 SKILL.md の全手順に従う
 5. **「省略します」と宣言する前に立ち止まる**: 何かを省略する判断をした瞬間、ユーザーに `implementation_plan.md` のコメント or チャットで省略の可否を確認
 
+6. **水増し（同一文の反復）禁止 — 量より固有性が合否を決める**: 「最低◯◯行/◯件」は深さの目安であり、合否は内容の固有性で決まる。**同一文・同一構文の反復、回転する名詞だけ変えた定型文の量産、「○○観点 1, 2, 3…」式の連番見出しで行数・件数を稼ぐことは禁止＝`phase_d_gate.sh` Check 19 で自動不合格**。**反復でなくても、データ（本母集団）を見なくても言える自明な一般論で字数を稼ぐのも水増しに含む**（例:「特許は権利文書である」「定型語は技術的意味を持たない」）。行数が不足する時は、文を繰り返す代わりに ①新しい代表特許（固有の公開番号）②新しい数値根拠 ③別のクロスパターン ④Web調査の裏付け を足す。各段落は本母集団固有の事実（固有の数値・公開番号・クラスタ名・出願人名のいずれか）を最低1つ含めること（理由: 反復・自明な一般論は読者に無価値で、機械ゲートで弾かれる）
+
+7. **本文のスクリプト生成・ゲート回避の禁止**: レポート本文・`deep_dive.typ`・`report.typ` を Python 等のスクリプトでテンプレート生成してはならない（`reports/generate_*.py` のような本文生成スクリプトは `phase_d_gate.sh` Check 19a で自動不合格）。各文は特許群の固有事実に基づく分析として直接書く。「最低行数を満たすための補助文・つなぎ文」を入れてはならない（行数不足＝分析不足。固有の事実を足すか、その章を短く確定する）。**`phase_d_gate.sh` を読んで反復検出を『回避』する目的で、接続詞・語順・文体だけを変えて内容の重複を温存することは禁止**。ゲートは実在する欠陥（重複）を検出している。正しい対処は重複文の削除と固有内容への置換であって、検出のすり抜けではない。**また「最低◯◯行」を満たすために1文ずつ改行して行数を稼ぐのも水増し**＝ゲートは行数(`wc -l`)でなく**非空白文字数**で判定する（Typst では行内改行は描画上スペースで見た目不変・行数は改行で増やせるが文字は増やせない）。「第一の…である。第二の…である。」式の一文一行の羅列でなく、複数文で論証（主張→根拠→示唆）を組む段落を書くこと
+
+8. **工程ナレーション節・後続章への申し送りの禁止**: 「後続分析への接続」「次章への申し送り」のような、**他章でやることのToDoを並べただけのメタ節・段落を作らない＝意味のない水増し**（完成レポートでは各モジュール章が既に存在するため無価値）。「Explorer分析では〜を確認する」「後続のCORE分類で確認する必要がある」式の**前向きの申し送り**も禁止。各章は自章の分析と結論で閉じ、章間連携は『クロスモジュール統合分析』章で行う。他章への言及は「〜で確認された〈事実〉」の**過去形・根拠引用**に限る。`phase_d_gate.sh` **Check 8e** で自動検出 FAIL（→ `analysis/deep_dive_guide.md`「工程ナレーション節を作らない」・`analysis/terminology.md` §1-4）
+
+9. **STOP-GATE はコンテキスト限界でも死守（捏造・先送り厳禁）**: STOP-GATE（Antigravity では該当 Artifact を更新し `<!-- ANTIGRAVITY_REVIEW_REQUIRED -->` を置いて **Artifact Review でユーザー承認を待つ**動作）を**実際に発行する前**に次フェーズへ進んではならない。**STOP-GATE に到達する前にコンテキスト/クォータが限界に近づいたら**: ① `reports/_carryover.md`（＋ brain）に現在地・確定値を保存 → ② ユーザーに「コンテキストが厳しいので一旦タスクを区切ります／`/compact` します。再開後に必ず STOP-GATE（母集団タイプ・分析の立場・別冊・タイトル・重点）を Artifact Review で確認します」と**告げてから**区切る → ③ 再開後、**最初に該当 Artifact を更新して Artifact Review を出す**。**Artifact Review を実際に発行していないのに「ユーザーが承認した／承認が得られなかった」と仮定して進むのは厳禁**（存在しない承認の捏造＝重大違反。`<!-- ANTIGRAVITY_REVIEW_REQUIRED -->` を置いて実際にユーザーが応答するまでフェーズを進めない）。そもそも Phase A のデータ精読で枯渇させないため、統計は **ARTIFACT GATE C の C-1 ワンショットスクリプトで1回だけ算出**し、CSV の試行錯誤・カラム名の探り当て・再読み込みをしない（今までの枯渇の主因）。
+
 このメタルールは下記「トークン効率に関する制約」よりも上位。両者が衝突する場合、本ルールが勝つ。
 
 ## トークン効率に関する制約（ツァーリ・ボンバ対策）
@@ -39,6 +47,52 @@ description: >
 両者が衝突する場合、**ゲート優先**。トークンが足りない場合：
 - Antigravity の `brain` メモリに「Phase A完了時点の要点」「Phase B結論」等を段階的に保存
 - 不足分は再度 `capcom_schema/` から該当セクションのみ部分読み込み
+
+## ⚠️ 大型レポートのフェーズ分割（コンテキスト枯渇・クォータ対策）
+
+CAPCOM のレポート生成は巨大なタスク（patents.csv＋多数のJSON＋prompts読込 → 800行超の report.typ＋6〜7本の deep_dive＋PPTX）で、1スレッド/1タスクで一気に通すとコンテキスト窓を超過しやすい。本フローは**各フェーズの成果物をディスクに書く設計**なので、タスクを分けても続きから再開できる。
+
+**分割実行のしかた**:
+1. `.agents/workflows/` の **フェーズ別ワークフロー（00_master / 01_phase_a / … / 05_phase_d）を1タスク=1フェーズで実行**する（Phase C は1モジュールずつ）。各フェーズ完了で Artifact をレビューし、次タスクへ
+2. 新タスクでは、まず `ls reports/` で完了状況を確認してから続きを実行する:
+   - `reports/_phase_a_decisions.json` あり → Phase A 完了
+   - `reports/<module>_deep_dive.typ` あり → そのモジュールの Phase C 完了
+   - `reports/report.typ` あり → Phase D 統合済み
+3. 各ゲート（`phase_c_gate.sh` / `phase_d_gate.sh`）はディスク状態を見るので、再開後も同じ判定が効く
+4. **クォータ/レート制限**（無償枠は週次リフレッシュで長時間ロックアウトの報告あり）に備え、長時間タスクは中断・再開に強い分割を徹底する
+
+**記憶の引き継ぎ（`reports/_carryover.md`）**: 成果物 `*.typ` と `_phase_a_decisions.json` だけでは Phase B の仮説検証過程・**Web調査の出所(URL/取得日)**・判断理由が新タスクで失われる。Antigravity は brain/Artifact（`implementation_plan.md` の § Confirmed Cross Patterns / § Confirmed Web Research 等）がネイティブ記憶だが、**3ツール共通の跨タスク正本は `reports/_carryover.md`**（矛盾時はこちら優先）。
+- 無ければ `capcom_schema/templates/carryover_template.md` を `reports/_carryover.md` にコピー。新タスク冒頭で通読 → Artifact/brain を再ロードして主記憶を再構築
+- 各 Artifact 確定（クロス確定・Web確定・walkthrough ゲート結果）の直後に `_carryover.md` の該当節へ**要約をミラー**（Artifact にある詳細はポインタのみ・二重の全文転記はしない）。**Web は1件ヒットごとに即 WEB出所台帳へ**
+- **レポート本文へは転載しない**（内部作業メモ）。詳細は `capcom_schema/SKILL.md` §フェーズ間引き継ぎ日誌
+
+**やってはいけない**: 全フェーズを1タスクで一気に通そうとする ／ 本文生成スクリプトを書いて巨大な文字列をコンテキストに抱える（§0 第7項で禁止）。
+
+### 🔄 セッション・チェックポイント（各フェーズ境界で必須・枯渇の予防）
+
+「完走できそうにない」と感じてから分割するのでは遅い（枯渇・クォータ超過は予兆なく起きる）。そこで **各フェーズのキリのいい境界で、ルーチンとしてタスク（セッション）切替を提案して一旦停止する**。対象境界:
+
+- **Phase A 完了**（`reports/_phase_a_decisions.json` 保存後）
+- **Phase B 完了**（エビデンス＋クロス確定後）
+- **Phase C の各モジュール完了ごと**（deep_dive 1本ごと＝最も枯渇しやすい区切り）
+- **Phase D 着手前**（`report.typ` 統合は重いので、その前で一度切る）
+
+各境界で必ず以下を順に実行する:
+
+1. 当該フェーズ/モジュールの **ゲート・Artifact 完了条件を満たしたことを確認**（`phase_c_gate.sh` 等）
+2. **`reports/_carryover.md` を更新**（STATUS=現在地・RESUME=次にやること・直近の固有事実・Web出所台帳。Artifact 確定の要約もミラー）
+3. **ユーザーにチェックポイントを提示して応答を待つ**（テキスト出力だけで満足せず、ユーザーの選択を取得するまで次に進まない）:
+
+   > ✅ **Phase X（／モジュール M）完了・ゲート通過。`reports/_carryover.md` 更新済み。**
+   > ここは安全な区切りです。コンテキスト枯渇・クォータ超過を避けるため、**新しいタスク（セッション）への切り替えを推奨します**。
+   > 新タスクでは `reports/_carryover.md` ＋ Artifact/brain を読んで **次（Phase Y ／ 次モジュール）から自動再開**します。
+   > - 🔄 **新タスクに切替（推奨）**: いまのタスクを閉じ、新規タスクで `ls reports/` ＋ `reports/_carryover.md` を読んで再開
+   > - ▶️ **このまま続行**: コンテキストにまだ余裕がある場合のみ（次の境界で再びチェックポイントを出す）
+   > - 🗜️ **`/compact` で続行**: 同タスクのまま圧縮（軽い選択肢）
+
+4. ユーザーが **切替** を選んだら、現タスクはここで終了してよい（成果物・Artifact・`_carryover.md` はディスク/brain に残る）。**続行/`/compact`** を選んだらそのまま次へ進み、**次の境界で再びチェックポイントを出す**。
+
+**重要**: このチェックポイントは「枯渇しそうな時だけ」ではなく **各境界で必ず出す**（予防が目的）。ユーザーが「最後まで一気に続けて」と明示した場合のみ、以降のチェックポイントを省略してよい。
 
 # APOLLO CAPCOM Skills (Antigravity版)
 
@@ -102,6 +156,19 @@ session_YYYYMMDD_HHMMSS/
 
 ---
 
+## 3.5 環境準備（依存インストール・最初に1回）
+
+レポート生成は **patents.csv の解析に `pandas`、スライド生成に `python-pptx` / `Pillow`** を使う。これらはセッションフォルダ直下の **`requirements-session.txt`** に列挙済み。**Phase A のデータ精読に入る前に、IDE のターミナルで依存を必ず確認・導入すること**（未導入のまま `import pandas` / `import pptx` すると `ModuleNotFoundError`（例: `No module named 'pandas'`）で止まる）:
+
+```bash
+# セッションフォルダ直下で実行（揃っていればスキップ、無ければ一括導入）
+python3 -c "import pandas, pptx, PIL" 2>/dev/null && echo "依存OK" || pip install -r requirements-session.txt
+```
+
+- `pip` が見つからなければ `python3 -m pip install -r requirements-session.txt`。書き込み権限エラーなら末尾に `--user` を付す。
+- 仮想環境を使うなら、セッションフォルダで `python3 -m venv .venv && source .venv/bin/activate` の後にインストールし、以降の `python3` も同じシェルで実行する。
+- ネットワーク制限等で `pip install` が通らない場合は、依存が無いまま分析を始めず、ユーザーに「セッションフォルダで `pip install -r requirements-session.txt` を実行してから再開してください」と伝えて一旦停止する。
+
 ## 4. レポート生成 4フェーズ手順（Artifact駆動）
 
 ### Phase A: ミッション理解 + データ精読
@@ -120,6 +187,7 @@ voyager/mission.json を読み、data/以下のJSONとpatents.csvを把握する
 - § Intent-Logic Divergences（STOP-GATE B 結果、両方指定時）
 - § Data Level 2 Reverse-Read（STOP-GATE C 結果）
 - § Population Type（A/A'/B/C/D）
+- § Narrative Stance（self/competitor/buyer/supplier/neutral、STOP-GATE C-2' 結果）
 - § NEBULA Strategy（STOP-GATE D 結果）
 - § Executive Summary Edition Decision
 
@@ -162,7 +230,7 @@ voyager/mission.json を読み、data/以下のJSONとpatents.csvを把握する
 - [ ] **設計意図を無視した汎用分析は品質不合格**
 
 🛑 **ARTIFACT GATE (サブクエスチョン化) — `query_intent` が指定されている場合のみ必須**:
-- [ ] `implementation_plan.md` § Sub-Questions に 3-5 個の観点を箇条書きで起草（各観点にキーワード 1-3 個を付記）
+- [ ] `implementation_plan.md` § Sub-Questions に 3-5 個の観点を箇条書きで起草（各観点にキーワード 1-3 個を付記）。**確定した立場（`narrative_stance`）の観点で SQ の抜けを点検**（self=自社の弱点・空白／competitor=対象企業の隙・参入余地／neutral=強み・リスク・投資妙味）。`query_intent` を最優先（分析者は通常その立場で母集団を設計済み）
 - [ ] `<!-- ANTIGRAVITY_REVIEW_REQUIRED -->` を配置、**Artifact Review でユーザー確認**
 - [ ] 確定後、`reports/_phase_a_decisions.json` の `sub_questions` に保存
 - [ ] **⚠️ 絶対制約**: サブクエスチョンは**内部メモ専用**。レポート本文に「Q1 / A1 / SQ1 / 問い 1」等の記号・形式は禁止。本文は通常の宣言調で書く（詳細: `terminology.md` §5-A-2）
@@ -176,7 +244,7 @@ voyager/mission.json を読み、data/以下のJSONとpatents.csvを把握する
 - [ ] Critical 検出でも進行可能（ユーザー判断尊重）
 
 1. `voyager/mission.json` を読む（Mission Objective + Evidence 一覧）→ `implementation_plan.md` § Mission Objective に転記
-2. `voyager/context.json` でデータセットのメタ情報と `population_meta` / `capcom_tools` を確認 → § Dataset Context に転記
+2. `voyager/context.json` でデータセットのメタ情報と `population_meta` / `capcom_tools` / `report_directives`（`image_slide_instruction`＝画像・スライドのユーザー指示）を確認 → § Dataset Context に転記
 3. `evidence_list` の全件を走査し、§ Evidence Inventory に一覧表を作成
 4. `snapshots/` のファイル一覧を取得し、Evidence と紐付け
 5. `data/patents.csv` を読む: `head -5` + pandas で出願人上位 10 社・クラスタ別・年別件数把握 → § Dataset Context に記録
@@ -189,6 +257,31 @@ voyager/mission.json を読み、data/以下のJSONとpatents.csvを把握する
 🛑 **ARTIFACT GATE C (データ側からの母集団実態確認 + 母集団タイプ判定) — 必須（全ケースで実施）**:
 
 **C-1. データ Level 2 逆読み**
+
+**⚠️ patents.csv の実カラム（試行錯誤＝コンテキスト枯渇を避けるため最初に把握する）**: `data/patents.csv` は APOLLO 処理済みで、カラムは **処理済み**（`applicant_main`=主出願人 / `inventor_main` / `year`=出願年 / `ipc_main_group` / `cluster` / `cluster_label` / `umap_x`,`umap_y` / `core_技術分類`,`core_課題分類`,`core_解決手段分類`）と **原データ**（`発明名称`〈先頭に BOM あり〉/ `要約` / `出願番号` / `公開番号`）の**混在**。⚠️ **`applicant_main` / `inventor_main` / `ipc_main_group` は `"['キオクシア', '東芝']"` のような Python リストの文字列**なので、集計には `ast.literal_eval` での展開（explode）が必須（しないと共同出願を1社と誤カウントする）。`cluster` は整数、`cluster_label` は `'[3] 半導体記憶, メモリセル, 半導体'` 形式の文字列。**`voyager/context.json` の `column_mapping` は元 CSV 名（`applicant`=出願人 等）で、patents.csv の実カラムとは一致しない**ので照合に使わない。**ステータス（権利状況）列は patents.csv に無い** — 権利化率は `prompts/atlas_*_insight.md` のステータス内訳から読む。
+
+**ワンショット統計スクリプト**（実データで検証済み・出願人HHI 等が正しく出る。BOM 対応 `encoding="utf-8-sig"`、リスト文字列は展開、出力は `.to_string()` で1ブロックに収める。**heredoc の多重実行・カラム名の探り当て・Unicode 正規化の試行は禁止＝今までの枯渇の主因**。結果は § Data Level 2 Reverse-Read に転記）:
+```python
+import pandas as pd, ast
+df = pd.read_csv("data/patents.csv", encoding="utf-8-sig")
+def listcol(col):  # "['A','B']" 形式のリスト文字列を展開する
+    def parse(x):
+        try:
+            v = ast.literal_eval(x) if isinstance(x, str) and x.strip().startswith('[') else x
+            return v if isinstance(v, list) else [v]
+        except Exception:
+            return [x]
+    return df[col].dropna().apply(parse).explode().astype(str).str.strip()
+print("総件数:", len(df), "| 期間:", int(df['year'].min()), "-", int(df['year'].max()))
+ap = listcol('applicant_main')
+print("\n[上位出願人]\n", ap.value_counts().head(10).to_string())
+sh = ap.value_counts(normalize=True); print("\n出願人HHI:", round((sh**2).sum(), 4))
+print("\n[年別件数]\n", df['year'].value_counts().sort_index().to_string())
+print("\n[上位IPC]\n", listcol('ipc_main_group').value_counts().head(10).to_string())
+print("\n[クラスタ別件数]\n", df.groupby(['cluster','cluster_label']).size().to_string())
+```
+（権利化率や Fターム等、patents.csv に無い指標は `prompts/` のインサイトや `data/*.json` から得る。CSV を何度も読み直さない）
+
 - [ ] `analysis/query_logic_reading.md` §5 の **Level 2 項目**を算出し、`implementation_plan.md` § Data Level 2 Reverse-Read に記入:
   - 総件数・対象期間・使用 DB / 上位 10 出願人・シェア / 主要 IPC/FI 上位 10 / 出願年分布 / 出願人集中度 HHI / 国・地域分布
 - [ ] **自動偏り警告**: 上位 1 社 30% 超 / 上位 1 IPC 40% 超 / 直近 2 年 50% 超集中 / HHI > 0.25 / 特定国 95% 超 を検出
@@ -199,11 +292,27 @@ voyager/mission.json を読み、data/以下のJSONとpatents.csvを把握する
   - 判定目安: 上位 1 社 > 90% → C / 上位 5 社で 95% 超 → B / 上位 10 社 40-70% → A' / 上位 10 社 < 40% → A / 複合的絞り込み + 上位 10 社 > 70% → D
 - [ ] タイプ C では出願人 HHI 算出無意味（HHI=1.0）、タイプ B/C/D では「市場集中」「業界シェア」等の **市場・業界解釈は禁止**（`population_type_metrics.md` §3）
 
+**C-2'. 分析の立場（叙述スタンス）判定 — 母集団タイプとは独立に必ず判定**
+
+母集団タイプ（データの構成）と「**誰の意思決定のためのレポートか**（＝提言・主張を語る立場）」は**別物**。母集団が単一企業（タイプ C）でも読者＝依頼主は対象企業自身とは限らず、競合・投資家・アナリストのこともある。**`population_type` が C だからといって対象企業を自動的に「当社」と呼んではならない**（取り違えると、対象企業を勝手に「当社」と書く／中立であるべき評価が当事者寄りになる、といった誤りが生じる）。
+- [ ] `query_intent` / Mission Objective から **分析の立場** を 5 分類で推定し、`implementation_plan.md` § Narrative Stance に記入:
+  - **self**（自社視点・当事者本人）: 対象企業を「当社」と呼ぶ／一人称可。手がかり: `query_intent` に「自社」「当社」「我々の」
+  - **competitor**（競合視点・水平）: 対象企業を企業名で三人称（「キオクシアは」）。一人称は読み手＝競合自身を指す時のみ。手がかり: 「競合」「ベンチマーク」「対抗」
+  - **buyer**（**自社＝買い手／対象＝供給元**。自社が対象から仕入れる。例: 自社=Apple・対象=キオクシア）: 対象を三人称。手がかり: 「調達」「サプライヤー選定」「供給元」「仕入れ」
+  - **supplier**（**自社＝供給元／対象＝顧客**。自社が対象に納入する。例: 自社=東京エレクトロン・対象=キオクシア）: 対象を三人称。手がかり: 「販売先」「納入先」「顧客の技術動向」
+  - ※**コードは常に『自社の役割』**（buyer=自社が買い手／supplier=自社が供給元。対象は相手方）。「buyer=対象が買い手」ではない。判別は取引の向き（自社が対象から買う→buyer／自社が対象に売る→supplier）
+  - **neutral**（中立・投資家・アナリスト）: 対象企業を企業名で三人称／一人称「当社」不可。手がかり: 「投資判断」「評価」「調査」や立場の記述なし（**既定**）
+- [ ] **手がかりが弱ければ `neutral` を仮置きし、C-3 の Artifact Review で必ずユーザーに確認**（勝手に self にしない）
+- [ ] 確定した立場は提言・主張・エグゼクティブサマリー・別冊の**全セクションで一貫**させる。**呼称だけでなく分析の力点・提言のロジックも立場に合わせる**（`self`=自社の打ち手／`competitor`=競合の対抗・参入／`buyer`=調達戦略・依存リスク／`supplier`=供給戦略・内製化リスク／`neutral`=第三者の評価・予測。同じ事実でも読み方と打ち手が変わる＝呼称を三人称にしただけの「べき論」にしない）。`self` 以外では対象企業を三人称で呼び「当社/弊社/我が社」を使わない（詳細は `terminology.md` の「分析の立場」節 §6-2-B）
+- [ ] **立場が `competitor` / `buyer` / `supplier`（関係性立場・自社 ≠ 対象）なら「自社（分析を行う側）」を特定（必須）**: 対象企業（`subject_company`）だけでなく分析を行う**自社名**を C-3 で尋ね `implementation_plan.md` § Narrative Stance と `narrative_stance.own_company` に記録。自社は Phase B で **Web 調査**し（事業・製品・技術/特許ポジション・市場での立ち位置）、対象企業と対比する（提言を一般論でなく「自社は X が強く／Y が手薄 → Z で差別化・参入。buyer=調達戦略／supplier=供給戦略」に具体化）。`buyer`/`supplier` の依存・交渉力は、母集団がドメイン（タイプ A/A'/B）なら出願人 HHI・上位集中で、**単一企業（タイプ C。例: キオクシア）では HHI 無意味なので Web 調査（市場シェア・取引構造）で**読む（**特許 ≠ 市場**）。`self`=`subject_company` が自社／`neutral`=自社なし（空）（詳細: `data_notes.md` §3、`terminology.md` §6-2-B）
+
 **C-3. Artifact Review**
-- [ ] `<!-- ANTIGRAVITY_REVIEW_REQUIRED -->` を配置、**Artifact Review でデータ実態 + タイプ推定を確認**（✅ 進める / ✏️ タイプ変更 / 💬 偏りあり・範囲と限界に明記 / 🔙 再抽出）
+- [ ] `<!-- ANTIGRAVITY_REVIEW_REQUIRED -->` を配置、**Artifact Review でデータ実態 + タイプ推定 + 分析の立場推定（self/competitor/buyer/supplier/neutral とその根拠）を確認**（✅ この実態・タイプ・立場で進める / ✏️ タイプ変更 / 👤 立場が違う（自社／競合／取引先・買い手／サプライヤー／中立を指定）/ 💬 偏りあり・範囲と限界に明記 / 🔙 再抽出）。※関係性立場（competitor/buyer/supplier）なら分析を行う『自社』の社名も確認する旨を明示
+- [ ] **⚠️ 立場の選択肢を提示する時は（`task.md`/`implementation_plan.md` のレビュー選択肢でも）必須**: **competitor / buyer / supplier を『その他』に畳まない**。「①中立(推奨) ②自社視点 ③競合視点 ④取引先・買い手／サプライヤー視点」を明示し、③④選択時に＋**自社名**を続けて確認する。**④は buyer/supplier の語で迷わせず取引の向きで訊く**:「自社が対象から**仕入れる**→buyer(対象=供給元)／自社が対象に**売る**→supplier(対象=顧客)」。**単一企業母集団（タイプ C）でも 5 立場すべて有効**（self/neutral だけと決めつけない）
+- [ ] **立場が `competitor` / `buyer` / `supplier`（関係性立場）に確定したら続けて自社名を尋ねる（必須）**: 未取得時は追加の Artifact Review で「本分析を行う『自社』（対象企業の {競合／取引先・買い手／サプライヤー} として提言を導く主体）の社名は？」を確認し `narrative_stance.own_company` に保存。**Phase B の § Web Research Themes に「自社（{own_company}）の事業・技術・特許ポジション」を必ず含める**。ユーザーが「伏せる／一般的な視点でよい」なら `own_company` は空文字にし 1 行報告して従来どおり進める
 
 **C-4. `reports/_phase_a_decisions.json` への保存**
-- [ ] 確定内容を以下のフィールドで保存: `population_type` / `query_intent_summary` / `sub_questions` / `query_logic_structure` / `intent_logic_divergences` / `data_level2_warnings` / `forbidden_expressions` / `nebula_strategy` / `user_notes`（詳細: `population_type_metrics.md` §4-3）
+- [ ] 確定内容を以下のフィールドで保存: `population_type` / **`narrative_stance`**（`code`=self/competitor/buyer/supplier/neutral / `label` / `subject_company` / `own_company`（competitor/buyer/supplier で分析を行う自社名。self は subject_company と同一、neutral・伏せる場合は空）/ `first_person_allowed`（self のみ true）/ `reasoning` / `confirmed_by_user`）/ `query_intent_summary` / `sub_questions` / `query_logic_structure` / `intent_logic_divergences` / `data_level2_warnings` / `forbidden_expressions` / `nebula_strategy` / `user_notes`（詳細: `population_type_metrics.md` §4-3、`narrative_stance` は `terminology.md` §6-2-B）
 
 🛑 **ARTIFACT GATE D (NEBULA 戦略判定) — 必須（全ケースで実施）**:
 - [ ] `data/nebula_*.json` の存在確認
@@ -214,7 +323,7 @@ voyager/mission.json を読み、data/以下のJSONとpatents.csvを把握する
 - [ ] `<!-- ANTIGRAVITY_REVIEW_REQUIRED -->` を配置、**Artifact Review でモード選択**を待機
 - [ ] 確定結果を `_phase_a_decisions.json` の `nebula_strategy` に保存
 
-→ **完了条件**: `implementation_plan.md` の Phase A 関連セクションすべて完成（Mission / Dataset / Evidence / Insights / Population Meta / query_logic Reading / query_intent 3-Point / Sub-Questions / Divergences / Level 2 / Population Type / NEBULA Strategy / Executive Summary Decision） / `task.md` Phase A 全チェック / `reports/_phase_a_decisions.json` 永続化
+→ **完了条件**: `implementation_plan.md` の Phase A 関連セクションすべて完成（Mission / Dataset / Evidence / Insights / Population Meta / query_logic Reading / query_intent 3-Point / Sub-Questions / Divergences / Level 2 / Population Type / Narrative Stance / NEBULA Strategy / Executive Summary Decision） / `task.md` Phase A 全チェック / `reports/_phase_a_decisions.json` 永続化
 
 ### Phase A-2: レポートタイトルの決定 🛑 ARTIFACT GATE
 
@@ -262,6 +371,7 @@ voyager/mission.json を読み、data/以下のJSONとpatents.csvを把握する
 
 🛑 **STOP-GATE 2 (Web調査の意思確認)**
 
+- [ ] **`narrative_stance` を確認 — 立場が `competitor` / `buyer` / `supplier`（関係性立場）かつ `own_company` が非空なら（下記モード問わず必須）**: § Web Research Themes に「**自社（{own_company}）の事業・主要製品・技術/特許ポジション・市場での立ち位置**」を必ず1件含める。対象企業（`subject_company`）との対比材料であり、提言を「自社は X が強く／Y が手薄 → …」と具体化する土台。buyer/supplier の依存・交渉力は母集団がドメイン（A/A'/B）なら HHI で、**単一企業（タイプ C）では HHI 無意味なので Web 調査（市場シェア・取引構造）で**読む（特許≠市場）。出所は脚注（サイト名・URL・取得日）を付し、最低1章で自社 vs 対象企業の対比に使う（`data_notes.md` §3、`terminology.md` §6-2-B）
 - [ ] **`reports/_phase_a_decisions.json` の `nebula_strategy.selected_mode` を確認**し、モード別に対応:
 
 **モード `execute`（NEBULA 実行済み）**:
@@ -305,6 +415,7 @@ voyager/mission.json を読み、data/以下のJSONとpatents.csvを把握する
 
 🛑 **STOP-GATE (リファレンス読了 + 計画確認)**
 - [ ] `capcom_schema/analysis/deep_dive_guide.md` を読了 → 各 Step の必須セクション数・最低行数把握
+- [ ] （予約）各 deep_dive の「統合的戦略インサイト」節の執筆**直前**に `capcom_schema/analysis/structured_techniques.md` §1 を読む（ACH＝対立仮説の検討。deep_dive 側は推奨・結論章では必須）
 - [ ] `implementation_plan.md` § Deep Dive Plan にテーブル形式で記載（Step / モジュール / 最低行数 / 必須セクション数）
 - [ ] **Artifact Review: ユーザーが Deep Dive Plan を承認**（コメント or ✅）
 
@@ -346,6 +457,7 @@ exemplars を参照し、全モジュールのdeep_dive.typを生成する。Pha
 🛑 **STOP-GATE (リファレンス読了 + 構成確認)**
 - [ ] `capcom_schema/analysis/report_structure.md` を読了 → 章構成・deep_dive コピールール把握
 - [ ] `capcom_schema/analysis/quality_checklist.md` を読了 → 定量チェックコマンド・全チェック項目把握
+- [ ] `capcom_schema/analysis/structured_techniques.md` を読了 → ACH・リンチピン・三つの環（結論・提言章で必須。`phase_d_gate.sh` Check 30/31/33/34 が検査）
 - [ ] `implementation_plan.md` § Report Structure & Quality Plan を完成
 - [ ] **Artifact Review: ユーザーが Report Plan を承認**
 
@@ -439,18 +551,24 @@ target = df[df['cluster'] == 3][['title', 'applicant_main', 'year']].head(20)  #
 - `kpi-card("ラベル", "値", note: "補足")` — KPIカード（**ドル記号禁止**）
 - `evidence-box(番号, "タイトル")[...]` — Evidenceボックス
 - `insight-box[...]` — Key Insightボックス
+- `point-lead[...]` — **要点ストリップ**（番号セクション見出し直後に置く結論先出し1〜2行＝走査層。散文の上に重ねる。散文の代替ではない）
+- `hl[...]` — インライン強調（数値以外のキーワードを選択的に。1セクション数語まで。多用禁止）
 - `snapshot-figure("パス", caption: "説明")` — スナップショット画像
 - `styled-table(columns: ..., header: (...), ..body)` — BCG風テーブル
 - `conclusion-box("タイトル")[本文]` — 主要結論
 - `recommendation-card("高", "タイトル", "説明", timeframe: "短期")` — 優先度付き推奨
 
+> 📐 **読みやすさ（走査層）— 詳細は `analysis/deep_dive_guide.md`「読みやすさ（走査層）」**: ①**各番号セクション冒頭に `#point-lead[...]` を1個**置き結論を1〜2行で先出し（散文は下にそのまま＝薄くしない）②**数値＋単位はテンプレートが自動で太字強調**＝**手動で数字を太字化しない**③余白・見出しバーも自動。要点だけ書いて散文を削るのは Check 1（文字数）で不合格。
+
 **注意**: `report_style.typ` のフォント設定を変更しないこと。画像パスは `reports/` からの相対パス。`--root ".."` 必須。
 
 ### python-pptx PPT
-- `capcom_schema/templates/apollo_template.pptx` + `slides_spec.md` を参照
-- フォント: `Meiryo UI` 統一
-- 可視化ファースト（チャートが主役）
-- 推奨25-40枚、同タイプ3枚連続禁止
+> ⚠️ **PPTX は `capcom_schema/templates/slides_spec.md` が唯一の正**（本節は要約）。Section 0〜6 を設計ガイド（いつ・どのヘルパーを・どんな主張骨格で使うか）として熟読し、矛盾したら slides_spec を採用。
+- **🔑 ヘルパー関数は `apollo_slides.py` を import して使う（コピーしない）**: 生成スクリプトの冒頭で `import sys; sys.path.insert(0, "capcom_schema/templates"); from apollo_slides import *` し、`add_title_shape` / `add_sub_message` / `add_kpi_slide` / `add_matrix_2x2_slide` / `add_arrow_flow_slide` / `add_donut_slide` / `add_issue_tree_slide` 等を呼ぶ（`slides_spec.md` から写経しない）。**自前で pptx のフォント・色・レイアウトを書き起こさない**。フォント（**Noto Sans JP**）・多段ウェイト（見出し=Black / サブメッセージ=Medium / 本文=Regular / 出典=Light）・上下中央寄せ・箱の充填はヘルパー内蔵（自前実装は単一ウェイト・平板の原因）
+- **🔑 デッキは完成レポート `reports/report.typ` を土台に**（evidence の寄せ集め禁止）。各章の主張→根拠→示唆を凝縮し章順に沿わせる（§0.9）
+- **出所**: モジュール名や `report.typ` 等のファイルパスを出所にしない（特許データ由来＝データセット名／事業ファクト＝Web 実出所）。タイトルに「～」副題を使わない・過剰修辞禁止
+- チャート+注釈 50%以上 / 同タイプ 3 枚連続禁止 / 推奨 25〜35 枚 / 出力 `reports/presentation.pptx`
+- 完了後 `bash capcom_schema/scripts/phase_d_gate.sh`（Check 16 PPTX 機械チェック）を実行。別冊は `executive_summary_guide.md` に従い **8〜12 ページ**（薄い別冊は不合格）
 
 ---
 

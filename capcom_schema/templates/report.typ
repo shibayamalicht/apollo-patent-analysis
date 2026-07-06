@@ -15,11 +15,13 @@
 )
 
 // --- 目次 ---
-#outline(
+// 必ず no-num-hl(...) で包む。包まないと、見出し中の「数値＋単位」が
+// 本文用の自動強調（navy 太字）で再マッチされ、目次の一部だけ色が不揃いになる。
+#no-num-hl(outline(
   title: [目次],
   indent: 1.5em,
   depth: 2,
-)
+))
 
 // ==================================================================
 // ここからレポート本文を記述
@@ -49,7 +51,7 @@
   // Evidence 1 の説明・分析
 
   // スナップショット画像を挿入する場合:
-  // #snapshot-figure("../snapshots/voyager_ev1_0.png", caption: "出願推移グラフ")
+  // #snapshot-figure("../snapshots/atlas_trend_snap.png", caption: "出願推移グラフ")
 ]
 
 == セクション2
@@ -64,7 +66,7 @@
 )
 
 #insight-box[
-  // 重要な発見をハイライト
+  // 重要な要点をハイライト
 ]
 
 #note-box[

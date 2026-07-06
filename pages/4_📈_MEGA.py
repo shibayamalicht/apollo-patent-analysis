@@ -50,8 +50,8 @@ if FONT_PATH:
 # --- 2. ページ設定 ---
 # ==================================================================
 st.set_page_config(
-    page_title="APOLLO v8 | MEGA",
-    page_icon="📈",
+    page_title="APOLLO v9 | MEGA",
+    page_icon=utils.module_icon("mega"),
     layout="wide"
 )
 
@@ -126,7 +126,7 @@ def extract_compound_nouns(text, stopwords_list):
     text = normalize_text(text)
     text = apply_ngram_filters(text)
     text = re.sub(r'【.*?】', '', text)
-    text = re.sub(r'[!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~]', ' ', text)
+    text = re.sub(r'[!"#$%&\'()*+,\-./:;<=>?@\[\\\]^_`{|}~]', ' ', text)
 
     try:
         tokens = t.tokenize(text)
@@ -167,14 +167,10 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_k
     word_freq = Counter(words)
 
     try:
-        wc = WordCloud(
-            width=800, height=400, background_color='white',
-            font_path=font_path, collocations=False,
-            max_words=100
-        ).generate_from_frequencies(word_freq)
+        wc_array = utils.compute_wordcloud_array(tuple(sorted(word_freq.items())), font_path)
 
         fig, ax = plt.subplots(figsize=(12, 6))
-        ax.imshow(wc, interpolation='bilinear')
+        ax.imshow(wc_array, interpolation='bilinear')
         ax.set_title(title, fontsize=20)
         ax.axis('off')
         st.pyplot(fig)
@@ -201,8 +197,9 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_k
                     fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
                     buf.seek(0)
                     capcom.save_snapshot_image(f"{capcom_key}_wordcloud", buf.read())
-            except Exception:
-                pass
+            except Exception as e:
+                # 保存失敗を握りつぶさず可視化する。
+                st.caption(f"⚠️ ワードクラウドの CAPCOM 保存に失敗しました（要確認）: {e}")
 
         # VOYAGERスナップショットボタン
         if capcom_key:
@@ -223,18 +220,6 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_k
         st.error(f"ワードクラウドの描画に失敗しました: {e}")
         if font_path is None:
             st.warning("日本語フォントが見つかりませんでした。")
-
-# ==================================================================
-# --- 4. 共通デザイン設定 (CSS) ---
-# ==================================================================
-
-
-# ==================================================================
-# --- 5. デザインテーマ管理 ---
-# ==================================================================
-
-
-
 
 
 # ==================================================================
@@ -328,7 +313,7 @@ def convert_df_to_csv(df):
 
 utils.render_sidebar()
 
-st.title("📈 MEGA")
+utils.module_header("mega", "MEGA")
 st.markdown("CAGR×活動量の4象限プロットで出願人・技術分野の成長ポジションを特定し、軌跡追跡でトレンドの変遷を読み解きます。")
 
 # ==================================================================
@@ -368,15 +353,15 @@ with tab_b:
         axis_options = [('出願人', 'applicant_main'), ('IPC (メイングループ)', 'ipc_main_group')]
         if st.session_state.col_map.get('fterm'): axis_options.append(('Fターム (テーマコード)', 'fterm_main'))
         analysis_axis = st.selectbox("分析軸:", options=axis_options, format_func=lambda x: x[0], key="mega_analysis_axis")
-        yaxis_slider = st.slider("Y軸 (現在) の集計年数:", min_value=1, max_value=10, value=5, key="mega_yaxis")
-        cagr_end_year = st.number_input("X軸 (過去の勢い) 計算の最終年:", value=datetime.datetime.now().year - 1, key="mega_cagr_year")
+        yaxis_slider = st.slider("Y軸 (現在) の集計年数:", min_value=1, max_value=10, value=5, key="mega_yaxis", help="4象限の「現在の活動量（Y軸）」を直近何年分の出願件数で測るかです。短くすると足元の勢いを、長くすると中期的な活動量を反映します。")
+        cagr_end_year = st.number_input("X軸 (過去の勢い) 計算の最終年:", value=datetime.datetime.now().year - 1, key="mega_cagr_year", help="「過去の勢い（X軸）」の成長率を計算する基準となる最終年です。この年までのデータで勢いを算出します。")
     with col2:
-        trajectory_past = st.number_input("軌跡 (過去への遡り年数):", min_value=1, value=5, key="mega_trajectory")
-        min_patents = st.number_input("最小フィルタ件数 (描画対象):", min_value=1, value=10, key="mega_min_patents")
+        trajectory_past = st.number_input("軌跡 (過去への遡り年数):", min_value=1, value=5, key="mega_trajectory", help="注目企業が4象限のどこからどこへ移動したか、その軌跡を何年前から辿って描くかです。長くするほど長期の移動経路が見えます。")
+        min_patents = st.number_input("最小フィルタ件数 (描画対象):", min_value=1, value=10, key="mega_min_patents", help="4象限に描画する最小の出願件数です。これ未満の小規模な出願人を除外し、主要プレイヤーに絞ってノイズを減らします。")
 
     st.subheader("ハイライトと軌跡")
     highlight_options = st.session_state.get("mega_highlight_options", [])
-    highlight_targets = st.multiselect("注目対象 (軌跡を表示):", options=highlight_options, format_func=lambda x: x[0])
+    highlight_targets = st.multiselect("注目対象 (軌跡を表示):", options=highlight_options, format_func=lambda x: x[0], help="象限移動の軌跡を強調表示する出願人を選びます。選んだ企業の戦略変化（成長/衰退への移動）を追えます。")
 
     st.subheader("動態分析マップ実行")
     if st.button("動態分析マップを描画", type="primary", key="mega_run_map"):
@@ -463,6 +448,10 @@ with tab_b:
         current_color_map = {st.session_state.mega_group_map_custom.get(k, k): v for k, v in base_color_map.items()}
         
         axis_label = st.session_state.mega_axis_label
+        # axis_col も session_state から復元する。axis_col は「描画ボタン押下時」(L370付近)のみ
+        # 定義されるローカル変数で、ボタンを押さない再描画では未定義になり、後続の CAPCOM 保存
+        # （軸別ファイル名 mega_momentum_<軸>.json）で NameError になっていた。
+        axis_col = st.session_state.get('mega_axis_col', '')
         cagr_start = int(st.session_state.get('cagr_start_year_min', 2000))
         cagr_end = int(st.session_state.get('cagr_end_year_val', datetime.datetime.now().year))
         xaxis_title_label = f"過去の勢い (CAGR, {cagr_start}-{cagr_end}年内の活動期間)"
@@ -502,21 +491,26 @@ with tab_b:
             if not df_filt.empty:
                 df_filt['Y_Present_Plot'] = df_filt['Y_Present'].replace(0, 0.1)
                 
+                # reset_index で軸の値（出願人名/IPC 等）が mega_axis_label 名の列として復活する。
+                # クリック時にこの値を取得できるよう custom_data に追加（customdata[1]）。
+                _axis_label_col = st.session_state.mega_axis_label
                 fig = px.scatter(
-                    df_filt.reset_index(), 
-                    x='X_Present', 
+                    df_filt.reset_index(),
+                    x='X_Present',
                     y='Y_Present_Plot',
-                    size='Bubble_Present', 
-                    size_max=60, 
-                    color='Group_Custom', 
-                    color_discrete_map=current_color_map, 
-                    hover_name=st.session_state.mega_axis_label, 
+                    size='Bubble_Present',
+                    size_max=60,
+                    color='Group_Custom',
+                    color_discrete_map=current_color_map,
+                    hover_name=_axis_label_col,
                     log_y=True,
-                    custom_data=['Group_Custom']
+                    custom_data=['Group_Custom', _axis_label_col]
                 )
                 fig.update_traces(hovertemplate=_get_hover_template_mode2())
 
         fig.add_vline(x=st.session_state.mega_x_threshold, line_width=1, line_dash="dash", line_color="gray")
+        # 注: plotly は対数軸でも add_hline/add_vline の座標を自動で log10 変換する。
+        # 生値（mega_y_threshold）のまま渡すのが正しい（log10 を渡すと二重変換でズレる）。
         fig.add_hline(y=st.session_state.mega_y_threshold, line_width=1, line_dash="dash", line_color="gray")
         
         utils.update_fig_layout(fig, "MEGA 動態分析マップ", height=800, show_axes=True, show_legend=False)
@@ -529,8 +523,47 @@ with tab_b:
             yaxis=dict(showgrid=True, zeroline=False, showline=True)
         )
         
-        st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+        utils.disable_selection_fade(fig)
+        selection_mega = st.plotly_chart(
+            fig, use_container_width=True, key="mega_map",
+            on_select="rerun", selection_mode="points",
+            config={'editable': False}
+        )
         st.session_state.df_momentum_export = df_to_plot.copy()
+
+        # --- バブルクリック → その軸値（出願人/IPC/Fターム）に該当する特許群をポップアップ ---
+        def _mega_resolve_click(point):
+            # 通常モードのバブルのみ customdata を持つ（軌跡モードの go.Scatter は反応しない）
+            cd = point.get("customdata")
+            if not cd or len(cd) < 2:
+                return None, None
+            axis_value = cd[1]  # 軸の値（出願人名 / IPCメイングループ / Fターム）
+            if axis_value is None or str(axis_value).strip() == "":
+                return None, None
+            axis_value = str(axis_value).strip()
+
+            # 分析軸に応じて df_main のフィルタ列を決定（不明な場合は出願人をデフォルト）
+            _label = st.session_state.get("mega_axis_label", "出願人")
+            if "IPC" in _label:
+                filt_col = "ipc_main_group"
+            elif "Fターム" in _label:
+                filt_col = "fterm_main"
+            else:
+                filt_col = "applicant_main"
+            if filt_col not in df_main.columns:
+                filt_col = "applicant_main"
+
+            # 各軸列はリスト（要素は strip 済み）。クリックした値を含む特許を抽出。
+            def _contains(lst):
+                if isinstance(lst, list):
+                    return any(str(v).strip() == axis_value for v in lst)
+                return False
+
+            indices = df_main[df_main[filt_col].apply(_contains)].index.tolist()
+            dlg_title = f"{_label}: {axis_value}（{len(indices)}件）"
+            return indices, dlg_title
+
+        utils.handle_chart_click_to_records(selection_mega, "mega_map", _mega_resolve_click)
 
         # --- Snapshot: PULSE 4象限マップ ---
         _pulse_summary = f"動態分析マップ: {axis_label}軸\n"
@@ -540,7 +573,7 @@ with tab_b:
         _pulse_snap_data = {
             'module': 'MEGA',
             'type': 'pulse_4quadrant',
-            'chart_data': _pulse_summary + "\n" + df_to_plot[['X_Present', 'Y_Present', 'Bubble_Present', 'Group_Auto']].head(50).to_string(),
+            'chart_data': _pulse_summary + "\n" + utils_ai.df_to_markdown(df_to_plot[['X_Present', 'Y_Present', 'Bubble_Present', 'Group_Auto']].head(50), index=True, index_label='対象'),
         }
         utils.render_snapshot_button(
             title=f"MEGA PULSE: {axis_label}軸 動態分析マップ",
@@ -561,7 +594,7 @@ with tab_b:
         _meta_pulse['象限別件数'] = {str(k): int(v) for k, v in _group_counts.items()}
         _meta_pulse['分析対象数'] = len(df_to_plot)
 
-        _pulse_data_str = df_to_plot[['X_Present', 'Y_Present', 'Bubble_Present', 'Group_Auto']].sort_values('Bubble_Present', ascending=False).head(30).to_string()
+        _pulse_data_str = utils_ai.df_to_markdown(df_to_plot[['X_Present', 'Y_Present', 'Bubble_Present', 'Group_Auto']].sort_values('Bubble_Present', ascending=False).head(30), index=True, index_label='対象')
         _pulse_prompt = utils_ai.generate_ai_insight_prompt(
             role="特許戦略・ポートフォリオ分析の専門家として、CAGR×活動量の4象限動態分析マップを戦略的に分析してください。",
             context="""\
@@ -594,10 +627,11 @@ with tab_b:
                 entities = []
                 for _, row in df_to_plot.iterrows():
                     entities.append({
-                        "name": str(row.get('X_Present', row.name if isinstance(row.name, str) else '')),
-                        "cagr": round(float(row.get('cagr', 0)), 4) if pd.notna(row.get('cagr')) else 0,
-                        "activity": int(row.get('Y_Present', 0)),
-                        "total": int(row.get('Bubble_Present', 0)),
+                        "name": str(row.name),
+                        "cagr": round(float(row['X_Present']), 4) if pd.notna(row.get('X_Present')) else 0,
+                        # NaN を int() に渡すと ValueError になるため NaN 安全化する。
+                        "activity": int(row['Y_Present']) if pd.notna(row.get('Y_Present')) else 0,
+                        "total": int(row['Bubble_Present']) if pd.notna(row.get('Bubble_Present')) else 0,
                         "quadrant": str(row.get('Group_Auto', ''))
                     })
                 mega_json = {
@@ -610,10 +644,14 @@ with tab_b:
                     "entities": entities,
                     "quadrant_summary": {str(k): int(v) for k, v in _group_counts.items()}
                 }
-                capcom.save_data("mega_momentum.json", mega_json)
+                # 軸別ファイル名で保存（出願人/IPC/Fタームを続けて実行しても上書きされない）
+                _axis_suffix = {'applicant_main': 'applicant', 'ipc_main_group': 'ipc',
+                                'fterm_main': 'fterm'}.get(axis_col, 'other')
+                capcom.save_data(f"mega_momentum_{_axis_suffix}.json", mega_json)
                 capcom.save_patents_csv()
         except Exception as e:
-            pass
+            # 失敗を可視化して原因を追えるようにする（保存失敗時も他モジュールの処理は継続）。
+            st.caption(f"⚠️ MEGA データの CAPCOM 保存に失敗しました（要確認）: {e}")
 
 
 # --- C. ドリルダウン分析 (TELESCOPE) ---
@@ -624,11 +662,44 @@ with tab_c:
 
     # --- クラスタリング設定 ---
     st.subheader("クラスタリング設定 (ドリルダウン用)")
-    
+
+    # 🤖 自動最適化（メインと同じ HDBSCAN 2パラメータ掃引をドリルダウンにも）
+    drill_auto_hdbscan = st.checkbox(
+        "🤖 自動最適化（最小クラスタサイズ・最小サンプル数を掃引してサブクラスタ数を適正化）",
+        key="mega_drill_auto_hdbscan",
+        help="ドリルダウン対象の件数に合わせて HDBSCAN の2パラメータを自動で掃引し、サブクラスタ数を適正化します。ONの間は下の手動値は無視されます。")
+    drill_target_k = None
+    if drill_auto_hdbscan:
+        # メインマップと同じく、対象の件数に応じて目標サブクラスタ数を初期化する（suggest_target_k）。
+        # 件数は選択肢ラベルの「(N件)」から取得し、対象を変えるたびに初期値が件数適応されるよう key に対象名を含める。
+        _n_sub = 0
+        for _lbl, _val in drilldown_options:
+            if _val == drilldown_target:
+                _m = re.search(r'\((\d[\d,]*)\s*件\)', _lbl)
+                if _m:
+                    _n_sub = int(_m.group(1).replace(',', ''))
+                break
+        drill_target_k = st.number_input(
+            "目標サブクラスタ数（目安）", min_value=2, max_value=80,
+            value=utils.suggest_target_k(_n_sub), key=f"mega_drill_target_k_{drilldown_target}",
+            help="この数に近づくよう2パラメータを掃引します（対象の件数から自動初期化）。"
+                 "結果のサブクラスタ数や粒度に満足できない場合は、この値を増減して再度「選択対象の技術マップを描画」を押してください。"
+                 "実際の値は密度構造に依存するため、目標ちょうどにならないこともあります（品質 DBCV を優先して選びます）。")
+        utils.render_dbcv_help()
+        # 前回の自動決定を常時再表示（メインマップと同じ挙動）。対象が一致する結果のみ表示する。
+        _dar = st.session_state.get('mega_drill_auto_result')
+        if _dar and _dar.get('target_id') == drilldown_target:
+            _rv = _dar.get('validity')
+            _rv_txt = f"・品質DBCV={_rv:.2f}" if isinstance(_rv, (int, float)) else ""
+            st.info(
+                f"🤖 前回の自動決定: 最小クラスタサイズ=**{_dar['mcs']}** / 最小サンプル数=**{_dar['ms']}** "
+                f"→ サブクラスタ **{_dar['k']}**・ノイズ {_dar['noise'] * 100:.1f}%（目標≈{_dar['target_k']}{_rv_txt}）。"
+                f"　数が合わない/粒度が好みでない場合は上の「目標サブクラスタ数」を変えて再描画してください。")
+
     col1, col2, col3 = st.columns(3)
-    with col1: drill_min_cluster_size = st.number_input('最小クラスタサイズ:', min_value=2, value=5, key="drill_min_cluster_size")
-    with col2: drill_min_samples = st.number_input('最小サンプル数:', min_value=1, value=5, key="drill_min_samples")
-    with col3: drill_label_top_n = st.number_input('ラベル単語数:', min_value=1, value=3, key="drill_label_top_n")
+    with col1: drill_min_cluster_size = st.number_input('最小クラスタサイズ:', min_value=2, value=5, key="drill_min_cluster_size", disabled=drill_auto_hdbscan, help="1つのクラスタとして認める最小の特許件数です（クラスタの粒度設定）。小さくすると細かい技術テーマまで分かれてクラスタ数が増えますが、どこにも属さないノイズ（外れ値）も増えます。大きくすると少数の大まかなクラスタにまとまり安定しますが、細部は埋もれます。目安は母集団の約1〜2%。推奨10〜50。")
+    with col2: drill_min_samples = st.number_input('最小サンプル数:', min_value=1, value=5, key="drill_min_samples", disabled=drill_auto_hdbscan, help="クラスタの「核」と認める密度の厳しさです。大きいほど判定が厳しくなりノイズ（外れ値）が増え、クラスタは密な中心部だけになります。小さいほど緩くなり多くの点が取り込まれます。通常は最小クラスタサイズ以下に設定します。推奨5〜20。")
+    with col3: drill_label_top_n = st.number_input('ラベル単語数:', min_value=1, value=3, key="drill_label_top_n", help="各クラスタの自動命名に使う特徴語の数です。多いほど内容を詳しく表せますが冗長になり、少ないほど簡潔になります。")
 
     if st.button("選択対象の技術マップを描画", type="primary", key="drill_run_map"):
         if drilldown_target == '(分析対象を選択)': st.error("選択してください。")
@@ -651,25 +722,44 @@ with tab_c:
                     umap_res = UMAP(n_components=2, n_neighbors=n_neighbors, min_dist=0.1, random_state=42).fit_transform(emb)
                     df_plot = pd.DataFrame(umap_res, columns=['x', 'y'])
                     
-                    clusterer = hdbscan.HDBSCAN(
-                        min_cluster_size=int(drill_min_cluster_size), 
-                        min_samples=int(drill_min_samples),
-                        metric='euclidean',
-                        cluster_selection_method='eom'
-                    )
-                    cluster_labels = clusterer.fit_predict(df_plot[['x', 'y']].values)
+                    if drill_auto_hdbscan:
+                        _dpb = st.progress(0.0, text="サブクラスタのパラメータを掃引中...")
+                        _dsweep = utils.sweep_hdbscan_params(
+                            df_plot[['x', 'y']].values, target_k=int(drill_target_k),
+                            progress_callback=lambda f: _dpb.progress(min(f, 1.0), text="サブクラスタのパラメータを掃引中..."))
+                        _dpb.empty()
+                        cluster_labels = _dsweep['labels']
+                        # 自動決定の結果を保持し、次回以降も「前回の自動決定」として再表示する（メインマップと同じ）。
+                        st.session_state['mega_drill_auto_result'] = {
+                            'mcs': _dsweep['min_cluster_size'], 'ms': _dsweep['min_samples'],
+                            'k': _dsweep['n_clusters'], 'noise': _dsweep['noise_ratio'],
+                            'target_k': _dsweep['target_k'], 'validity': _dsweep.get('validity'),
+                            'target_id': drilldown_target}
+                        _drv = _dsweep.get('validity')
+                        _drv_txt = f"・品質DBCV={_drv:.2f}" if isinstance(_drv, (int, float)) else ""
+                        st.caption(
+                            f"🤖 自動決定: 最小クラスタサイズ={_dsweep['min_cluster_size']} / 最小サンプル数={_dsweep['min_samples']} "
+                            f"→ サブクラスタ {_dsweep['n_clusters']}・ノイズ {_dsweep['noise_ratio'] * 100:.0f}%（目標≈{_dsweep['target_k']}{_drv_txt}）")
+                    else:
+                        clusterer = hdbscan.HDBSCAN(
+                            min_cluster_size=int(drill_min_cluster_size),
+                            min_samples=int(drill_min_samples),
+                            metric='euclidean',
+                            cluster_selection_method='eom'
+                        )
+                        cluster_labels = clusterer.fit_predict(df_plot[['x', 'y']].values)
                     
                     df_plot['cluster_id'] = cluster_labels
                     df_plot['year'] = df_filtered['year'].values
                     df_plot[col_map['title']] = df_filtered[col_map['title']].values
                     if col_map['abstract']: df_plot[col_map['abstract']] = df_filtered[col_map['abstract']].values
                     
-                    # patiroha.auto_label で c-TF-IDF ラベリング（MEGAドリルダウン）
+                    # utils.safe_auto_label で c-TF-IDF ラベリング（MEGAドリルダウン、Janome 例外耐性付き）
                     mega_drill_texts = (
                         df_plot[col_map['title']].fillna('') + ' ' +
                         df_plot[col_map.get('abstract', '')].fillna('') if col_map.get('abstract') else df_plot[col_map['title']].fillna('')
                     )
-                    label_map = patiroha.auto_label(
+                    label_map = utils.safe_auto_label(
                         mega_drill_texts,
                         df_plot['cluster_id'].values,
                         method='c-tfidf',
@@ -690,11 +780,11 @@ with tab_c:
     if "df_drilldown" in st.session_state:
         df_d = st.session_state.df_drilldown.copy()
         
-        map_mode = st.radio("表示モード:", ["散布図 (Scatter)", "密度マップ (Density)", "クラスタ領域 (Clusters)"], horizontal=True, key="mega_map_mode")
+        map_mode = st.radio("表示モード:", ["クラスタ領域 (Clusters)", "密度マップ (Density)", "散布図 (Scatter)"], horizontal=True, key="mega_map_mode", help="俯瞰図の描き方を切り替えます。クラスタ領域＝色付き領域で表示、密度マップ＝混み具合をヒートマップで表示、散布図＝個々の特許を点で表示。全体像は領域、混雑度は密度、個別確認は散布図が見やすいです。")
         
         c1, c2, c3 = st.columns(3)
         with c1:
-            mesh_size = st.number_input("メッシュサイズ (Grid)", 40, 200, 40, step=5, key="mega_mesh")
+            mesh_size = st.number_input("メッシュサイズ (Grid)", 40, 200, 40, step=5, key="mega_mesh", help="密度マップ（ヒートマップ）の格子の細かさです。大きいほど細かい格子で局所的な濃淡が見えますが、まばらだと粗く見えます。小さいほど滑らかで大まかな分布になります。")
             use_abs = st.checkbox("密度スケール固定", False, key="mega_abs") if map_mode == "密度マップ (Density)" else False
         with c2:
             no_noise = st.checkbox("ノイズを除く", False, key="mega_noise")
@@ -702,7 +792,7 @@ with tab_c:
             show_label = st.checkbox("ラベルを表示", True, key="mega_label")
             
         c_t1, c_t2 = st.columns(2)
-        with c_t1: interval = st.selectbox("期間の粒度:", [1, 2, 3, 5], index=2, key="mega_interval")
+        with c_t1: interval = st.selectbox("期間の粒度:", [1, 2, 3, 5], index=2, key="mega_interval", help="トレンドを何年ごとに区切って集計するかです。粗く（大きく）すると大まかな傾向、細かく（小さく）すると年単位の動きが見えます。")
         
         min_y, max_y = df_d['year'].min(), df_d['year'].max()
         bins = pd.date_range(start=f"{int(min_y)}-01-01", end=f"{int(max_y)}-12-31", freq=f'{interval}YE')
@@ -810,10 +900,13 @@ with tab_c:
             'type': 'telescope_drilldown',
             'chart_data': f"ドリルダウン対象: {st.session_state.get('drilldown_target_name', 'N/A')}\n{_drill_cluster_info}",
         }
+        # ドリルダウン対象別の key（静的キーだと対象を切り替えても「保存済み」のまま出るため）
+        _mega_tel_slug = re.sub(r'\s+', '_', str(st.session_state.get('drilldown_target_name', 'target')))[:30] or 'target'
         utils.render_snapshot_button(
             title=f"MEGA TELESCOPE: {st.session_state.get('drilldown_target_name', 'N/A')}",
             description=f"ドリルダウン対象の技術ポートフォリオマップ（UMAP+HDBSCAN）。",
-            key="mega_telescope_snap",
+            key=f"mega_telescope_snap_{_mega_tel_slug}",
+            group="mega_telescope_snap",
             fig=fig,
             data_summary=_drill_snap_data
         )
@@ -822,7 +915,8 @@ with tab_c:
         _meta_drill = utils_ai.build_common_metadata(df_main=df_main, col_map=col_map)
         _meta_drill['ドリルダウン対象'] = st.session_state.get('drilldown_target_name', 'N/A')
         _meta_drill['クラスタ数'] = len(st.session_state.get('sbert_sub_cluster_map_auto', {}))
-        _meta_drill['分析対象件数'] = len(df_d) if 'df_d' in dir() else 0
+        # df_d はこのブロック冒頭（df_drilldown 取得時）で必ず定義済み。
+        _meta_drill['分析対象件数'] = len(df_d)
 
         _drill_prompt = utils_ai.generate_ai_insight_prompt(
             role="技術戦略・特許ランドスケープの専門家として、ドリルダウン分析による技術クラスタの構造を分析してください。",
@@ -850,22 +944,16 @@ UMAP+HDBSCANによるクラスタリングマップを表示しています。
             import capcom
             if capcom.is_active() and 'cluster_id' in df_d.columns:
                 drill_clusters_json = []
+                # 代表特許（重心に近い3件）をクラスタIDごとに一括取得（埋め込みは関数内で session_state から取得）
+                _reps_by_cid = utils.get_cluster_representatives(df_d, cluster_col='cluster_id', n_reps=3)
                 for _cid in sorted(df_d['cluster_id'].unique()):
                     _grp = df_d[df_d['cluster_id'] == _cid]
                     _label = st.session_state.sbert_sub_cluster_map_auto.get(_cid, str(_cid))
-                    # 代表特許（重心に近い3件）
-                    _reps = []
-                    if embeddings is not None:
-                        _reps = utils.get_cluster_representatives(
-                            _grp, embeddings, df_main, col_map,
-                            n=3, title_col=col_map['title'],
-                            abstract_col=col_map['abstract']
-                        )
                     drill_clusters_json.append({
-                        "cluster_id": int(_cid),
+                        "cluster_id": int(_cid) if pd.notna(_cid) else -1,
                         "label": _label,
                         "count": len(_grp),
-                        "representatives": _reps
+                        "representatives": _reps_by_cid.get(_cid, [])
                     })
                 mega_drill_json = {
                     "metadata": {
@@ -876,10 +964,14 @@ UMAP+HDBSCANによるクラスタリングマップを表示しています。
                     },
                     "clusters": drill_clusters_json
                 }
-                capcom.save_data("mega_drilldown.json", mega_drill_json)
+                # 対象別ファイル名で保存（複数対象を続けてドリルダウンしても上書きされない）
+                _drill_tgt = str(st.session_state.get('drilldown_target_name', 'N_A'))
+                _drill_slug = re.sub(r'\s+', '_', _drill_tgt).strip('_')[:40] or 'target'
+                capcom.save_data(f"mega_drilldown_{_drill_slug}.json", mega_drill_json)
                 capcom.save_patents_csv()
         except Exception as e:
-            pass
+            # 保存失敗を握りつぶさず可視化する。
+            st.caption(f"⚠️ MEGA ドリルダウンの CAPCOM 保存に失敗しました（要確認）: {e}")
 
         st.subheader("クラスタ・ラベル編集")
         st.markdown("AIを活用してクラスタのラベルを自動提案できます。")
@@ -908,18 +1000,21 @@ UMAP+HDBSCANによるクラスタリングマップを表示しています。
         
         col_tm1, col_tm2 = st.columns(2)
         with col_tm1:
-            cooc_top_n = st.slider("共起: 上位単語数", 30, 100, 70, key="mega_cooc_top_n")
-            cooc_threshold = st.slider("共起: Jaccard係数 閾値", 0.01, 0.3, 0.03, 0.01, key="mega_cooc_threshold")
+            cooc_top_n = st.slider("共起: 上位単語数", 30, 100, 70, key="mega_cooc_top_n", help="ネットワークに表示するキーワード（ノード）の数です。出現頻度の上位から何語を使うかを決めます。多いほど網羅的ですが密集して読みにくく、少ないほど主要語に絞られ見やすくなります。")
+            cooc_threshold = st.slider("共起: Jaccard係数 閾値", 0.01, 0.3, 0.03, 0.01, key="mega_cooc_threshold", help="2つのキーワードを線（エッジ）で結ぶ基準の強さです。共起の強さを0〜1で表すJaccard係数がこの値以上のペアだけを結びます。高くすると強い関係だけが残ってスッキリし、低くすると弱い関係も含め線が増えて密になります。")
         
         if st.button("テキスト分析を実行", key="mega_run_text_mining"):
             with st.spinner("分析中..."):
-                all_text = ""
+                # 文献ごとに抽出して集約（doc_words は共起ネットワークでも再利用し二度抽出を回避）
+                words, doc_words = [], []
                 for _, row in df_in.iterrows():
-                    if col_map['title'] and pd.notna(row[col_map['title']]): all_text += str(row[col_map['title']]) + " "
-                    if col_map.get('abstract') and col_map['abstract'] in row and pd.notna(row[col_map['abstract']]): 
-                        all_text += str(row[col_map['abstract']]) + " "
-                
-                words = extract_compound_nouns(all_text, stopwords)
+                    dt = ""
+                    if col_map['title'] and pd.notna(row[col_map['title']]): dt += str(row[col_map['title']]) + " "
+                    if col_map.get('abstract') and col_map['abstract'] in row and pd.notna(row[col_map['abstract']]):
+                        dt += str(row[col_map['abstract']]) + " "
+                    dw = extract_compound_nouns(dt, stopwords)
+                    words.extend(dw)
+                    doc_words.append(dw)
                 
                 if not words: st.warning("有効なキーワードなし")
                 else:
@@ -931,13 +1026,8 @@ UMAP+HDBSCANによるクラスタリングマップを表示しています。
                     top_words = [w for w, c in word_freq.most_common(cooc_top_n)]
                     pair_counts = Counter()
                     
-                    for _, row in df_in.iterrows():
-                        dt = ""
-                        if col_map['title']: dt += str(row[col_map['title']]) + " "
-                        if col_map.get('abstract') and col_map['abstract'] in row: 
-                            dt += str(row[col_map['abstract']]) + " "
-                        dw = set(extract_compound_nouns(dt, stopwords))
-                        dw = {w for w in dw if w in top_words}
+                    for dw_list in doc_words:
+                        dw = {w for w in set(dw_list) if w in top_words}
                         if len(dw) >= 2:
                             for pair in combinations(sorted(list(dw)), 2): pair_counts[pair] += 1
                     

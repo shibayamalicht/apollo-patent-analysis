@@ -1,6 +1,6 @@
 # APOLLO CAPCOM プロジェクトルール（Antigravity IDE 最優先）
 
-このフォルダは APOLLO v7 の CAPCOM セッション（`session_YYYYMMDD_HHMMSS/`）です。Antigravity IDE の **Artifact-first パラダイム** に沿って戦略レポートを生成します。
+このフォルダは APOLLO v9 の CAPCOM セッション（`session_YYYYMMDD_HHMMSS/`）です。Antigravity IDE の **Artifact-first パラダイム** に沿って戦略レポートを生成します。
 
 本 GEMINI.md は Antigravity での **最優先ルール** です。`AGENTS.md` は GEMINI.md 非対応の派生エディタ用 fallback であり、本ファイルと内容が重複する部分は本ファイルが優先します。
 
@@ -18,6 +18,11 @@
    - `implementation_plan.md` ← `artifacts_templates/implementation_plan.md.tmpl` をコピー
    - `walkthrough.md` ← `artifacts_templates/walkthrough.md.tmpl` をコピー
 3. **3 Artifact を Antigravity に登録**（Review Policy = "Request Review" で動作）
+4. **フェーズ間引き継ぎ日誌 `reports/_carryover.md` を生成**（`capcom_schema/templates/carryover_template.md` をコピー）
+
+> **Artifact と `_carryover.md` の役割分担**: Artifact（`task.md`/`implementation_plan.md`/`walkthrough.md`）は**人間レビュー・作業ビュー**、`reports/_carryover.md` は**3ツール共通の跨タスク正本（再開ポインタ＋Web出所台帳）**。タスク分割・`/compact` でネイティブ記憶が飛んでも `_carryover.md` から復元する。Artifact 確定（クロス確定・Web確定・ゲート結果）の直後に `_carryover.md` の該当節へ要約をミラー（詳細は二重転記せずポインタのみ）。矛盾時は `_carryover.md` を正とする。`_carryover.md` はレポート本文へ転記しない（内部メモ）。
+
+> **🔄 セッション・チェックポイント（各フェーズ境界で必須・枯渇/クォータの予防）**: 各フェーズの区切り（**Phase A完了・Phase B完了・Phase Cの各モジュール完了ごと・Phase D着手前**）で必ず、ゲート/Artifact 通過＋`_carryover.md` 更新の後に「**新タスク（セッション）に切り替えますか？**」と提案して一旦停止する（続行/切替/`/compact` をユーザーが選ぶ）。「枯渇しそうな時だけ」ではなく**予防として各境界で必ず出す**。切替時は新タスクが `_carryover.md`＋Artifact から自動再開。詳細はスキル本体 `### 🔄 セッション・チェックポイント`。
 
 ### Review Policy 必須
 
@@ -66,6 +71,9 @@ bash capcom_schema/scripts/phase_d_gate.sh
 - **サブエージェント起動**: Manager + Browser subagent は本スキル実行中は **起動しない**（Web調査時の Browser subagent のみ Phase B 限定で許可）
 - **patents.csv 全量表示**: `print(df)` / `cat data/patents.csv` 等
 - **deep_dive の圧縮**: Phase D で report.typ に deep_dive をコピーする際、要約・省略は禁止（全文コピー）
+- **水増し（コピペ反復）**: 同一文・同一構文の反復、回転する名詞だけ変えた定型文の量産、「○○観点 1, 2, 3…」式の連番見出しで行数・件数を稼ぐこと。**`phase_d_gate.sh` Check 19 で自動不合格**。行数が足りない時は文を繰り返さず、新しい代表特許（固有の公開番号）・数値根拠・別のクロスパターン・Web裏付けを足す。各段落は前段落と異なる固有の事実を最低1つ含めること
+- **本文のスクリプト生成**: `deep_dive.typ` / `report.typ` を Python 等のスクリプトでテンプレート生成すること（`reports/generate_*.py` は **Check 19a で自動不合格**）。各文は固有の分析として直接書く。「最低行数を満たすための補助文・つなぎ文」も禁止
+- **ゲート回避（specification gaming）**: `phase_d_gate.sh` を読んで反復検出を**すり抜ける目的**で接続詞・語順・文体だけ変えて内容の重複を温存すること。対処は重複の削除と固有内容への置換（末尾22字の重複も Check 19 で検出）
 - **bash Gate スキップ**: `phase_c_gate.sh` / `phase_d_gate.sh` の実行を省略するのは絶対禁止
 
 ---
@@ -78,7 +86,7 @@ session_YYYYMMDD_HHMMSS/               ← cwd
 │   ├── SKILL.md                       # Claude Code用（Antigravity では参照のみ）
 │   ├── analysis/                      # 分析手法ガイド（9ファイル）
 │   ├── references/                    # モジュール別スキーマ（10ファイル）
-│   ├── exemplars/                     # deep_dive 執筆見本（5 Typst）
+│   ├── exemplars/                     # deep_dive 執筆見本（7 Typst）
 │   ├── templates/                     # Typst / PPT テンプレート
 │   └── scripts/                       # bash 品質ゲート
 ├── data/                              # patents.csv + モジュールJSON

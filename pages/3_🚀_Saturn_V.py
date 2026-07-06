@@ -44,8 +44,8 @@ warnings.filterwarnings('ignore')
 # --- 1. ページ設定 ---
 # ==================================================================
 st.set_page_config(
-    page_title="APOLLO v8 | Saturn V", 
-    page_icon="🚀", 
+    page_title="APOLLO v9 | Saturn V", 
+    page_icon=utils.module_icon("saturnv"), 
     layout="wide"
 )
 
@@ -54,8 +54,6 @@ st.session_state['current_page'] = 'Saturn V'
 # ==================================================================
 # --- 2. フォント設定 ---
 # ==================================================================
-
-
 FONT_PATH = utils.get_japanese_font_path()
 if FONT_PATH:
     try:
@@ -63,19 +61,6 @@ if FONT_PATH:
         plt.rcParams['font.family'] = prop.get_name()
     except:
         pass
-
-# ==================================================================
-# --- 3. 共通デザイン設定 (CSS) ---
-# ==================================================================
-
-
-# ==================================================================
-# --- 4. デザインテーマ管理 ---
-# ==================================================================
-
-
-
-
 
 # ==================================================================
 # --- 5. テキスト処理関数 ---
@@ -149,7 +134,7 @@ def extract_compound_nouns(text, stopwords_list):
     text = normalize_text(text)
     text = apply_ngram_filters(text)
     text = re.sub(r'【.*?】', '', text)
-    text = re.sub(r'[!\"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~]', ' ', text)
+    text = re.sub(r'[!"#$%&\'()*+,\-./:;<=>?@\[\\\]^_`{|}~]', ' ', text)
 
     try:
         tokens = t.tokenize(text)
@@ -185,14 +170,10 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_k
     if not words: return None
     word_freq = Counter(words)
     try:
-        wc = WordCloud(
-            width=800, height=400, background_color='white',
-            font_path=font_path, collocations=False,
-            max_words=100
-        ).generate_from_frequencies(word_freq)
+        wc_array = utils.compute_wordcloud_array(tuple(sorted(word_freq.items())), font_path)
 
         fig, ax = plt.subplots(figsize=(12, 6))
-        ax.imshow(wc, interpolation='bilinear')
+        ax.imshow(wc_array, interpolation='bilinear')
         ax.set_title(title, fontsize=20)
         ax.axis('off')
         st.pyplot(fig)
@@ -212,8 +193,8 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_k
                     fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
                     buf.seek(0)
                     capcom.save_snapshot_image(f"{capcom_key}_wordcloud", buf.read())
-            except Exception:
-                pass
+            except Exception as e:
+                st.caption(f"⚠️ ワードクラウド の CAPCOM 保存に失敗しました（要確認）: {e}")
 
         # VOYAGERスナップショットボタン
         if capcom_key:
@@ -297,7 +278,7 @@ def get_date_bin_options(df_filtered, interval_years, year_column='year'):
 # --- サイドバー ---
 utils.render_sidebar()
 
-st.title("🚀 Saturn V")
+utils.module_header("saturnv", "Saturn V")
 st.markdown("特許テキストの意味的類似性から技術マップを自動生成。クラスタ構造・ノイズ（萌芽技術）・成長動態を一望します。")
 
 # ==================================================================
@@ -359,33 +340,76 @@ tab_main, tab_drill, tab_stats, tab_export = st.tabs([
 # --- TELESCOPE ---
 with tab_main:
     st.subheader("クラスタリング実行")
+
+    # 🤖 自動最適化モード: HDBSCAN の2パラメータを母集団に合わせて掃引し、クラスタ数を適正化する
+    auto_hdbscan = st.checkbox(
+        "🤖 自動最適化（最小クラスタサイズ・最小サンプル数を掃引してクラスタ数を適正化）",
+        key="main_auto_hdbscan",
+        help="母集団に合わせて HDBSCAN の2パラメータ（最小クラスタサイズ・最小サンプル数）を自動で掃引し、"
+             "クラスタ数が少なすぎ(2,3)も多すぎもしない設定を自動選択します（手動調整が不要になります）。",
+    )
+
     col1, col2, col3 = st.columns([2, 2, 1])
-    with col1: min_cluster_size_w = st.number_input("最小クラスタサイズ (推奨: 10-50):", min_value=2, value=15, key="main_min_cluster_size")
-    with col2: min_samples_w = st.number_input("最小サンプル数 (推奨: 5-20):", min_value=1, value=10, key="main_min_samples")
-    with col3: label_top_n_w = st.number_input("クラスタラベル単語数:", min_value=1, value=3, key="main_label_top_n")
-    
+    with col1: min_cluster_size_w = st.number_input("最小クラスタサイズ (推奨: 10-50):", min_value=2, value=15, key="main_min_cluster_size", disabled=auto_hdbscan, help="1つのクラスタとして認める最小の特許件数です（クラスタの粒度設定）。小さくすると細かい技術テーマまで分かれてクラスタ数が増えますが、どこにも属さないノイズ（外れ値）も増えます。大きくすると少数の大まかなクラスタにまとまり安定しますが、細部は埋もれます。目安は母集団の約1〜2%（例: 2,000件なら20前後）。推奨10〜50。")
+    with col2: min_samples_w = st.number_input("最小サンプル数 (推奨: 5-20):", min_value=1, value=10, key="main_min_samples", disabled=auto_hdbscan, help="クラスタの「核」と認める密度の厳しさです。大きいほど判定が厳しくなり、ノイズ（外れ値）が増えてクラスタは密な中心部だけになります。小さいほど緩くなり、多くの点がクラスタに取り込まれます。通常は最小クラスタサイズ以下に設定します。推奨5〜20。")
+    with col3: label_top_n_w = st.number_input("クラスタラベル単語数:", min_value=1, value=3, key="main_label_top_n", help="各クラスタの自動命名に使う特徴語の数です。クラスタを特徴づける語を上位から何語ラベルに並べるかを決めます。多いほど内容を詳しく表せますが冗長になり、少ないほど簡潔になります。")
+
+    target_k_w = None
+    if auto_hdbscan:
+        _n_pop = len(st.session_state.df_main) if st.session_state.df_main is not None else 0
+        target_k_w = st.number_input(
+            "目標クラスタ数（目安）", min_value=2, max_value=80,
+            value=utils.suggest_target_k(_n_pop), key="main_auto_target_k",
+            help="この数に近づくよう2パラメータを掃引します（母集団規模から自動初期化）。"
+                 "結果のクラスタ数や粒度に満足できない場合は、この値を増減して再度「描画 (再計算)」を押してください。"
+                 "実際の値は密度構造に依存するため、目標ちょうどにならないこともあります（品質 DBCV を優先して選びます）。")
+        utils.render_dbcv_help()
+        if st.session_state.get('main_auto_result'):
+            _ar = st.session_state['main_auto_result']
+            _rv = _ar.get('validity')
+            _rv_txt = f"・品質DBCV={_rv:.2f}" if isinstance(_rv, (int, float)) else ""
+            st.info(
+                f"🤖 前回の自動決定: 最小クラスタサイズ=**{_ar['mcs']}** / 最小サンプル数=**{_ar['ms']}** "
+                f"→ クラスタ数 **{_ar['k']}**・ノイズ {_ar['noise'] * 100:.1f}%（目標≈{_ar['target_k']}{_rv_txt}）。"
+                f"　数が合わない/粒度が好みでない場合は上の「目標クラスタ数」を変えて再描画してください。")
+
     if st.button("描画 (再計算)", type="primary", key="main_run_cluster", disabled=st.session_state.main_cluster_running):
         st.session_state.main_cluster_running = True
-        with st.spinner("HDBSCANクラスタリングを実行中..."):
-            try:
-                embedding = st.session_state.df_main[['umap_x', 'umap_y']].values
-                clusterer = hdbscan.HDBSCAN(min_cluster_size=int(min_cluster_size_w), min_samples=int(min_samples_w), metric='euclidean', cluster_selection_method='eom')
-                clustering = clusterer.fit(embedding)
-                st.session_state.df_main['cluster'] = clustering.labels_
-                
-                # patiroha.auto_label で c-TF-IDF ラベリング
+        try:
+            embedding = st.session_state.df_main[['umap_x', 'umap_y']].values
+            if auto_hdbscan:
+                _pb = st.progress(0.0, text="HDBSCAN パラメータを掃引中...")
+                _sweep = utils.sweep_hdbscan_params(
+                    embedding, target_k=int(target_k_w),
+                    progress_callback=lambda f: _pb.progress(min(f, 1.0), text="HDBSCAN パラメータを掃引中..."))
+                _pb.empty()
+                cluster_labels = _sweep['labels']
+                st.session_state['main_auto_result'] = {
+                    'mcs': _sweep['min_cluster_size'], 'ms': _sweep['min_samples'],
+                    'k': _sweep['n_clusters'], 'noise': _sweep['noise_ratio'],
+                    'target_k': _sweep['target_k'], 'validity': _sweep.get('validity')}
+            else:
+                with st.spinner("HDBSCANクラスタリングを実行中..."):
+                    clusterer = hdbscan.HDBSCAN(min_cluster_size=int(min_cluster_size_w), min_samples=int(min_samples_w), metric='euclidean', cluster_selection_method='eom')
+                    cluster_labels = clusterer.fit_predict(embedding)
+                st.session_state.pop('main_auto_result', None)
+
+            with st.spinner("クラスタのラベリング中..."):
+                st.session_state.df_main['cluster'] = cluster_labels
+
+                # utils.safe_auto_label で c-TF-IDF ラベリング (Janome 例外耐性付き)
                 label_top_n = int(label_top_n_w)
                 texts_for_label = (
                     st.session_state.df_main[col_map['title']].fillna('') + ' ' +
                     st.session_state.df_main[col_map['abstract']].fillna('')
                 )
-                labels_map = patiroha.auto_label(
+                labels_map = utils.safe_auto_label(
                     texts_for_label,
                     st.session_state.df_main['cluster'].values,
                     method='c-tfidf',
                     top_n=label_top_n,
                 )
-                
+
                 st.session_state.df_main['cluster_label'] = st.session_state.df_main['cluster'].map(labels_map)
                 st.session_state.saturnv_labels_map = labels_map.copy()
                 st.session_state.saturnv_labels_map_original = labels_map.copy()
@@ -396,14 +420,14 @@ with tab_main:
                     import capcom
                     if capcom.is_active():
                         capcom.save_patents_csv()
-                except Exception:
-                    pass
-                st.success("クラスタリング完了")
-                st.rerun()
-            except Exception as e:
-                st.error(f"エラー: {e}")
-            finally:
-                st.session_state.main_cluster_running = False
+                except Exception as e:
+                    st.caption(f"⚠️ クラスタ付きデータ の CAPCOM 保存に失敗しました（要確認）: {e}")
+            st.success("クラスタリング完了")
+            st.rerun()
+        except Exception as e:
+            st.error(f"エラー: {e}")
+        finally:
+            st.session_state.main_cluster_running = False
 
     st.markdown("---")
     
@@ -415,7 +439,7 @@ with tab_main:
         col1, col2 = st.columns(2)
         with col1:
             if 'year' in df_main.columns and df_main['year'].notna().any():
-                bin_interval_w_val = st.selectbox("期間の粒度:", [5, 3, 2, 1], index=0, key="main_bin_interval", on_change=on_main_interval_change)
+                bin_interval_w_val = st.selectbox("期間の粒度:", [5, 3, 2, 1], index=0, key="main_bin_interval", on_change=on_main_interval_change, help="表示期間を区切る年数の幅です。大きくすると5年単位などの大まかな期間に、小さくすると1年単位など細かい期間に分かれます（下の「表示期間」の選択肢が変わります）。")
                 date_bin_options = get_date_bin_options(df_main, int(bin_interval_w_val), 'year')
                 date_bin_filter_w = st.selectbox("表示期間:", date_bin_options, key="main_date_filter")
             else:
@@ -450,25 +474,31 @@ with tab_main:
             (f"{st.session_state.saturnv_labels_map.get(cid)} ({cluster_counts.get(st.session_state.saturnv_labels_map.get(cid), 0)}件)", cid)
             for cid in sorted(st.session_state.df_main['cluster'].unique())
         ]
-        cluster_filter_w = st.multiselect("マップ表示クラスタ:", cluster_options, default=[cluster_options[0]], format_func=lambda x: x[0], key="main_cluster_filter")
+        cluster_filter_w = st.multiselect("マップ表示クラスタ:", cluster_options, default=[cluster_options[0]], format_func=lambda x: x[0], key="main_cluster_filter", help="分析・表示の対象にするクラスタを選びます。特定の技術テーマだけに絞って詳しく見たいときに使います。")
 
         st.subheader("分析結果 (TELESCOPE メインマップ)")
         
         # --- UIレイアウト ---
-        map_mode = st.radio("表示モード:", ["散布図 (Scatter)", "密度マップ (Density)", "クラスタ領域 (Clusters)"], horizontal=True)
+        map_mode = st.radio("表示モード:", ["クラスタ領域 (Clusters)", "密度マップ (Density)", "散布図 (Scatter)"], horizontal=True, help="俯瞰図の描き方を切り替えます。クラスタ領域＝各クラスタを色付きの領域で表示、密度マップ＝点の混み具合をヒートマップで表示、散布図＝個々の特許を点で表示。全体像は領域、混雑度は密度、個別確認は散布図が見やすいです。")
         c1, c2, c3 = st.columns(3)
         with c1:
             st.markdown("**密度マップ設定**")
-            main_mesh_size = st.number_input("メッシュサイズ (Grid)", value=30, min_value=10, max_value=200, step=5, key="main_mesh_size")
+            main_mesh_size = st.number_input("メッシュサイズ (Grid)", value=30, min_value=10, max_value=200, step=5, key="main_mesh_size", help="密度マップ（ヒートマップ）を描くときの格子の細かさです。大きいほど細かい格子になり局所的な濃淡が見えますが、点がまばらだと粗く見えます。小さいほど滑らかで大まかな分布になります。")
             use_abs_scale = False
             if map_mode == "密度マップ (Density)":
-                use_abs_scale = st.checkbox("密度スケールを固定 (絶対評価)", value=False, key="main_abs_scale")
+                use_abs_scale = st.checkbox("密度スケールを固定 (絶対評価)", value=False, key="main_abs_scale", help="密度の色の濃さの基準を全体共通に固定します。オンにすると期間やフィルタを変えても色の意味（濃さ＝件数）が一定になり期間どうしを公平に比較できます。オフにすると表示中のデータ内で色を相対的に割り当てます。")
         with c2:
             st.markdown("**フィルタ**")
-            remove_noise_chk = st.checkbox("ノイズを除く (Exclude Noise)", value=False, key="main_remove_noise")
+            remove_noise_chk = st.checkbox("ノイズを除く (Exclude Noise)", value=False, key="main_remove_noise", help="どのクラスタにも属さないノイズ（外れ値）の特許をマップから隠します。オンにすると主要なクラスタ構造がすっきり見えますが、萌芽技術の候補となるノイズは見えなくなります。")
         with c3:
             st.markdown("**表示オプション**")
-            show_labels_chk = st.checkbox("マップにラベルを表示する", value=True, key="main_show_labels")
+            show_labels_chk = st.checkbox("マップにラベルを表示する", value=True, key="main_show_labels", help="各クラスタの自動命名ラベルをマップ上に重ねて表示します。オフにすると点の分布だけが見えるため、ラベルが重なって読みにくいときに使います。")
+            # ステータス列があれば色分け基準を選べる（クラスタ / ステータス・パステル）
+            _status_col_sv = col_map.get('status')
+            if _status_col_sv and _status_col_sv in st.session_state.df_main.columns:
+                color_by = st.radio("色分け基準:", ["クラスタ", "ステータス"], horizontal=True, key="main_color_by", help="マップの点を何で色分けするかを選びます。基準により見える構造が変わります（クラスタ＝技術テーマ別、ステータス＝権利状況別）。")
+            else:
+                color_by = "クラスタ"
         
         # --- ハイブリッド・レイヤー構造 ---
         
@@ -510,196 +540,248 @@ with tab_main:
             df_ghost = pd.DataFrame()
 
         # --- 描画ロジック ---
-        fig_main = go.Figure()
-        
-        # 密度マップ
-        if not df_trend.empty and map_mode == "密度マップ (Density)":
-            custom_density_colorscale = [
-                [0.0, "rgba(255, 255, 255, 0)"], 
-                [0.1, "rgba(225, 245, 254, 0.3)"],
-                [0.4, "rgba(129, 212, 250, 0.6)"],
-                [1.0, "rgba(2, 119, 189, 0.9)"]
-            ]
-            
-            contour_params = dict(
-                x=df_trend['umap_x'], y=df_trend['umap_y'], 
-                colorscale=custom_density_colorscale, 
-                reversescale=False, xaxis='x', yaxis='y', 
-                showscale=False, name="密度", 
-                nbinsx=main_mesh_size, nbinsy=main_mesh_size,
-                contours=dict(coloring='fill', showlines=True),
-                line=dict(width=0.5, color='rgba(0, 0, 0, 0.2)')
-            )
-            if use_abs_scale and st.session_state.saturnv_global_zmax:
-                contour_params.update(dict(zauto=False, zmin=0, zmax=st.session_state.saturnv_global_zmax))
-            else: 
-                contour_params.update(dict(zauto=True))
-            
-            fig_main.add_trace(go.Histogram2dContour(**contour_params))
-
-        # クラスタ領域
-        if map_mode == "クラスタ領域 (Clusters)" and not df_universe.empty:
-            unique_clusters = sorted(df_universe['cluster'].unique())
-            color_sequence = utils.APOLLO_COLORS
-            for i, cid in enumerate(unique_clusters):
-                if cid == -1: continue
-                points = df_universe[df_universe['cluster'] == cid][['umap_x', 'umap_y']].values
-                if len(points) >= 3:
-                    try:
-                        hull = ConvexHull(points)
-                        hull_points = points[hull.vertices]
-                        hull_points = np.append(hull_points, [hull_points[0]], axis=0)
-                        cluster_color = color_sequence[i % len(color_sequence)]
-                        fig_main.add_trace(go.Scatter(
-                            x=hull_points[:, 0], y=hull_points[:, 1], mode='lines', fill='toself',
-                            fillcolor=cluster_color, opacity=0.1, line=dict(color=cluster_color, width=2),
-                            hoverinfo='skip', showlegend=False
-                        ))
-                    except: pass
-
-        # Ghost (Universe背景)
-        if not df_ghost.empty:
-            ghost_color = '#dddddd'
-            ghost_opacity = 0.4
-            fig_main.add_trace(go.Scatter(
-                x=df_ghost['umap_x'], y=df_ghost['umap_y'], mode='markers', 
-                marker=dict(color=ghost_color, size=3, opacity=ghost_opacity, line=dict(width=0)), 
-                hoverinfo='skip', name='その他 (Ghost)'
-            ))
-
-        # Focus (注目)
-        if not df_focus.empty:
-            marker_line = dict(width=1, color='white') if map_mode == "密度マップ (Density)" else dict(width=0)
-            is_applicant_filtered = "ALL" not in applicant_values
-            
-            if is_applicant_filtered:
-                # Applicant Drill Down Mode
-                palette = px.colors.qualitative.Bold
-                for i, app_name in enumerate(applicant_values):
-                    mask = df_focus[col_map['applicant']].fillna('').str.contains(re.escape(app_name))
-                    df_app = df_focus[mask]
-                    if not df_app.empty:
-                        fig_main.add_trace(go.Scatter(
-                            x=df_app['umap_x'], y=df_app['umap_y'], mode='markers',
-                            marker=dict(color=palette[i % len(palette)], size=6, opacity=0.9, line=marker_line),
-                            hoverinfo='text', hovertext=df_app['hover_text'], name=app_name
-                        ))
-            else:
-                # Standard Mode (Cluster Coloring)
-
-                if 'cluster' in df_focus.columns:
-                    df_focus_valid = df_focus[df_focus['cluster'] != -1]
-                    df_focus_noise = df_focus[df_focus['cluster'] == -1]
-                else:
-                    df_focus_valid = df_focus
-                    df_focus_noise = pd.DataFrame()
-
-                # Plot Valid Clusters
-                if not df_focus_valid.empty:
-                    fig_main.add_trace(go.Scatter(
-                        x=df_focus_valid['umap_x'], y=df_focus_valid['umap_y'], mode='markers', 
-                        marker=dict(
-                            color=df_focus_valid['cluster'], 
-                            colorscale=utils.APOLLO_COLORS, 
-                            showscale=False, 
-                            size=5, 
-                            opacity=0.8, 
-                            line=marker_line
-                        ), 
-                        hoverinfo='text', hovertext=df_focus_valid['hover_text'], name='特許 (Valid)'
-                    ))
-                
-                # Plot Noise (Separate Trace)
-                if not df_focus_noise.empty:
-                    fig_main.add_trace(go.Scatter(
-                        x=df_focus_noise['umap_x'], y=df_focus_noise['umap_y'], mode='markers', 
-                        marker=dict(
-                            color='#999999', 
-                            size=3, 
-                            opacity=0.3, 
-                            line=dict(width=0)
-                        ), 
-                        hoverinfo='text', hovertext=df_focus_noise['hover_text'], name='Noise'
-                    ))
-
-        # ラベル追加
-        if show_labels_chk:
-            label_data_source = df_universe
-            target_cids = cluster_values if "ALL" not in cluster_values else label_data_source['cluster'].unique()
-            color_sequence = utils.APOLLO_COLORS
-            sorted_unique_cids = sorted(df_universe['cluster'].unique()) 
-            
-            # Filter Noise from labels
-            valid_label_data = label_data_source[label_data_source['cluster'] != -1]
-            
-            for cid, grp in valid_label_data[valid_label_data['cluster'].isin(target_cids)].groupby('cluster'):
-                mean_pos = grp[['umap_x', 'umap_y']].mean()
-                label_txt = grp['cluster_label'].iloc[0]
-                try:
-                    color_idx = sorted_unique_cids.index(cid)
-                    border_color = color_sequence[color_idx % len(color_sequence)]
-                except: border_color = "#333333"
-
-                fig_main.add_annotation(
-                    x=mean_pos['umap_x'], y=mean_pos['umap_y'], 
-                    text=label_txt, showarrow=False, 
-                    font=dict(size=11, color='black', family="Helvetica"), 
-                    bgcolor='rgba(255,255,255,0.8)', bordercolor=border_color, borderwidth=2, borderpad=4
-                )
-
-        norm_msg = " (絶対評価)" if use_abs_scale and map_mode == "密度マップ (Density)" else ""
-        utils.update_fig_layout(fig_main, f"Saturn V - メインマップ{norm_msg}", height=1200, show_legend=False)
-        
-
-        # 1. アスペクト比: 歪みを防ぐため1:1を強制
-        # 2. フォーカス: 有効なクラスタにズーム（ノイズ除外）
-        
-        if not df_focus.empty and 'cluster' in df_focus.columns:
-             # Use only VALID clusters for bounds calculation
-             target_df = df_focus[df_focus['cluster'] != -1]
+        # fig_main をフィルタ・表示条件・クラスタリング結果が変わったときだけ再構築し、
+        # それ以外のリラン（他ウィジェット操作等）では session_state のキャッシュを再利用する。
+        _main_fig_key = (
+            map_mode, main_mesh_size, use_abs_scale, remove_noise_chk, show_labels_chk, color_by,
+            date_bin_filter_w,
+            tuple(tuple(v) for v in applicant_filter_w),
+            tuple(tuple(v) for v in cluster_filter_w),
+            tuple(sorted(st.session_state.saturnv_labels_map.items())),
+        )
+        if (st.session_state.get('saturnv_main_fig_key') == _main_fig_key
+                and 'saturnv_main_fig' in st.session_state):
+            fig_main = st.session_state['saturnv_main_fig']
         else:
-             target_df = df_focus if not df_focus.empty else df_universe
-             if 'cluster' in target_df.columns:
-                 target_df = target_df[target_df['cluster'] != -1]
-
-        if not target_df.empty:
-             # Calculate bounds
-             x_min, x_max = target_df['umap_x'].min(), target_df['umap_x'].max()
-             y_min, y_max = target_df['umap_y'].min(), target_df['umap_y'].max()
-             
-             # Calculate spread
-             x_range = x_max - x_min
-             y_range = y_max - y_min
-             
-             # Add Padding (2%)
-             pad_factor = 0.02
-             x_pad = x_range * pad_factor if x_range > 0 else 1.0
-             y_pad = y_range * pad_factor if y_range > 0 else 1.0
-             
-             # Apply new ranges with Fixed Aspect Ratio matching
-             fig_main.update_layout(
-                height=1200,
-                xaxis=dict(range=[x_min - x_pad, x_max + x_pad], autorange=False),
-                yaxis=dict(
-                    range=[y_min - y_pad, y_max + y_pad], 
-                    autorange=False,
-                    scaleanchor="x", 
-                    scaleratio=1
+            fig_main = go.Figure()
+        
+            # 密度マップ
+            if not df_trend.empty and map_mode == "密度マップ (Density)":
+                custom_density_colorscale = [
+                    [0.0, "rgba(255, 255, 255, 0)"], 
+                    [0.1, "rgba(225, 245, 254, 0.3)"],
+                    [0.4, "rgba(129, 212, 250, 0.6)"],
+                    [1.0, "rgba(2, 119, 189, 0.9)"]
+                ]
+            
+                contour_params = dict(
+                    x=df_trend['umap_x'], y=df_trend['umap_y'], 
+                    colorscale=custom_density_colorscale, 
+                    reversescale=False, xaxis='x', yaxis='y', 
+                    showscale=False, name="密度", 
+                    nbinsx=main_mesh_size, nbinsy=main_mesh_size,
+                    contours=dict(coloring='fill', showlines=True),
+                    line=dict(width=0.5, color='rgba(0, 0, 0, 0.2)')
                 )
-             )
+                if use_abs_scale and st.session_state.saturnv_global_zmax:
+                    contour_params.update(dict(zauto=False, zmin=0, zmax=st.session_state.saturnv_global_zmax))
+                else: 
+                    contour_params.update(dict(zauto=True))
+            
+                fig_main.add_trace(go.Histogram2dContour(**contour_params))
 
-        st.plotly_chart(fig_main, use_container_width=True, config={
-            'editable': True,
-            'edits': {
-                'annotationPosition': True,
-                'annotationText': False,
-                'axisTitleText': False,
-                'legendPosition': False,
-                'legendText': False,
-                'shapePosition': False,
-                'titleText': False
-            }
-        })
+            # クラスタ領域
+            if map_mode == "クラスタ領域 (Clusters)" and not df_universe.empty:
+                unique_clusters = sorted(df_universe['cluster'].unique())
+                color_sequence = utils.APOLLO_COLORS
+                for i, cid in enumerate(unique_clusters):
+                    if cid == -1: continue
+                    points = df_universe[df_universe['cluster'] == cid][['umap_x', 'umap_y']].values
+                    if len(points) >= 3:
+                        try:
+                            hull = ConvexHull(points)
+                            hull_points = points[hull.vertices]
+                            hull_points = np.append(hull_points, [hull_points[0]], axis=0)
+                            cluster_color = color_sequence[i % len(color_sequence)]
+                            fig_main.add_trace(go.Scatter(
+                                x=hull_points[:, 0], y=hull_points[:, 1], mode='lines', fill='toself',
+                                fillcolor=cluster_color, opacity=0.1, line=dict(color=cluster_color, width=2),
+                                hoverinfo='skip', showlegend=False
+                            ))
+                        except: pass
+
+            # Ghost (Universe背景)
+            if not df_ghost.empty:
+                ghost_color = '#dddddd'
+                ghost_opacity = 0.4
+                fig_main.add_trace(go.Scatter(
+                    x=df_ghost['umap_x'], y=df_ghost['umap_y'], mode='markers', 
+                    marker=dict(color=ghost_color, size=3, opacity=ghost_opacity, line=dict(width=0)), 
+                    hoverinfo='skip', name='その他 (Ghost)'
+                ))
+
+            # Focus (注目)
+            if not df_focus.empty:
+                marker_line = dict(width=1, color='white') if map_mode == "密度マップ (Density)" else dict(width=0)
+                is_applicant_filtered = "ALL" not in applicant_values
+            
+                if is_applicant_filtered:
+                    # Applicant Drill Down Mode
+                    palette = px.colors.qualitative.Bold
+                    for i, app_name in enumerate(applicant_values):
+                        mask = df_focus[col_map['applicant']].fillna('').str.contains(re.escape(app_name))
+                        df_app = df_focus[mask]
+                        if not df_app.empty:
+                            fig_main.add_trace(go.Scatter(
+                                x=df_app['umap_x'], y=df_app['umap_y'], mode='markers',
+                                marker=dict(color=palette[i % len(palette)], size=6, opacity=0.9, line=marker_line),
+                                hoverinfo='text', hovertext=df_app['hover_text'], customdata=df_app.index, name=app_name
+                            ))
+                else:
+                    # Standard Mode (Cluster or Status Coloring)
+
+                    if color_by == "ステータス" and _status_col_sv and _status_col_sv in df_focus.columns:
+                        # ステータス別にパステル着色（個別特許点・クリック対応）
+                        for _stt, _grp in df_focus.groupby(df_focus[_status_col_sv].fillna('(未設定)').astype(str)):
+                            if not _grp.empty:
+                                fig_main.add_trace(go.Scatter(
+                                    x=_grp['umap_x'], y=_grp['umap_y'], mode='markers',
+                                    marker=dict(color=utils.status_color_for(_stt, vivid=True), size=6, opacity=0.9,
+                                                line=dict(width=0.5, color='rgba(40,40,40,0.5)')),
+                                    hoverinfo='text', hovertext=_grp['hover_text'], customdata=_grp.index,
+                                    name=str(_stt), showlegend=True
+                                ))
+                    else:
+                        if 'cluster' in df_focus.columns:
+                            df_focus_valid = df_focus[df_focus['cluster'] != -1]
+                            df_focus_noise = df_focus[df_focus['cluster'] == -1]
+                        else:
+                            df_focus_valid = df_focus
+                            df_focus_noise = pd.DataFrame()
+
+                        # Plot Valid Clusters
+                        if not df_focus_valid.empty:
+                            fig_main.add_trace(go.Scatter(
+                                x=df_focus_valid['umap_x'], y=df_focus_valid['umap_y'], mode='markers', 
+                                marker=dict(
+                                    color=df_focus_valid['cluster'], 
+                                    colorscale=utils.APOLLO_COLORS, 
+                                    showscale=False, 
+                                    size=5, 
+                                    opacity=0.8, 
+                                    line=marker_line
+                                ), 
+                                hoverinfo='text', hovertext=df_focus_valid['hover_text'], customdata=df_focus_valid.index, name='特許 (Valid)'
+                            ))
+                
+                        # Plot Noise (Separate Trace)
+                        if not df_focus_noise.empty:
+                            fig_main.add_trace(go.Scatter(
+                                x=df_focus_noise['umap_x'], y=df_focus_noise['umap_y'], mode='markers', 
+                                marker=dict(
+                                    color='#999999', 
+                                    size=3, 
+                                    opacity=0.3, 
+                                    line=dict(width=0)
+                                ), 
+                                hoverinfo='text', hovertext=df_focus_noise['hover_text'], customdata=df_focus_noise.index, name='Noise'
+                            ))
+
+            # ラベル追加
+            if show_labels_chk:
+                label_data_source = df_universe
+                target_cids = cluster_values if "ALL" not in cluster_values else label_data_source['cluster'].unique()
+                color_sequence = utils.APOLLO_COLORS
+                sorted_unique_cids = sorted(df_universe['cluster'].unique()) 
+            
+                # Filter Noise from labels
+                valid_label_data = label_data_source[label_data_source['cluster'] != -1]
+            
+                for cid, grp in valid_label_data[valid_label_data['cluster'].isin(target_cids)].groupby('cluster'):
+                    mean_pos = grp[['umap_x', 'umap_y']].mean()
+                    label_txt = grp['cluster_label'].iloc[0]
+                    try:
+                        color_idx = sorted_unique_cids.index(cid)
+                        border_color = color_sequence[color_idx % len(color_sequence)]
+                    except: border_color = "#333333"
+
+                    fig_main.add_annotation(
+                        x=mean_pos['umap_x'], y=mean_pos['umap_y'], 
+                        text=label_txt, showarrow=False, 
+                        font=dict(size=11, color='black', family="Helvetica"), 
+                        bgcolor='rgba(255,255,255,0.8)', bordercolor=border_color, borderwidth=2, borderpad=4
+                    )
+
+            norm_msg = " (絶対評価)" if use_abs_scale and map_mode == "密度マップ (Density)" else ""
+            utils.update_fig_layout(fig_main, f"Saturn V - メインマップ{norm_msg}", height=1200, show_legend=False)
+
+            # 出願人フィルタ中（企業別カラー）／ステータス表示のときは凡例を表示する。
+            # 凡例はマップ「上に重ねて」配置するため、マップ本体の大きさは変わらない。
+            _show_legend_sv = ("ALL" not in applicant_values) or (color_by == "ステータス")
+            if _show_legend_sv:
+                fig_main.update_layout(
+                    showlegend=True,
+                    legend=dict(
+                        x=0.01, y=0.99, xanchor='left', yanchor='top',
+                        bgcolor='rgba(255,255,255,0.78)', bordercolor='#cccccc', borderwidth=1,
+                        font=dict(size=13),
+                    ),
+                )
+        
+
+            # 1. アスペクト比: 歪みを防ぐため1:1を強制
+            # 2. フォーカス: 有効なクラスタにズーム（ノイズ除外）
+        
+            # マップの表示範囲（ズーム）はフィルタに依存せず一定にする。絞り込み後の df_focus では
+            # なく、全体集合 df_universe（有効クラスタ）から範囲を算出する。これにより「マップ表示
+            # クラスタ」「出願人」等のフィルタを変えても俯瞰図の枠（位置・ズーム）が動かない。
+            if 'cluster' in df_universe.columns:
+                target_df = df_universe[df_universe['cluster'] != -1]
+                if target_df.empty:
+                    target_df = df_universe
+            else:
+                target_df = df_universe
+
+            if not target_df.empty:
+                 # Calculate bounds
+                 x_min, x_max = target_df['umap_x'].min(), target_df['umap_x'].max()
+                 y_min, y_max = target_df['umap_y'].min(), target_df['umap_y'].max()
+             
+                 # Calculate spread
+                 x_range = x_max - x_min
+                 y_range = y_max - y_min
+             
+                 # Add Padding (2%)
+                 pad_factor = 0.02
+                 x_pad = x_range * pad_factor if x_range > 0 else 1.0
+                 y_pad = y_range * pad_factor if y_range > 0 else 1.0
+             
+                 # Apply new ranges with Fixed Aspect Ratio matching
+                 # constrain="domain": 範囲を厳守し、1:1アスペクトはプロット領域側で調整する。
+                 # これにより、ラベル(注釈)の有無で表示範囲が広がって俯瞰図が縮む現象を防ぐ。
+                 fig_main.update_layout(
+                    height=1200,
+                    xaxis=dict(range=[x_min - x_pad, x_max + x_pad], autorange=False, constrain="domain"),
+                    yaxis=dict(
+                        range=[y_min - y_pad, y_max + y_pad],
+                        autorange=False,
+                        scaleanchor="x",
+                        scaleratio=1,
+                        constrain="domain"
+                    )
+                 )
+
+            st.session_state['saturnv_main_fig'] = fig_main
+            st.session_state['saturnv_main_fig_key'] = _main_fig_key
+        @st.fragment
+        def _saturnv_click_main():
+            utils.disable_selection_fade(fig_main)
+            selection_main = st.plotly_chart(fig_main, use_container_width=True,
+                on_select="rerun", selection_mode="points", key="saturnv_main_map", config={
+                'editable': True,
+                'edits': {
+                    'annotationPosition': True,
+                    'annotationText': False,
+                    'axisTitleText': False,
+                    'legendPosition': False,
+                    'legendText': False,
+                    'shapePosition': False,
+                    'titleText': False
+                }
+            })
+            # クリックした特許点 → 詳細ポップアップ（クラスタ領域/ラベルは customdata 無しのため反応しない）
+            utils.handle_map_click(selection_main, "saturnv_main", title="クリックした特許")
+        _saturnv_click_main()
 
         # スナップショットボタン
         # 安全なサマリーを作成
@@ -723,7 +805,7 @@ with tab_main:
             if df_snap_safe[c].dtype == object:
                 df_snap_safe[c] = df_snap_safe[c].astype(str).str.slice(0, 50) + "..."
         
-        snap_data['chart_data'] = df_snap_safe.to_string(index=False)
+        snap_data['chart_data'] = utils_ai.df_to_markdown(df_snap_safe, index=False)
         
 
         try:
@@ -801,6 +883,33 @@ with tab_main:
         except Exception as e:
              st.error(f"スナップショット生成エラー: {e}")
 
+        # 🖼️ 整理版ランドスケープ（スライド用・上位クラスタのみ）
+        if st.checkbox("🖼️ 整理版ランドスケープ（スライド/レポート用・上位クラスタのみ）を表示", key="saturn_curated_show"):
+            st.caption("全クラスタを密にラベルすると重なるため、件数上位クラスタだけを大きく示したスライド向けの俯瞰図です。")
+            _cl_topn = st.slider("ラベル表示するクラスタ数（件数上位）", 3, 15, 8, key="saturn_curated_topn", help="整理版（スライド/レポート用）の俯瞰図で、件数が多い上位何クラスタにだけ大きなラベルを付けるかです。全クラスタに付けると重なって読めないため、主要クラスタだけを強調します。")
+            _cl_style_lbl = st.radio("表示モード:", ["クラスタ領域 (Clusters)", "密度マップ (Density)", "散布図 (Scatter)"],
+                                     horizontal=True, key="saturn_curated_style", help="俯瞰図の描き方を切り替えます。クラスタ領域＝各クラスタを色付きの領域で表示、密度マップ＝点の混み具合をヒートマップで表示、散布図＝個々の特許を点で表示。全体像は領域、混雑度は密度、個別確認は散布図が見やすいです。")
+            _cl_style = {"クラスタ領域 (Clusters)": "hull", "密度マップ (Density)": "density", "散布図 (Scatter)": "points"}.get(_cl_style_lbl, "hull")
+            try:
+                _cl_fig = utils.build_curated_landscape(
+                    df_universe, cluster_col='cluster', label_col='cluster_label',
+                    x_col='umap_x', y_col='umap_y', top_n=_cl_topn, region_style=_cl_style,
+                    density_bins=int(st.session_state.get('main_mesh_size', 30)))
+                st.plotly_chart(_cl_fig, use_container_width=True, config={'editable': False})
+                _n_all = int(df_universe[df_universe['cluster'] != -1]['cluster'].nunique()) if 'cluster' in df_universe.columns else 0
+                # CAPCOMアクティブ時はクリーンPNGをZIPに同梱（スライド/レポート用の整理版を下流へ）
+                utils.save_curated_to_capcom(
+                    _cl_fig, snap_id="saturnv_curated_landscape",
+                    cache_token=f"{_cl_topn}_{_cl_style}")
+                utils.render_report_png_button(
+                    _cl_fig, key="saturn_curated_report",
+                    default_title="技術ランドスケープ：主要クラスタ",
+                    default_subtitle=f"出願 {len(df_universe):,}件 / 上位{_cl_topn}クラスタ（全{_n_all}クラスタ）",
+                    default_caption="",
+                    label="🎨 整理版をスライド/レポート用PNGに書き出す")
+            except Exception as _e:
+                st.warning(f"整理版ランドスケープの生成に失敗しました: {_e}")
+
         if st.session_state.saturnv_cluster_done:
             # AIインサイト (メインマップ)
             insight_context = f"""
@@ -829,12 +938,19 @@ with tab_main:
                 df_universe, 'cluster', 'umap_x', 'umap_y', label_map=st.session_state.saturnv_labels_map
             )
 
-            # 生成 (空間情報を追加コンテキストとして渡す)
+            # クラスタ動態（前回実行時に session_state へ保存済み）とノイズ（萌芽技術）を insight に反映。
+            # これらは本 insight より後段で計算されるため、前回ラン分を参照する（CAPCOM JSON出力と同方式）。
+            _sv_noise = int((df_universe['cluster'] == -1).sum()) if -1 in df_universe['cluster'].values else 0
+            _sv_map_extra, _sv_map_inst = utils_ai.build_map_dynamics_noise_addon(
+                dynamics_data=st.session_state.get('saturnv_dynamics_data'),
+                noise_count=_sv_noise, total_count=len(df_universe))
+
+            # 生成 (空間情報・クラスタ動態・ノイズを追加コンテキストとして渡す)
             prompt = utils_ai.generate_ai_insight_prompt(
-                insight_role, insight_context, snap_data, insight_instruction, 
-                extra_content=f"\n# 空間配置情報 (Spatial Context)\n{spatial_info}"
+                insight_role, insight_context, snap_data, insight_instruction + _sv_map_inst,
+                extra_content=f"\n# 空間配置情報 (Spatial Context)\n{spatial_info}\n{_sv_map_extra}"
             )
-            
+
             utils_ai.render_ai_insight_button(prompt, "saturn_main_insight")
 
             # CAPCOM data/ JSON出力（Saturn V TELESCOPEクラスタ）
@@ -847,7 +963,8 @@ with tab_main:
                             continue
                         label = st.session_state.saturnv_labels_map.get(cid, f"Cluster {cid}")
                         auto_label = st.session_state.get('saturnv_labels_map_original', {}).get(cid, label)
-                        count = int(cluster_counts_snap.get(cid, 0))
+                        _cnt = cluster_counts_snap.get(cid, 0)
+                        count = int(_cnt) if pd.notna(_cnt) else 0
                         # 重心座標
                         cid_mask = df_universe['cluster'] == cid
                         cx = float(df_universe.loc[cid_mask, 'umap_x'].mean()) if cid_mask.any() else 0
@@ -871,7 +988,7 @@ with tab_main:
                                 reps_raw.append(rep_str[:200] if len(rep_str) > 200 else rep_str)
 
                         clusters_json.append({
-                            "cluster_id": int(cid),
+                            "cluster_id": int(cid) if pd.notna(cid) else -1,
                             "label": label,
                             "auto_label": auto_label,
                             "count": count,
@@ -952,8 +1069,8 @@ with tab_main:
                             if _title_col and _title_col in df_universe.columns:
                                 _df_noise_capcom = df_universe[df_universe['cluster'] == -1]
                                 _noise_texts = (_df_noise_capcom[_title_col].fillna('') + ' ' +
-                                               _df_noise_capcom.get(_abstract_col, pd.Series([''] * len(_df_noise_capcom))).fillna(''))
-                                _noise_kws = _noise_texts.apply(utils.extract_keywords)
+                                               _df_noise_capcom.get(_abstract_col, pd.Series([''] * len(_df_noise_capcom), index=_df_noise_capcom.index)).fillna(''))
+                                _noise_kws = _noise_texts.apply(lambda x: utils.extract_keywords(x, stopwords=stopwords))
                                 _all_kws = []
                                 for _kw_list in _noise_kws:
                                     _all_kws.extend(_kw_list)
@@ -989,7 +1106,7 @@ with tab_main:
                         saturnv_json['cluster_dynamics'] = st.session_state['saturnv_dynamics_data']
                     capcom.save_data("saturnv_clusters.json", saturnv_json)
             except Exception as e:
-                pass
+                st.caption(f"⚠️ クラスタ（俯瞰図） の CAPCOM 保存に失敗しました（要確認）: {e}")
 
         st.subheader("ラベル編集")
         utils.render_ai_label_assistant(st.session_state.df_main, 'cluster', "saturnv_labels_map", col_map, tfidf_matrix, feature_names, widget_key_prefix="main_label")
@@ -1080,8 +1197,8 @@ with tab_main:
                         abstract_col = col_map.get('abstract', '')
                         if title_col and title_col in df_noise.columns:
                             noise_texts = (df_noise[title_col].fillna('') + ' ' +
-                                          df_noise.get(abstract_col, pd.Series([''] * len(df_noise))).fillna(''))
-                            noise_kws = noise_texts.apply(utils.extract_keywords)
+                                          df_noise.get(abstract_col, pd.Series([''] * len(df_noise), index=df_noise.index)).fillna(''))
+                            noise_kws = noise_texts.apply(lambda x: utils.extract_keywords(x, stopwords=stopwords))
 
                             from collections import Counter
                             all_kws = []
@@ -1146,7 +1263,7 @@ with tab_main:
             col1, col2 = st.columns(2)
             with col1:
                 if 'year' in df_subset_filter.columns and df_subset_filter['year'].notna().any():
-                    drill_bin_interval_w_val = st.selectbox("期間の粒度:", [5, 3, 2, 1], index=0, key="drill_interval_w", on_change=on_drill_interval_change)
+                    drill_bin_interval_w_val = st.selectbox("期間の粒度:", [5, 3, 2, 1], index=0, key="drill_interval_w", on_change=on_drill_interval_change, help="表示期間を区切る年数の幅です。大きくすると5年単位などの大まかな期間に、小さくすると1年単位など細かい期間に分かれます（下の「表示期間」の選択肢が変わります）。")
                     drill_date_bin_options = get_date_bin_options(df_subset_filter, int(drill_bin_interval_w_val), 'year')
                     drill_date_bin_filter_w = st.selectbox("表示期間:", drill_date_bin_options, key="drill_date_filter_w")
                 else:
@@ -1176,11 +1293,37 @@ with tab_main:
                     drill_applicant_filter_w = [(f"(全出願人) ({len(df_subset_filter)}件)", "ALL")]
 
         st.subheader("クラスタリング設定 (ドリルダウン用)")
+        # 🤖 自動最適化（メインと同じ HDBSCAN 2パラメータ掃引をドリルダウンにも）
+        drill_auto_hdbscan = st.checkbox(
+            "🤖 自動最適化（最小クラスタサイズ・最小サンプル数を掃引してサブクラスタ数を適正化）",
+            key="drill_auto_hdbscan",
+            help="ドリルダウン対象の件数に合わせて HDBSCAN の2パラメータを自動で掃引し、サブクラスタ数が少なすぎ(2,3)も多すぎもしない設定を自動選択します（手動調整が不要になります）。ONの間は下の手動値は無視されます。")
+        drill_target_k_w = None
+        if drill_auto_hdbscan:
+            # メインマップと同じく、対象の件数に応じて目標サブクラスタ数を初期化する（suggest_target_k）。
+            # 対象クラスタを変えるたびに初期値が件数適応されるよう、key に対象IDを含める。
+            _n_sub = len(df_subset_filter) if drilldown_target_id != "NONE" else 0
+            drill_target_k_w = st.number_input(
+                "目標サブクラスタ数（目安）", min_value=2, max_value=80,
+                value=utils.suggest_target_k(_n_sub), key=f"drill_target_k_w_{drilldown_target_id}",
+                help="この数に近づくよう2パラメータを掃引します（対象の件数から自動初期化）。"
+                     "結果のサブクラスタ数や粒度に満足できない場合は、この値を増減して再度「選択クラスタで再マップ」を押してください。"
+                     "実際の値は密度構造に依存するため、目標ちょうどにならないこともあります（品質 DBCV を優先して選びます）。")
+            utils.render_dbcv_help()
+            # 前回の自動決定を常時再表示（メインマップと同じ挙動）。対象が一致する結果のみ表示する。
+            _dar = st.session_state.get('saturnv_drill_auto_result')
+            if _dar and _dar.get('target_id') == drilldown_target_id:
+                _rv = _dar.get('validity')
+                _rv_txt = f"・品質DBCV={_rv:.2f}" if isinstance(_rv, (int, float)) else ""
+                st.info(
+                    f"🤖 前回の自動決定: 最小クラスタサイズ=**{_dar['mcs']}** / 最小サンプル数=**{_dar['ms']}** "
+                    f"→ サブクラスタ **{_dar['k']}**・ノイズ {_dar['noise'] * 100:.1f}%（目標≈{_dar['target_k']}{_rv_txt}）。"
+                    f"　数が合わない/粒度が好みでない場合は上の「目標サブクラスタ数」を変えて再描画してください。")
         col1, col2, col3 = st.columns(3)
-        with col1: drill_min_cluster_size_w = st.number_input('最小クラスタサイズ:', min_value=2, value=5, key="drill_min_cluster_size_w")
-        with col2: drill_min_samples_w = st.number_input('最小サンプル数:', min_value=1, value=5, key="drill_min_samples_w")
-        with col3: drill_label_top_n_w = st.number_input('ラベル単語数:', min_value=1, value=3, key="drill_label_top_n_w")
-        drill_show_labels_chk = st.checkbox('マップにラベルを表示する', value=True, key="drill_show_labels_chk")
+        with col1: drill_min_cluster_size_w = st.number_input('最小クラスタサイズ:', min_value=2, value=5, key="drill_min_cluster_size_w", disabled=drill_auto_hdbscan, help="ドリルダウン（選択クラスタの内部再分割）で、1つのサブクラスタとして認める最小の特許件数です（クラスタの粒度設定）。小さくすると細かい技術テーマまで分かれてクラスタ数が増えますが、どこにも属さないノイズ（外れ値）も増えます。大きくすると少数の大まかなクラスタにまとまり安定しますが、細部は埋もれます。対象件数が少ないため小さめの値が向きます。")
+        with col2: drill_min_samples_w = st.number_input('最小サンプル数:', min_value=1, value=5, key="drill_min_samples_w", disabled=drill_auto_hdbscan, help="ドリルダウンで、サブクラスタの「核」と認める密度の厳しさです。大きいほど判定が厳しくなり、ノイズ（外れ値）が増えてクラスタは密な中心部だけになります。小さいほど緩くなり、多くの点がクラスタに取り込まれます。通常は最小クラスタサイズ以下に設定します。")
+        with col3: drill_label_top_n_w = st.number_input('ラベル単語数:', min_value=1, value=3, key="drill_label_top_n_w", help="各サブクラスタの自動命名に使う特徴語の数です。クラスタを特徴づける語を上位から何語ラベルに並べるかを決めます。多いほど内容を詳しく表せますが冗長になり、少ないほど簡潔になります。")
+        drill_show_labels_chk = st.checkbox('マップにラベルを表示する', value=True, key="drill_show_labels_chk", help="各サブクラスタの自動命名ラベルをマップ上に重ねて表示します。オフにすると点の分布だけが見えるため、ラベルが重なって読みにくいときに使います。")
 
         if st.button("選択クラスタで再マップ", type="primary", key="drill_run_button"):
             if drilldown_target_id == "NONE":
@@ -1200,7 +1343,7 @@ with tab_main:
 
                         # 出願人でフィルタリングを実行
                         drill_app_values = [val[1] for val in drill_applicant_filter_w]
-                        if "ALL" not in drill_app_values:
+                        if drill_app_values and "ALL" not in drill_app_values:
                             mask_list_drill = [df_subset[col_map['applicant']].fillna('').str.contains(re.escape(app)) for app in drill_app_values]
                             df_subset = df_subset[pd.concat(mask_list_drill, axis=1).any(axis=1)]
                         
@@ -1220,15 +1363,34 @@ with tab_main:
                             df_subset['drill_x'] = embedding_drill[:, 0]
                             df_subset['drill_y'] = embedding_drill[:, 1]
                             
-                            clusterer_drill = hdbscan.HDBSCAN(min_cluster_size=int(drill_min_cluster_size_w), min_samples=int(drill_min_samples_w), metric='euclidean', cluster_selection_method='eom')
-                            df_subset['drill_cluster'] = clusterer_drill.fit_predict(embedding_drill)
+                            if drill_auto_hdbscan:
+                                _dpb = st.progress(0.0, text="サブクラスタのパラメータを掃引中...")
+                                _dsweep = utils.sweep_hdbscan_params(
+                                    embedding_drill, target_k=int(drill_target_k_w),
+                                    progress_callback=lambda f: _dpb.progress(min(f, 1.0), text="サブクラスタのパラメータを掃引中..."))
+                                _dpb.empty()
+                                df_subset['drill_cluster'] = _dsweep['labels']
+                                # 自動決定の結果を保持し、次回以降も「前回の自動決定」として再表示する（メインマップと同じ）。
+                                st.session_state['saturnv_drill_auto_result'] = {
+                                    'mcs': _dsweep['min_cluster_size'], 'ms': _dsweep['min_samples'],
+                                    'k': _dsweep['n_clusters'], 'noise': _dsweep['noise_ratio'],
+                                    'target_k': _dsweep['target_k'], 'validity': _dsweep.get('validity'),
+                                    'target_id': drilldown_target_id}
+                                _drv = _dsweep.get('validity')
+                                _drv_txt = f"・品質DBCV={_drv:.2f}" if isinstance(_drv, (int, float)) else ""
+                                st.caption(
+                                    f"🤖 自動決定: 最小クラスタサイズ={_dsweep['min_cluster_size']} / 最小サンプル数={_dsweep['min_samples']} "
+                                    f"→ サブクラスタ {_dsweep['n_clusters']}・ノイズ {_dsweep['noise_ratio'] * 100:.0f}%（目標≈{_dsweep['target_k']}{_drv_txt}）")
+                            else:
+                                clusterer_drill = hdbscan.HDBSCAN(min_cluster_size=int(drill_min_cluster_size_w), min_samples=int(drill_min_samples_w), metric='euclidean', cluster_selection_method='eom')
+                                df_subset['drill_cluster'] = clusterer_drill.fit_predict(embedding_drill)
                             
-                            # patiroha.auto_label で c-TF-IDF ラベリング（ドリルダウン）
+                            # utils.safe_auto_label で c-TF-IDF ラベリング（ドリルダウン、Janome 例外耐性付き）
                             drill_texts = (
                                 df_subset[col_map['title']].fillna('') + ' ' +
                                 df_subset[col_map['abstract']].fillna('')
                             )
-                            drill_labels_map = patiroha.auto_label(
+                            drill_labels_map = utils.safe_auto_label(
                                 drill_texts,
                                 df_subset['drill_cluster'].values,
                                 method='c-tfidf',
@@ -1256,15 +1418,15 @@ with tab_main:
             st.subheader("ドリルダウンマップ")
             
             # --- UIレイアウト ---
-            drill_map_mode = st.radio("表示モード:", ["散布図 (Scatter)", "密度マップ (Density)", "クラスタ領域 (Clusters)"], horizontal=True, key="drill_map_mode_radio")
+            drill_map_mode = st.radio("表示モード:", ["クラスタ領域 (Clusters)", "密度マップ (Density)", "散布図 (Scatter)"], horizontal=True, key="drill_map_mode_radio", help="俯瞰図の描き方を切り替えます。クラスタ領域＝各クラスタを色付きの領域で表示、密度マップ＝点の混み具合をヒートマップで表示、散布図＝個々の特許を点で表示。全体像は領域、混雑度は密度、個別確認は散布図が見やすいです。")
             
             d_c1, d_c2, d_c3 = st.columns(3)
             with d_c1:
                 st.markdown("**密度マップ設定**")
-                drill_mesh_size = st.number_input("メッシュサイズ (Grid)", value=40, min_value=10, max_value=200, step=5, key="drill_mesh_size")
+                drill_mesh_size = st.number_input("メッシュサイズ (Grid)", value=40, min_value=10, max_value=200, step=5, key="drill_mesh_size", help="密度マップ（ヒートマップ）を描くときの格子の細かさです。大きいほど細かい格子になり局所的な濃淡が見えますが、点がまばらだと粗く見えます。小さいほど滑らかで大まかな分布になります。")
             with d_c2:
                 st.markdown("**フィルタ**")
-                drill_remove_noise_chk = st.checkbox("ノイズを除く (Exclude Noise)", value=False, key="drill_remove_noise")
+                drill_remove_noise_chk = st.checkbox("ノイズを除く (Exclude Noise)", value=False, key="drill_remove_noise", help="どのサブクラスタにも属さないノイズ（外れ値）の特許をマップから隠します。オンにすると主要なサブクラスタ構造がすっきり見えますが、外れ値の特許は見えなくなります。")
             with d_c3:
                 st.empty()
 
@@ -1319,8 +1481,11 @@ with tab_main:
             df_drill_noise = df_drill_plot[df_drill_plot['drill_cluster'] == -1]
             
             # 1. Plot Noise (Grey Background) - Always plot if present and not filtered out
+            # 凸包（go.Scatter=SVG）と座標系を揃えるため、プロット点も go.Scatter を使う。
+            # go.Scattergl（WebGL）だと凸包領域とプロット点がズレる（メイン俯瞰図は両方 Scatter で
+            # ズレない）。サブクラスタは点数が少なく Scatter でも性能問題はない。
             if not df_drill_noise.empty:
-                fig_drill.add_trace(go.Scattergl(
+                fig_drill.add_trace(go.Scatter(
                     x=df_drill_noise['drill_x'], y=df_drill_noise['drill_y'], mode='markers',
                     marker=dict(color='#dddddd', size=4, opacity=0.4, line=dict(width=0)),
                     hoverinfo='text', hovertext=df_drill_noise['drill_hover_text'], name='Noise'
@@ -1328,7 +1493,7 @@ with tab_main:
 
             # 2. Plot Valid Sub-clusters (Colored)
             if not df_drill_valid.empty:
-                fig_drill.add_trace(go.Scattergl(
+                fig_drill.add_trace(go.Scatter(
                     x=df_drill_valid['drill_x'], y=df_drill_valid['drill_y'], mode='markers',
                     marker=dict(
                         color=df_drill_valid['drill_cluster'], 
@@ -1396,7 +1561,7 @@ with tab_main:
                 if df_snap_safe_d[c].dtype == object:
                     df_snap_safe_d[c] = df_snap_safe_d[c].astype(str).str.slice(0, 50) + "..."
             
-            snap_data['chart_data'] = df_snap_safe_d.to_string(index=False)
+            snap_data['chart_data'] = utils_ai.df_to_markdown(df_snap_safe_d, index=False)
 
 
             try:
@@ -1459,12 +1624,16 @@ with tab_main:
             snap_data['ai_insight_context'] = full_drill_context
 
             # Render Snapshot Button
+            # ドリルダウンはクラスタを切り替えるたびにビューが変わるため、key を対象クラスタ別にする。
+            # 静的キーだと1枚撮った後に別クラスタへ切り替えても「保存済み」のまま出てしまう。
+            _drill_snap_slug = re.sub(r'\s+', '_', str(st.session_state.get('drill_base_label', 'target')))[:30] or 'target'
             utils.render_snapshot_button(
                 title=f"Saturn V: Drilldown - {st.session_state.drill_base_label}",
                 description=f"Detailed analysis of cluster: {st.session_state.drill_base_label}",
-                fig=fig_drill, # Kept fig_drill as it was in the original code
+                fig=fig_drill,
                 data_summary=snap_data,
-                key="saturn_drill_snap"
+                key=f"saturn_drill_snap_{_drill_snap_slug}",
+                group="saturn_drill_snap"
             )
 
             st.markdown("---")
@@ -1487,14 +1656,15 @@ with tab_main:
                         if cid == -1:
                             continue
                         label = drill_labels_map.get(cid, f"Sub-Cluster {cid}")
-                        count = int(drill_counts.get(cid, 0))
+                        _dcnt = drill_counts.get(cid, 0)
+                        count = int(_dcnt) if pd.notna(_dcnt) else 0
                         cid_mask = df_drill['drill_cluster'] == cid
                         cx = float(df_drill.loc[cid_mask, 'drill_x'].mean()) if cid_mask.any() else 0
                         cy = float(df_drill.loc[cid_mask, 'drill_y'].mean()) if cid_mask.any() else 0
                         reps_full = drill_reps.get(cid, []) if cid in drill_reps else []
                         reps_raw = [r[:200] if len(r) > 200 else r for r in reps_full]
                         drill_clusters_json.append({
-                            "cluster_id": int(cid),
+                            "cluster_id": int(cid) if pd.notna(cid) else -1,
                             "label": label,
                             "count": count,
                             "centroid": [round(cx, 4), round(cy, 4)],
@@ -1511,9 +1681,12 @@ with tab_main:
                         "clusters": drill_clusters_json,
                         "spatial_context": drill_spatial_info if 'drill_spatial_info' in dir() else ""
                     }
-                    capcom.save_data("saturnv_drilldown.json", drill_json)
+                    # 親クラスタ別ファイル名で保存（複数クラスタを続けて深掘りしても上書きされない）
+                    _probe_tgt = str(st.session_state.get('drill_base_label', '') or 'cluster')
+                    _probe_slug = re.sub(r'\s+', '_', _probe_tgt).strip('_')[:40] or 'cluster'
+                    capcom.save_data(f"saturnv_drilldown_{_probe_slug}.json", drill_json)
             except Exception as e:
-                pass
+                st.caption(f"⚠️ クラスタ詳細（ドリルダウン） の CAPCOM 保存に失敗しました（要確認）: {e}")
 
             st.subheader("サブクラスタ・ラベル編集")
             utils.render_ai_label_assistant(df_drill, 'drill_cluster', "drill_labels_map", col_map, tfidf_matrix, feature_names, widget_key_prefix="drill_label")
@@ -1535,16 +1708,20 @@ with tab_main:
             st.subheader("クラスタ・テキスト分析 (Text Mining)")
             col_tm1, col_tm2 = st.columns(2)
             with col_tm1:
-                cooc_top_n = st.slider("共起: 上位単語数", 30, 100, 70, key="cooc_top_n")
-                cooc_threshold = st.slider("共起: Jaccard係数 閾値", 0.01, 0.3, 0.03, 0.01, key="cooc_threshold")
+                cooc_top_n = st.slider("共起: 上位単語数", 30, 100, 70, key="cooc_top_n", help="ネットワークに表示するキーワード（ノード）の数です。出現頻度の上位から何語を使うかを決めます。多いほど網羅的ですが密集して読みにくく、少ないほど主要語に絞られ見やすくなります。")
+                cooc_threshold = st.slider("共起: Jaccard係数 閾値", 0.01, 0.3, 0.03, 0.01, key="cooc_threshold", help="2つのキーワードを線（エッジ）で結ぶ基準の強さです。共起の強さを0〜1で表すJaccard係数がこの値以上のペアだけを結びます。高くすると強い関係だけが残ってスッキリし、低くすると弱い関係も含め線が増えて密になります。")
             
             if st.button("テキスト分析を実行", key="run_text_mining"):
                 with st.spinner("分析中..."):
-                    all_text = ""
+                    # 文献ごとに抽出して集約（doc_words は共起ネットワークでも再利用し二度抽出を回避）
+                    words, doc_words = [], []
                     for _, row in df_drill.iterrows():
-                        if col_map['title'] and pd.notna(row[col_map['title']]): all_text += row[col_map['title']] + " "
-                        if col_map['abstract'] and pd.notna(row[col_map['abstract']]): all_text += row[col_map['abstract']] + " "
-                    words = extract_compound_nouns(all_text, stopwords)
+                        dt = ""
+                        if col_map['title'] and pd.notna(row[col_map['title']]): dt += str(row[col_map['title']]) + " "
+                        if col_map['abstract'] and pd.notna(row[col_map['abstract']]): dt += str(row[col_map['abstract']]) + " "
+                        dw = extract_compound_nouns(dt, stopwords)
+                        words.extend(dw)
+                        doc_words.append(dw)
                     
                     if not words: st.warning("有効なキーワードなし")
                     else:
@@ -1555,12 +1732,8 @@ with tab_main:
                         word_freq = Counter(words)
                         top_words = [w for w, c in word_freq.most_common(cooc_top_n)]
                         pair_counts = Counter()
-                        for _, row in df_drill.iterrows():
-                            dt = ""
-                            if col_map['title']: dt += str(row[col_map['title']]) + " "
-                            if col_map['abstract']: dt += str(row[col_map['abstract']]) + " "
-                            dw = set(extract_compound_nouns(dt, stopwords))
-                            dw = {w for w in dw if w in top_words}
+                        for dw_list in doc_words:
+                            dw = {w for w in set(dw_list) if w in top_words}
                             if len(dw) >= 2:
                                 for pair in combinations(sorted(list(dw)), 2): pair_counts[pair] += 1
                         
@@ -1605,7 +1778,7 @@ with tab_main:
                             net_reps = utils.get_keyword_centric_representatives(df_drill, top_words, n_reps=10)
                             rep_lines_net = []
                             for i, r in enumerate(net_reps):
-                                rep_lines_net.append(f"{i+1}. 【{r['title']}】 ({r['applicant']}) - {r['abstract'][:80]}...")
+                                rep_lines_net.append(f"{i+1}. 【{r['title']}】[{r.get('number','N/A')}] ({r['applicant']}) - {r['abstract'][:80]}...")
 
                             net_data_summary = {
                                 "Total Nodes": G.number_of_nodes(),
@@ -1643,7 +1816,7 @@ with tab_main:
                 (f"{st.session_state.saturnv_labels_map.get(cid)} ({cluster_counts_stats.get(st.session_state.saturnv_labels_map.get(cid), 0)}件)", cid)
                 for cid in sorted(st.session_state.df_main['cluster'].unique())
             ]
-            stats_cluster_filter_w = st.multiselect("集計対象クラスタ:", cluster_options_stats, default=[cluster_options_stats[0]], format_func=lambda x: x[0], key="stats_cluster_filter")
+            stats_cluster_filter_w = st.multiselect("集計対象クラスタ:", cluster_options_stats, default=[cluster_options_stats[0]], format_func=lambda x: x[0], key="stats_cluster_filter", help="統計集計の対象にするクラスタを選びます。特定の技術テーマだけに絞って件数推移や出願人ランキングを見たいときに使います。")
             
             c1, c2 = st.columns(2)
             with c1:
@@ -1661,10 +1834,10 @@ with tab_main:
                 if 'stats_start_year' not in st.session_state: st.session_state.stats_start_year = auto_min_year
                 if 'stats_end_year' not in st.session_state: st.session_state.stats_end_year = auto_max_year
                 
-                s_year = st.number_input('開始年:', min_value=1900, max_value=2100, key="stats_start_year", step=1)
-                e_year = st.number_input('終了年:', min_value=1900, max_value=2100, key="stats_end_year", step=1)
+                s_year = st.number_input('開始年:', min_value=1900, max_value=2100, key="stats_start_year", step=1, help="集計・表示の対象とする年の範囲（始まり）です。")
+                e_year = st.number_input('終了年:', min_value=1900, max_value=2100, key="stats_end_year", step=1, help="集計・表示の対象とする年の範囲（終わり）です。")
             with c2:
-                n_apps = st.number_input('表示人数:', min_value=1, value=15, key="stats_num_assignees")
+                n_apps = st.number_input('表示人数:', min_value=1, value=15, key="stats_num_assignees", help="出願人ランキング等で上位何件まで表示するかです（表示数のみ変わり、分析結果は変わりません）。")
             
             if st.button("特許マップを描画", key="stats_run_button"):
                 df_s = st.session_state.df_main.copy()

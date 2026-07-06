@@ -13,7 +13,7 @@ description: >
 
 - スキル本体の詳細: `.agent/skills/apollo-capcom/SKILL.md` § 4. Phase C
 - Deep Dive ガイド: `capcom_schema/analysis/deep_dive_guide.md`（Step 0-6 の必須セクション・最低行数・ミクロ分析ルール）
-- exemplars: `capcom_schema/exemplars/` 配下の5 Typst ファイル
+- exemplars: `capcom_schema/exemplars/` 配下の7 Typst ファイル（nebula / saturnv / explorer / mega / atlas / core / crew）
 
 ## 実行ステップ
 
@@ -41,6 +41,7 @@ description: >
 - 対応する exemplar を読む（例: Step 1 なら `capcom_schema/exemplars/saturnv_exemplar.typ`）
 - `reports/<module>_deep_dive.typ` を生成
 - 必須: ミクロ分析A（代表特許15件以上）、B（出願人5社以上、各5行以上）、`#snapshot-figure()` 1枚以上
+- 🔄 **モジュール完了ごとにセッション・チェックポイント**: deep_dive を1本生成したら、`reports/_carryover.md` を更新（完了モジュール・次モジュール・直近の固有事実）したうえで、ユーザーに「**新タスクに切り替えますか？**（続行／切替／`/compact`）」と提案して一旦停止する。Phase C は最も枯渇しやすいので**1モジュール=1タスク**を基本とし、切替時は新タスクが `_carryover.md`＋`ls reports/` で次モジュールから自動再開。詳細はスキル本体 `### 🔄 セッション・チェックポイント`
 
 4. **Step 0 NEBULA**: `reports/nebula_deep_dive.typ` 生成（120行以上 / 8セクション）
    - `capcom_schema/exemplars/nebula_exemplar.typ` を参考
@@ -64,12 +65,12 @@ description: >
    - 時系列、ランキング、ライフサイクル
 
 9. **Step 5 CORE**: `reports/core_deep_dive.typ` 生成（80行以上 / 7セクション）
-   - exemplar なし、SKILL.md の指示に従う
-   - ルールベース分類結果の解釈
+   - `capcom_schema/exemplars/core_exemplar.typ` を参考
+   - ルールベース分類結果の解釈。ミクロ分析Aは `data/patents.csv` を重点セルで絞り込み実特許を引用
 
 10. **Step 6 CREW**: `reports/crew_deep_dive.typ` 生成（60行以上、最低行数指定なし）
-    - exemplar なし
-    - ネットワーク分析（betweenness、コミュニティ検出）
+    - `capcom_schema/exemplars/crew_exemplar.typ` を参考（指標ごとに節立て）
+    - ネットワーク分析（媒介中心性・コミュニティ）。色分け指標ごとの解釈、ミクロ分析は `data/patents.csv` を `inventor_main`/`applicant_main` で絞り込み実特許を引用
 
 ### 🛑 SCRIPTED GATE: Phase C 完了判定
 
@@ -98,7 +99,7 @@ description: >
 
 - **`phase_c_gate.sh` の実行スキップは禁止**
 - **「実質的にOK」と質的判断で進むのは禁止**
-- deep_dive を exemplar なしで書き始めるのは禁止（Step 0-4）
+- deep_dive を exemplar なしで書き始めるのは禁止（Step 0-6 すべて exemplar あり）
 - **Agent tool / サブエージェント起動禁止**（Browser subagent も Phase C では使わない）
 
 ## 次ステップ

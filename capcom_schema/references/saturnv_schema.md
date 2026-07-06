@@ -2,7 +2,7 @@
 
 ## 対象ファイル
 - `data/saturnv_clusters.json` (TELESCOPE)
-- `data/saturnv_drilldown.json` (PROBE)
+- `data/saturnv_drilldown_<クラスタ>.json` (PROBE。**親クラスタ別に保存**。旧: 固定名 `saturnv_drilldown.json`)
 
 ## モジュール概要
 Saturn V はSBERT+UMAP+HDBSCANによるAI特許ランドスケープモジュール。
@@ -60,7 +60,9 @@ Saturn V はSBERT+UMAP+HDBSCANによるAI特許ランドスケープモジュー
 
 ---
 
-### PROBE (`saturnv_drilldown.json`)
+### PROBE (`saturnv_drilldown_<クラスタ>.json`)
+
+> 💡 v9 以降、**親クラスタ別ファイル名で保存**される（`saturnv_drilldown_<クラスタ>.json`）ため、複数クラスタを続けて深掘りしても上書きされず全て残る。存在する `saturnv_drilldown_*.json` を各々分析する。レポートでは各ファイルの `parent_cluster` を確認し、その対象の話として書く（旧版は固定名 `saturnv_drilldown.json` で最後のクラスタのみ）。
 
 #### metadata
 
@@ -127,7 +129,7 @@ Saturn V はSBERT+UMAP+HDBSCANによるAI特許ランドスケープモジュー
     "noise_count": 150,
     "noise_ratio": 0.12,
     "noise_interpretation": "標準的・安定構造（5-15%）",
-    "temporal_pattern": "recent_surge | historical | uniform",
+    "temporal_pattern": "近年集中（新興テーマの可能性） | 過去集中（歴史的バリエーション） | 均一分布（永続的ニッチ）",
     "year_distribution": {"2020": 5, "2021": 8, ...},
     "top_applicants": [{"applicant": "A社", "count": 12}, ...],
     "emerging_keywords": [{"keyword": "ペロブスカイト", "frequency": 15}, ...]
@@ -145,7 +147,7 @@ Saturn V はSBERT+UMAP+HDBSCANによるAI特許ランドスケープモジュー
 
 ### 萌芽テーマの分析手順
 1. `emerging_keywords` から頻出語彙を確認
-2. `temporal_pattern` が `recent_surge` なら新興テーマの可能性大
+2. `temporal_pattern` が「近年集中（新興テーマの可能性）」なら新興テーマの可能性大
 3. `top_applicants` で特定企業に集中していれば戦略的ニッチ
 4. `patents.csv` で cluster==-1 のレコードを直接参照し、具体的な特許タイトルを確認
 

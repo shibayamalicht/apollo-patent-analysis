@@ -28,7 +28,7 @@ def parse_ipc_atlas(ipc, level):
         return ipc[:4]
     elif level == 2:
         match = re.match(r'([A-H][0-9]{2}[A-Z]\s*[0-9]+)', ipc)
-        return f"{match.group(1).strip()}/00" if match else ipc
+        return f"{match.group(1).replace(' ', '')}/00" if match else ipc
     else:
         return ipc
 
@@ -75,6 +75,10 @@ def update_fig_layout(fig, title, height=600, show_legend=True):
         layout_params['showlegend'] = False
         
     fig.update_layout(**layout_params)
+    # 横グリッド線の視認性を確保する。plotly_white 既定の gridcolor=#e6eaf1 は淡すぎて、
+    # 棒グラフの上では事実上見えず（50/100 等の線が「無い」ように見える原因）。
+    # ややダークな点線にし、above traces で棒の上にも描画して全目盛りで線が見えるようにする。
+    fig.update_yaxes(gridcolor="#c4c4c4", griddash="dot", layer="above traces")
     return fig
 
 # ==================================================================
@@ -82,8 +86,8 @@ def update_fig_layout(fig, title, height=600, show_legend=True):
 # ==================================================================
 
 st.set_page_config(
-    page_title="APOLLO v8 | ATLAS",
-    page_icon="🌍",
+    page_title="APOLLO v9 | ATLAS",
+    page_icon=utils.module_icon("earth"),
     layout="wide"
 )
 
@@ -91,7 +95,7 @@ st.session_state['current_page'] = 'ATLAS'
 
 utils.render_sidebar()
 
-st.title("🌍 ATLAS")
+utils.module_header("earth", "ATLAS")
 st.markdown("出願推移・出願人ランキング・IPC分布・市場集中度（HHI/Entropy/Gini）を自動可視化し、データセットの全体像を把握します。")
 
 # ==================================================================
@@ -125,9 +129,11 @@ max_year = int(df_main['year'].max())
 
 col1, col2 = st.columns(2)
 with col1:
-    stats_start_year = st.number_input('集計開始年:', min_value=min_year, max_value=max_year, value=min_year, key="atlas_start_year")
+    stats_start_year = st.number_input('集計開始年:', min_value=min_year, max_value=max_year, value=min_year, key="atlas_start_year",
+        help="統計・トレンドを集計する対象期間（出願年）です。")
 with col2:
-    stats_end_year = st.number_input('集計終了年:', min_value=min_year, max_value=max_year, value=max_year, key="atlas_end_year")
+    stats_end_year = st.number_input('集計終了年:', min_value=min_year, max_value=max_year, value=max_year, key="atlas_end_year",
+        help="統計・トレンドを集計する対象期間（出願年）です。")
 
 try:
     df_filtered = df_main[
@@ -144,7 +150,7 @@ try:
     import capcom
     if capcom.is_active() and not df_filtered.empty:
         _yearly = df_filtered['year'].value_counts().sort_index()
-        _trend_dict = {str(int(k)): int(v) for k, v in _yearly.items()}
+        _trend_dict = {str(int(k) if pd.notna(k) else 0): (int(v) if pd.notna(v) else 0) for k, v in _yearly.items()}
 
         # CAGR計算
         _cagr_val, _trend_label = utils.calculate_cagr_slope(df_filtered)
@@ -159,8 +165,8 @@ try:
         # 多様性指標（HHI / Entropy / Gini）
         _div_result = None
         if _app_ranking:
-            _counts_list = list(_app_ranking.values())
-            _div_result = patiroha.calculate_diversity(_counts_list)
+            # 多様性指標は全出願人から計算（上位N社に絞ると集中度を過大評価／不平等度を過小評価するため）
+            _div_result = patiroha.calculate_diversity(_app_counts_ser.values.tolist())
 
         # IPC分布
         _ipc_ranking = {}
@@ -176,7 +182,7 @@ try:
                 "module": "ATLAS",
                 "period": f"{int(stats_start_year)}-{int(stats_end_year)}",
                 "total_patents": len(df_filtered),
-                "unique_applicants": len(_app_ranking) if _app_ranking else 0
+                "unique_applicants": int(_app_counts_ser.size) if _app_ranking else 0
             },
             "trend": _trend_dict,
             "cagr": f"{_cagr_val:.1%}" if _cagr_val is not None else "N/A",
@@ -197,82 +203,37 @@ try:
             atlas_json["status_distribution"] = {str(k): int(v) for k, v in _status_counts.items()}
             _status_by_year = df_filtered.groupby(['year', _status_col]).size().unstack(fill_value=0)
             atlas_json["status_by_year"] = {
-                str(int(year)): {str(col): int(val) for col, val in row.items()}
+                str(int(year) if pd.notna(year) else 0): {str(col): (int(val) if pd.notna(val) else 0) for col, val in row.items()}
                 for year, row in _status_by_year.iterrows()
             }
 
         capcom.save_data("atlas_statistics.json", atlas_json)
 except Exception as e:
-    pass
+    st.caption(f"⚠️ WARN ATLAS統計 の CAPCOM 保存に失敗しました（要確認）: {e}")
 
 st.markdown("---")
 
-tab1, tab1_line, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "件数推移", 
+tab1, tab1_line, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    "件数推移",
     "件数推移（折れ線）",
-    "出願人ランキング", 
-    "IPCランキング", 
-    "出願人×年 バブル", 
+    "出願人ランキング",
+    "IPCランキング",
+    "出願人×年 バブル",
     "IPC×出願人 バブル",
     "構成比マップ (Treemap)",
-    "ライフサイクルマップ"
+    "ライフサイクルマップ",
+    "権利化率マップ"
 ])
 
 # --- ステータスの配色設定 (APOLLO公式パレット — CAPCOMレポートと統一) ---
 # ステータスの意味からセマンティックに色を割り当てる。
 # 全タブで色が統一されるように、ステータスごとの色を固定する。
+# ステータス色はパステル配色（utils.build_status_color_map に集約。参考_AIS 準拠で全タブ統一）
 status_color_map = {}
 status_col = st.session_state.col_map.get('status')
 if status_col:
-    # APOLLO 公式カラーパレット (CAPCOM report_style.typ と統一)
-    APOLLO_STATUS_COLORS = {
-        'granted':   "#1B2A4A",  # NAVY        — 登録/有効 (主役)
-        'published': "#2E5090",  # BLUE        — 公開
-        'pending':   "#3B7DD8",  # ACCENT      — 出願中
-        'examining': "#D4A017",  # AMBER       — 審査中 (注視)
-        'rejected':  "#D64545",  # RED_ACCENT  — 拒絶 (マイナス)
-        'withdrawn': "#666666",  # MEDIUM_GRAY — 取下げ
-        'expired':   "#CCCCCC",  # BORDER_GRAY — 放棄/消滅/失効
-    }
-    # 未分類ステータス用のフォールバック循環色 (NAVYのモノクロ濃淡)
-    APOLLO_STATUS_FALLBACK = ["#5B6E92", "#8A9CC0", "#A8B6D0", "#7D6B8A", "#9C8FA8"]
-
-    def _classify_status(s):
-        """ステータス文字列をセマンティックカテゴリに分類する"""
-        s_lower = str(s).lower()
-        # 登録/有効
-        if any(k in s_lower for k in ['granted', 'registered', 'active', '登録', '有効', '権利存続', '存続']):
-            return 'granted'
-        # 拒絶 (← 「拒絶査定後の出願」等の誤判定を防ぐため pending より先)
-        if any(k in s_lower for k in ['rejected', 'refused', 'denied', '拒絶', '却下']):
-            return 'rejected'
-        # 取下げ
-        if any(k in s_lower for k in ['withdrawn', 'withdraw', '取下', '取り下げ']):
-            return 'withdrawn'
-        # 放棄/消滅/失効
-        if any(k in s_lower for k in ['expired', 'lapsed', 'abandoned', 'dead', '消滅', '失効', '放棄', '満了']):
-            return 'expired'
-        # 審査中
-        if any(k in s_lower for k in ['examining', 'examination', 'review', '審査', '審理']):
-            return 'examining'
-        # 公開
-        if any(k in s_lower for k in ['published', 'publication', '公開', '公表']):
-            return 'published'
-        # 出願中
-        if any(k in s_lower for k in ['pending', 'application', 'filed', 'filing', '出願', '係属']):
-            return 'pending'
-        return None  # 未分類
-
-    # 全てのユニークなステータスを取得（ソートして順序を固定）
     unique_statuses_all = sorted(df_filtered[status_col].dropna().unique().astype(str))
-    fallback_idx = 0
-    for s in unique_statuses_all:
-        category = _classify_status(s)
-        if category and category in APOLLO_STATUS_COLORS:
-            status_color_map[s] = APOLLO_STATUS_COLORS[category]
-        else:
-            status_color_map[s] = APOLLO_STATUS_FALLBACK[fallback_idx % len(APOLLO_STATUS_FALLBACK)]
-            fallback_idx += 1
+    status_color_map = utils.build_status_color_map(unique_statuses_all)
 
 # 1. 件数推移
 with tab1:
@@ -282,7 +243,8 @@ with tab1:
     use_status_breakdown = False
     status_col = st.session_state.col_map.get('status')
     if status_col:
-        use_status_breakdown = st.checkbox("ステータス内訳を表示", key="atlas_use_status_tab1")
+        use_status_breakdown = st.checkbox("ステータス内訳を表示", key="atlas_use_status_tab1",
+            help="ONにすると棒を権利化状況（登録・拒絶・係属など）で色分けし、各年の権利状況の内訳が分かります。OFFは合計件数のみを表示します。")
 
     if st.button("件数推移グラフを描画", key="atlas_run_map1"):
         if df_filtered.empty:
@@ -292,7 +254,7 @@ with tab1:
                  # Stacked Bar Chart by Status
                 plot_data = df_filtered.groupby(['year', status_col]).size().reset_index(name='count')
                 # Use color_discrete_map for consistency
-                fig = px.bar(plot_data, x='year', y='count', color=status_col, labels={'year': '出願年', 'count': '出願件数', status_col: 'ステータス'}, 
+                fig = px.bar(plot_data, x='year', y='count', color=status_col, labels={'year': '出願年', 'count': '出願件数', status_col: 'ステータス'},
                              color_discrete_map=status_color_map,
                              category_orders={status_col: sorted(status_color_map.keys())} # 凡例の順序を統一
                             )
@@ -311,9 +273,45 @@ with tab1:
     if 'atlas_fig_trend' in st.session_state:
         fig = st.session_state['atlas_fig_trend']
         plot_data = st.session_state['atlas_data_trend']
-        
-        st.plotly_chart(fig, use_container_width=True, config={'editable': False})
-        
+
+        # クリック → 該当特許群ポップアップ対応
+        @st.fragment
+        def _atlas_click_trend():
+            utils.disable_selection_fade(fig)
+            _trend_selection = st.plotly_chart(
+                fig, use_container_width=True, config={'editable': False},
+                on_select="rerun", selection_mode="points", key="atlas_chart_trend"
+            )
+
+            # クリック点（出願年・ステータス）から該当特許インデックスを解決
+            def _resolve_trend(point):
+                # 出願年を取得（x優先、customdataにフォールバック）
+                _year_raw = point.get('x')
+                if _year_raw is None:
+                    _cd = point.get('customdata')
+                    if isinstance(_cd, (list, tuple)) and _cd:
+                        _year_raw = _cd[0]
+                try:
+                    _year = int(float(_year_raw))
+                except (TypeError, ValueError):
+                    return None, None
+                _mask = (df_filtered['year'] == _year)
+                _title = f"{_year}年の出願"
+                # ステータス積み上げ表示時は凡例（legendgroup）でステータスも絞る
+                _st_col = st.session_state.col_map.get('status')
+                _status = point.get('legendgroup')
+                if not _status:
+                    # px.bar の積み上げでは curve_number 経由でも取得しうるが、legendgroup を優先
+                    _status = None
+                if _st_col and _st_col in df_filtered.columns and _status:
+                    _mask = _mask & (df_filtered[_st_col].astype(str) == str(_status))
+                    _title = f"{_year}年・{_status} の出願"
+                _idx = df_filtered[_mask].index.tolist()
+                return _idx, f"{_title}（{len(_idx)} 件）"
+
+            utils.handle_chart_click_to_records(_trend_selection, "atlas_chart_trend", _resolve_trend)
+        _atlas_click_trend()
+
         # スナップショットボタン
         snap_data = utils.generate_rich_summary(df_filtered, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=5)
         snap_data['module'] = 'ATLAS'
@@ -335,7 +333,7 @@ with tab1:
             df_snap_safe = pd.DataFrame(plot_data)
             
         # Ensure we don't exceed token limits but prioritize showing full year range
-        snap_data['chart_data'] = df_snap_safe.head(50).to_string(index=False)
+        snap_data['chart_data'] = utils_ai.df_to_markdown(df_snap_safe.head(50), index=False)
         utils.render_snapshot_button(
             title=f"出願件数推移 ({int(stats_start_year)}-{int(stats_end_year)})",
             description="市場全体の出願動向を示すトレンドグラフ。",
@@ -364,9 +362,15 @@ with tab1:
             _meta_trend['最終年件数'] = int(_yearly.iloc[-1])
         _meta_trend['出願人数'] = int(df_filtered['applicant_main'].explode().str.strip().nunique())
 
+        # ステータス内訳ON時は、ステータス×年の内訳と質の分析指示をAIインサイトに渡す
+        _st_ex_t, _st_inst_t = utils_ai.status_insight_addon(
+            use_status_breakdown, df_filtered, status_col, 'year', '出願年')
+        _ctx_t = "棒グラフによる出願件数の年次推移を表示しています。各年の出願件数から、技術分野の成長・成熟・衰退のステージを判定します。"
+        if _st_ex_t:
+            _ctx_t += "さらにステータス内訳（権利状況の積み上げ）も表示しており、各年の権利状況構成は下記[ステータス内訳]に対応します。"
         _trend_prompt = utils_ai.generate_ai_insight_prompt(
             role="特許分析の専門家として、出願件数の時系列推移データを分析してください。",
-            context="棒グラフによる出願件数の年次推移を表示しています。各年の出願件数から、技術分野の成長・成熟・衰退のステージを判定します。",
+            context=_ctx_t,
             data_summary=snap_data.get('chart_data', ''),
             instructions="""\
 以下の観点で分析してください:
@@ -375,10 +379,11 @@ with tab1:
 3. **成長率分析**: CAGRの評価と今後3-5年の予測トレンド
 4. **市場示唆**: 出願動向から読み取れる市場・技術動向への示唆
 
-各主張には必ず具体的な数値を1つ以上含めてください。""",
+各主張には必ず具体的な数値を1つ以上含めてください。""" + _st_inst_t,
             metadata=_meta_trend,
             constraints="データに基づく客観的分析を行い、推測は明確に区別すること。",
-            output_format="Markdown形式。見出し付きの構造化された分析レポート。"
+            output_format="Markdown形式。見出し付きの構造化された分析レポート。",
+            extra_content=_st_ex_t
         )
         utils_ai.render_ai_insight_button(_trend_prompt, "atlas_trend_insight")
 
@@ -390,13 +395,15 @@ with tab1_line:
     
     with col_line_1:
         # モード選択
-        line_mode = st.radio("表示モード:", ["全体推移", "出願人比較"], horizontal=True, key="atlas_line_mode")
+        line_mode = st.radio("表示モード:", ["全体推移", "出願人比較"], horizontal=True, key="atlas_line_mode",
+            help="折れ線で何を比べるかを決めます。「全体推移」は市場全体の年次推移を1本で、「出願人比較」は選んだ出願人ごとに線を分けて出願戦略の違いを比較します。")
     
     with col_line_2:
         # ステータス内訳オプション (全体推移モードのみ)
         use_status_breakdown_line = False
         if line_mode == "全体推移" and status_col:
-            use_status_breakdown_line = st.checkbox("ステータス内訳を表示", key="atlas_use_status_line")
+            use_status_breakdown_line = st.checkbox("ステータス内訳を表示", key="atlas_use_status_line",
+                help="ONにすると権利化状況（登録・拒絶・係属など）ごとに積み上げた面グラフになり、各年の権利状況の内訳が分かります。OFFは合計件数の折れ線のみを表示します。")
     
     target_applicants = []
     
@@ -508,15 +515,14 @@ with tab1_line:
         # Snapshot Button
         snap_data = utils.generate_rich_summary(df_filtered if 'df_target' not in locals() else df_target, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=5)
         snap_data['module'] = 'ATLAS'
-        # Optimize Chart Data
         # Optimize Chart Data (Wide Format for Applicants)
         if data is not None and not data.empty:
              if 'assignee_parsed' in data.columns:
                  # Pivot: Year | App A | App B ...
                  df_pivot = data.pivot(index='year', columns='assignee_parsed', values='count').fillna(0).astype(int).reset_index()
-                 snap_data['chart_data'] = df_pivot.head(40).to_string(index=False)
+                 snap_data['chart_data'] = utils_ai.df_to_markdown(df_pivot.head(40), index=False)
              else:
-                 snap_data['chart_data'] = data.head(40).to_string(index=False)
+                 snap_data['chart_data'] = utils_ai.df_to_markdown(data.head(40), index=False)
         else:
              snap_data['chart_data'] = "No Data"
         utils.render_snapshot_button(
@@ -531,9 +537,15 @@ with tab1_line:
         _meta_line = utils_ai.build_common_metadata(df_main=df_main, df_filtered=df_filtered, col_map=col_map,
             filter_info=f"{int(stats_start_year)}年～{int(stats_end_year)}年")
         _meta_line['表示モード'] = line_mode
+        # ステータス内訳ON時（全体推移モード）は内訳と質の分析指示を渡す
+        _st_ex_l, _st_inst_l = utils_ai.status_insight_addon(
+            use_status_breakdown_line, df_filtered, status_col, 'year', '出願年')
+        _ctx_l = "折れ線グラフによる出願件数の年次推移を表示しています。全体推移モードでは市場全体の動向を、出願人比較モードでは主要プレイヤーの出願戦略の変遷を可視化しています。"
+        if _st_ex_l:
+            _ctx_l += "全体推移モードではステータス内訳（権利状況の積み上げ面）も表示しており、各年の権利状況構成は下記[ステータス内訳]に対応します。"
         _line_prompt = utils_ai.generate_ai_insight_prompt(
             role="特許分析の専門家として、出願件数の時系列推移（折れ線グラフ）を分析してください。",
-            context="折れ線グラフによる出願件数の年次推移を表示しています。全体推移モードでは市場全体の動向を、出願人比較モードでは主要プレイヤーの出願戦略の変遷を可視化しています。",
+            context=_ctx_l,
             data_summary=snap_data.get('chart_data', ''),
             instructions="""\
 以下の観点で分析してください:
@@ -542,10 +554,11 @@ with tab1_line:
 3. **相関分析**: 複数出願人の推移に同期的な動きがあるかを評価
 4. **予測**: 直近の傾向から今後2-3年の方向性を予測
 
-各主張には必ず具体的な数値を1つ以上含めてください。""",
+各主張には必ず具体的な数値を1つ以上含めてください。""" + _st_inst_l,
             metadata=_meta_line,
             constraints="折れ線グラフの傾きの変化に注目し、変曲点を見逃さないこと。",
-            output_format="Markdown形式。見出し付きの構造化された分析レポート。"
+            output_format="Markdown形式。見出し付きの構造化された分析レポート。",
+            extra_content=_st_ex_l
         )
         utils_ai.render_ai_insight_button(_line_prompt, "atlas_trend_line_insight")
 
@@ -554,21 +567,24 @@ with tab2:
     st.subheader("出願人ランキング")
     col2_1, col2_2 = st.columns([2, 1])
     with col2_1:
-         num_to_display_map2 = st.number_input("表示人数:", min_value=1, value=20, key="atlas_num_apps_map2")
-    
+         num_to_display_map2 = st.number_input("表示人数:", min_value=1, value=20, key="atlas_num_apps_map2",
+            help="ランキングで上位何件まで表示するかです（表示数のみ変わり、集中度などの分析結果は変わりません）。")
+
     # Status Breakdown Option
     use_status_breakdown_tab2 = False
     status_col = st.session_state.col_map.get('status')
     with col2_2:
         if status_col:
-            use_status_breakdown_tab2 = st.checkbox("ステータス内訳を表示", key="atlas_use_status_tab2")
+            use_status_breakdown_tab2 = st.checkbox("ステータス内訳を表示", key="atlas_use_status_tab2",
+                help="ONにすると各出願人の棒を権利化状況（登録・拒絶・係属など）で色分けし、出願人ごとの権利状況の内訳が分かります。OFFは合計件数のみを表示します。")
 
     if st.button("出願人ランキングを描画", key="atlas_run_map2"):
         if df_filtered.empty:
             st.warning("データがありません。")
         else:
             # 1. 上位出願人の特定 (合計件数に基づく)
-            assignee_counts = df_filtered['applicant_main'].explode().str.strip().value_counts().head(int(num_to_display_map2)).sort_values(ascending=True)
+            _assignee_counts_full = df_filtered['applicant_main'].explode().str.strip().value_counts()  # 全量（多様性指標用）
+            assignee_counts = _assignee_counts_full.head(int(num_to_display_map2)).sort_values(ascending=True)  # 表示用（上位N社）
             top_applicants = assignee_counts.index.tolist()
 
             if use_status_breakdown_tab2 and status_col:
@@ -592,16 +608,56 @@ with tab2:
             
             st.session_state['atlas_fig_ranking'] = fig
             st.session_state['atlas_data_ranking'] = assignee_counts
+            st.session_state['atlas_data_ranking_full'] = _assignee_counts_full  # 全量（多様性指標用）
 
     # 永続表示
     if 'atlas_fig_ranking' in st.session_state:
         fig = st.session_state['atlas_fig_ranking']
         assignee_counts = st.session_state['atlas_data_ranking']
+        _assignee_counts_full = st.session_state.get('atlas_data_ranking_full', assignee_counts)  # 全量（無ければ表示用で代替）
 
-        st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+        # クリック → 該当特許群ポップアップ対応
+        @st.fragment
+        def _atlas_click_ranking():
+            utils.disable_selection_fade(fig)
+            _rank_selection = st.plotly_chart(
+                fig, use_container_width=True, config={'editable': False},
+                on_select="rerun", selection_mode="points", key="atlas_chart_ranking"
+            )
 
-        # 多様性指標メトリクス
-        _applicant_counts_for_div = assignee_counts.values.tolist()
+            # クリック点（横棒＝出願人名）から該当特許インデックスを解決
+            def _resolve_ranking(point):
+                # 出願人名は横棒の y。customdata を優先しつつ y にフォールバック
+                _appname = None
+                _cd = point.get('customdata')
+                if isinstance(_cd, (list, tuple)) and _cd and isinstance(_cd[0], str):
+                    _appname = _cd[0]
+                if not _appname:
+                    _appname = point.get('y')
+                if not isinstance(_appname, str):
+                    return None, None
+                _appname = _appname.strip()
+                # applicant_main はリスト列（正規化済み）。strip 後一致で判定
+                def _has_app(lst):
+                    if not isinstance(lst, list):
+                        return False
+                    return any(isinstance(a, str) and a.strip() == _appname for a in lst)
+                _mask = df_filtered['applicant_main'].apply(_has_app)
+                _title = _appname
+                # ステータス積み上げ表示時は凡例（legendgroup）でステータスも絞る
+                _st_col = st.session_state.col_map.get('status')
+                _status = point.get('legendgroup')
+                if _st_col and _st_col in df_filtered.columns and _status:
+                    _mask = _mask & (df_filtered[_st_col].astype(str) == str(_status))
+                    _title = f"{_appname}・{_status}"
+                _idx = df_filtered[_mask].index.tolist()
+                return _idx, f"{_title}（{len(_idx)} 件）"
+
+            utils.handle_chart_click_to_records(_rank_selection, "atlas_chart_ranking", _resolve_ranking)
+        _atlas_click_ranking()
+
+        # 多様性指標メトリクス（全市場参加者＝全出願人から計算。上位N社に絞ると集中度を過大評価するため）
+        _applicant_counts_for_div = _assignee_counts_full.values.tolist()
         if _applicant_counts_for_div:
             div = patiroha.calculate_diversity(_applicant_counts_for_div)
             c1, c2, c3 = st.columns(3)
@@ -620,7 +676,7 @@ with tab2:
         df_snap_safe = assignee_counts.head(30).reset_index()
         df_snap_safe.columns = ['Applicant', 'Count']
         df_snap_safe['Applicant'] = df_snap_safe['Applicant'].astype(str).str.slice(0, 50)
-        snap_data['chart_data'] = df_snap_safe.to_string(index=False)
+        snap_data['chart_data'] = utils_ai.df_to_markdown(df_snap_safe, index=False)
         utils.render_snapshot_button(
             title=f"主要出願人ランキング ({int(stats_start_year)}-{int(stats_end_year)})",
             description="特許出願件数に基づく市場の主要プレイヤーランキング。",
@@ -635,7 +691,7 @@ with tab2:
         # 多様性指標計算（HHI / Entropy / Gini）
         _total_patents = assignee_counts.sum()
         if _total_patents > 0:
-            _div_rank = patiroha.calculate_diversity(assignee_counts.values.tolist())
+            _div_rank = patiroha.calculate_diversity(_assignee_counts_full.values.tolist())  # 全出願人から
             _shares = assignee_counts / _total_patents
             _meta_rank['HHI(市場集中度)'] = f"{_div_rank.hhi:.4f} ({_div_rank.hhi_status})"
             _meta_rank['Entropy(多様性)'] = f"{_div_rank.entropy:.2f}"
@@ -645,9 +701,20 @@ with tab2:
             _meta_rank['1位シェア(%)'] = f"{_shares.iloc[-1]*100:.1f}%" if len(_shares) > 0 else "N/A"
         _meta_rank['全出願人数'] = int(df_filtered['applicant_main'].explode().str.strip().nunique())
 
+        # ステータス内訳ON時は、出願人×ステータスの内訳を渡し権利化の質を分析させる
+        _st_ex_r, _st_inst_r = "", ""
+        if use_status_breakdown_tab2 and status_col:
+            _df_exp_r = df_filtered.explode('applicant_main').copy()
+            _df_exp_r['applicant_parsed'] = _df_exp_r['applicant_main'].astype(str).str.strip()
+            _st_ex_r, _st_inst_r = utils_ai.status_insight_addon(
+                True, _df_exp_r, status_col, 'applicant_parsed', '出願人',
+                top_axis=int(num_to_display_map2))
+        _ctx_r = "水平棒グラフによる出願人ランキングを表示しています。出願件数の多い順に主要プレイヤーを表示し、市場の競争構造を可視化しています。"
+        if _st_ex_r:
+            _ctx_r += "さらに出願人ごとのステータス内訳（権利状況の積み上げ）も表示しており、各社の権利状況構成は下記[ステータス内訳]に対応します。"
         _rank_prompt = utils_ai.generate_ai_insight_prompt(
             role="特許分析・競争戦略の専門家として、出願人ランキングデータから競争環境を分析してください。",
-            context="水平棒グラフによる出願人ランキングを表示しています。出願件数の多い順に主要プレイヤーを表示し、市場の競争構造を可視化しています。",
+            context=_ctx_r,
             data_summary=snap_data.get('chart_data', ''),
             instructions="""\
 以下の観点で分析してください:
@@ -657,18 +724,21 @@ with tab2:
 4. **競争パターン**: 上位と下位の件数格差、参入障壁の高さの推定
 5. **戦略的示唆**: 新規参入者やポートフォリオ戦略へのインプリケーション
 
-各主張には必ず具体的な数値を1つ以上含めてください。""",
+各主張には必ず具体的な数値を1つ以上含めてください。""" + _st_inst_r,
             metadata=_meta_rank,
             constraints="出願件数は必ずしも特許の質や事業規模と一致しない点に注意すること。",
-            output_format="Markdown形式。見出し付きの構造化された分析レポート。"
+            output_format="Markdown形式。見出し付きの構造化された分析レポート。",
+            extra_content=_st_ex_r
         )
         utils_ai.render_ai_insight_button(_rank_prompt, "atlas_ranking_insight")
 
 # 3. IPCランキング
 with tab3:
     st.subheader("IPCランキング")
-    ipc_level_map3 = st.selectbox("IPCレベル:", [(1, "サブクラス (A01B)"), (2, "メイングループ (A01B 1/00)")], format_func=lambda x: x[1], key="atlas_ipc_level_map3")
-    num_to_display_map3 = st.number_input("表示IPC数:", min_value=1, value=20, key="atlas_num_ipcs_map3")
+    ipc_level_map3 = st.selectbox("IPCレベル:", [(1, "サブクラス (A01B)"), (2, "メイングループ (A01B 1/00)")], format_func=lambda x: x[1], key="atlas_ipc_level_map3",
+        help="技術分野（IPC）をどの細かさで集計するかです。「サブクラス」は大まかな技術領域、「メイングループ」はより細かい区分で見られます（細かいほど分類数が増え、1分類あたりの件数は小さくなります）。")
+    num_to_display_map3 = st.number_input("表示IPC数:", min_value=1, value=20, key="atlas_num_ipcs_map3",
+        help="ランキングで上位何件まで表示するかです（表示数のみ変わり、分析結果は変わりません）。")
     if st.button("IPCランキングを描画", key="atlas_run_map3"):
         if df_filtered.empty:
             st.warning("データがありません。")
@@ -696,7 +766,7 @@ with tab3:
         # Optimize Chart Data
         df_snap_safe = data.head(30).reset_index()
         df_snap_safe.columns = ['IPC', 'Count']
-        snap_data['chart_data'] = df_snap_safe.to_string(index=False)
+        snap_data['chart_data'] = utils_ai.df_to_markdown(df_snap_safe, index=False)
         utils.render_snapshot_button(
             title=f"IPCランキング ({ipc_level_map3[1]})",
             description="技術分野 (IPC) 別の上位ランキング。",
@@ -733,14 +803,16 @@ with tab4:
     st.subheader("出願人 × 年 バブルチャート")
     col4_1, col4_2 = st.columns([2, 1])
     with col4_1:
-         num_to_display_map4 = st.number_input("表示人数:", min_value=1, value=10, key="atlas_num_apps_map4")
-    
+         num_to_display_map4 = st.number_input("表示人数:", min_value=1, value=10, key="atlas_num_apps_map4",
+            help="バブルに表示する上位出願人を何件までにするかです（表示数のみ変わり、分析結果は変わりません）。")
+
     # Status Breakdown Option
     use_status_breakdown_tab4 = False
     status_col = st.session_state.col_map.get('status')
     with col4_2:
         if status_col:
-            use_status_breakdown_tab4 = st.checkbox("ステータス内訳を表示", key="atlas_use_status_tab4")
+            use_status_breakdown_tab4 = st.checkbox("ステータス内訳を表示", key="atlas_use_status_tab4",
+                help="ONにすると各セルが権利化状況（登録・拒絶・係属など）の円グラフになり、出願人×年ごとの権利状況の内訳が分かります。OFFは件数の大きさを示すバブルのみを表示します。")
 
     if st.button("出願人×年 バブルを描画", key="atlas_run_map4"):
         assignees_exploded = df_filtered.explode('applicant_main')
@@ -957,13 +1029,11 @@ with tab4:
         data = st.session_state['atlas_data_bubble_tab4']
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
-        
+
         # Snapshot Button
-        # Snapshot Button
-        snap_data = utils.generate_rich_summary(data, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=5)
+        snap_data = utils.generate_rich_summary(df_filtered, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=5)
         snap_data['module'] = 'ATLAS'
-        
-        # Optimize Chart Data
+
         # Optimize Chart Data
         if hasattr(data, 'head'):
 
@@ -990,9 +1060,9 @@ with tab4:
                  # Aggregate to remove status if just showing bubble position
                  df_pivot = df_snap_safe.groupby(['year', 'assignee_parsed'])['count'].sum().reset_index()
                  df_pivot = df_pivot.pivot(index='year', columns='assignee_parsed', values='count').fillna(0).astype(int).reset_index()
-                 snap_data['chart_data'] = df_pivot.head(40).to_string(index=False)
+                 snap_data['chart_data'] = utils_ai.df_to_markdown(df_pivot.head(40), index=False)
              else:
-                 snap_data['chart_data'] = df_snap_safe.head(40).to_string(index=False)
+                 snap_data['chart_data'] = utils_ai.df_to_markdown(df_snap_safe.head(40), index=False)
         else:
              snap_data['chart_data'] = "Data Summary"
 
@@ -1008,9 +1078,20 @@ with tab4:
         _meta_bubble = utils_ai.build_common_metadata(df_main=df_main, df_filtered=df_filtered, col_map=col_map,
             filter_info=f"{int(stats_start_year)}年～{int(stats_end_year)}年")
         _meta_bubble['表示出願人数'] = num_to_display_map4
+        # ステータス内訳ON時のみ、出願人×ステータスの内訳を渡す（OFF時は内訳に言及しない）
+        _st_ex_b, _st_inst_b = "", ""
+        if use_status_breakdown_tab4 and status_col:
+            _df_exp_b = df_filtered.explode('applicant_main').copy()
+            _df_exp_b['applicant_parsed'] = _df_exp_b['applicant_main'].astype(str).str.strip()
+            _st_ex_b, _st_inst_b = utils_ai.status_insight_addon(
+                True, _df_exp_b, status_col, 'applicant_parsed', '出願人',
+                top_axis=int(num_to_display_map4))
+        _ctx_b = "バブルチャートで主要出願人の年別出願件数を可視化しています。バブルの大きさは件数、位置は年×出願人を示します。"
+        if _st_ex_b:
+            _ctx_b += "ステータス内訳をONにしており、各セルの権利状況はパイチャートグリッドで表示されています（各社の権利状況構成は下記[ステータス内訳]に対応）。"
         _bubble_prompt = utils_ai.generate_ai_insight_prompt(
             role="特許分析・競争戦略の専門家として、出願人の年別出願活動をバブルチャートから分析してください。",
-            context="バブルチャートで主要出願人の年別出願件数を可視化しています。バブルの大きさは件数、位置は年×出願人を示します。ステータス内訳がある場合はパイチャートグリッドで表示されています。",
+            context=_ctx_b,
             data_summary=snap_data.get('chart_data', ''),
             instructions="""\
 以下の観点で分析してください:
@@ -1019,10 +1100,11 @@ with tab4:
 3. **競合分析**: 同時期に活動が集中している出願人群の特定と競争構造の推定
 4. **戦略転換**: 出願量が急変した出願人とその時期の特定
 
-各主張には必ず具体的な数値を1つ以上含めてください。""",
+各主張には必ず具体的な数値を1つ以上含めてください。""" + _st_inst_b,
             metadata=_meta_bubble,
             constraints="バブルサイズの違いに注目し、出願人間の規模感の差を明確にすること。",
-            output_format="Markdown形式。見出し付きの構造化された分析レポート。"
+            output_format="Markdown形式。見出し付きの構造化された分析レポート。",
+            extra_content=_st_ex_b
         )
         utils_ai.render_ai_insight_button(_bubble_prompt, "atlas_app_year_insight")
 
@@ -1030,9 +1112,12 @@ with tab4:
 with tab5:
     st.subheader("IPC × 出願人 バブルチャート")
     col1, col2, col3 = st.columns(3)
-    with col1: ipc_level_map5 = st.selectbox("IPCレベル:", [(1, "サブクラス"), (2, "メイングループ")], format_func=lambda x: x[1], key="atlas_ipc_level_map5")
-    with col2: num_ipcs_map5 = st.number_input("IPC数 (Y軸):", min_value=1, value=15, key="atlas_num_ipcs_map5")
-    with col3: num_apps_map5 = st.number_input("出願人数 (X軸):", min_value=1, value=15, key="atlas_num_apps_map5")
+    with col1: ipc_level_map5 = st.selectbox("IPCレベル:", [(1, "サブクラス"), (2, "メイングループ")], format_func=lambda x: x[1], key="atlas_ipc_level_map5",
+        help="技術分野（IPC）をどの細かさで集計するかです。「サブクラス」は大まかな技術領域、「メイングループ」はより細かい区分で見られます（細かいほど分類数が増えます）。")
+    with col2: num_ipcs_map5 = st.number_input("IPC数 (Y軸):", min_value=1, value=15, key="atlas_num_ipcs_map5",
+        help="クロス集計（出願人×技術分野IPC）で縦軸に上位何件のIPCを取るかです。大きいほど広く見えますが密になります。")
+    with col3: num_apps_map5 = st.number_input("出願人数 (X軸):", min_value=1, value=15, key="atlas_num_apps_map5",
+        help="クロス集計（出願人×技術分野IPC）で横軸に上位何件の出願人を取るかです。大きいほど広く見えますが密になります。")
     if st.button("IPC×出願人 バブルを描画", key="atlas_run_map5"):
         df_exploded = df_filtered.explode('applicant_main').explode('ipc_normalized')
         df_exploded.dropna(subset=['applicant_main', 'ipc_normalized'], inplace=True)
@@ -1057,17 +1142,16 @@ with tab5:
         data = st.session_state['atlas_data_bubble_ipc']
         
         st.plotly_chart(fig, use_container_width=True, config={'editable': False})
-        
+
         # Snapshot Button
-        # Snapshot Button
-        snap_data = utils.generate_rich_summary(data, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=5)
+        snap_data = utils.generate_rich_summary(df_filtered, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=5)
         snap_data['module'] = 'ATLAS'
-        
+
         # Optimize Chart Data (IPC Bubble)
         df_snap_safe = data.head(30).copy()
         if 'assignee_parsed' in df_snap_safe.columns:
              df_snap_safe['assignee_parsed'] = df_snap_safe['assignee_parsed'].astype(str).str.slice(0, 50)
-        snap_data['chart_data'] = df_snap_safe.to_string(index=False)
+        snap_data['chart_data'] = utils_ai.df_to_markdown(df_snap_safe, index=False)
 
         utils.render_snapshot_button(
             title=f"IPC x 出願人 ポートフォリオ",
@@ -1101,7 +1185,8 @@ with tab5:
 # 6. 構成比マップ
 with tab6:
     st.subheader("構成比マップ (Treemap)")
-    tree_mode = st.radio("表示モード:", ["IPC階層 (技術分野)", "出願人シェア"], horizontal=True, key="atlas_tree_mode")
+    tree_mode = st.radio("表示モード:", ["IPC階層 (技術分野)", "出願人シェア"], horizontal=True, key="atlas_tree_mode",
+        help="面積マップで何の構成比を見るかを決めます。「IPC階層」は技術分野ごと、「出願人シェア」は出願人ごとの件数比率を、面積の大きさで表します。")
     if st.button("ツリーマップを描画", key="atlas_run_treemap"):
         with st.spinner("作成中..."):
             if tree_mode == "IPC階層 (技術分野)":
@@ -1141,7 +1226,7 @@ with tab6:
         df_snap_safe = data.head(30).copy()
         if 'Applicant' in df_snap_safe.columns:
              df_snap_safe['Applicant'] = df_snap_safe['Applicant'].astype(str).str.slice(0, 50)
-        snap_data['chart_data'] = df_snap_safe.to_string(index=False)
+        snap_data['chart_data'] = utils_ai.df_to_markdown(df_snap_safe, index=False)
 
         utils.render_snapshot_button(
             title="構成比マップ (Treemap)",
@@ -1262,7 +1347,7 @@ with tab7:
         
         # Optimize Chart Data (Lifecycle)
         df_snap_safe = data.head(30).copy()
-        snap_data['chart_data'] = df_snap_safe.to_string(index=False)
+        snap_data['chart_data'] = utils_ai.df_to_markdown(df_snap_safe, index=False)
         utils.render_snapshot_button(
             title="技術ライフサイクルマップ",
             description="出願件数と出願人数（参入企業数）の相関から、技術の成熟度を診断するマップ。",
@@ -1307,3 +1392,169 @@ with tab7:
             output_format="Markdown形式。見出し付きの構造化された分析レポート。"
         )
         utils_ai.render_ai_insight_button(_life_prompt, "atlas_lifecycle_insight")
+
+
+# 8. 権利化率マップ
+with tab8:
+    st.subheader("権利化率マップ（出願数 × 権利化率）")
+    _gr_status_col = st.session_state.col_map.get('status')
+    if not _gr_status_col or _gr_status_col not in df_filtered.columns:
+        st.info("ステータス（法的状態）カラムが割り当てられていません。Mission Control でステータス列を指定すると、権利化率の分析が可能になります。")
+    else:
+        st.info("""
+        **「多数出願だが権利化率が低い」vs「少数だが権利化率が高い」を一望します。**
+        - 横軸: 出願数（活動量）／縦軸: 権利化率（登録の割合）／バブル径: 出願数
+        - **右上**=量・質ともに強い／**左上**=少数精鋭（質重視）／**右下**=量産だが権利化に課題／**左下**=限定的
+        """)
+        _gr_c1, _gr_c2, _gr_c3 = st.columns(3)
+        with _gr_c1:
+            _gr_unit = st.radio("分析単位:", ["出願人", "IPC"], horizontal=True, key="atlas_gr_unit",
+                help="権利化率を何ごとに集計するかを決めます。「出願人」は会社・組織ごと、「IPC」は技術分野ごとに、出願数と権利化率を比較します。")
+        with _gr_c2:
+            _gr_denom_label = st.radio(
+                "権利化率の定義:", ["登録 / 全件", "登録 / 処分確定"], key="atlas_gr_denom",
+                help="「全件」=係属中・審査中も分母に含む（母集団全体の権利化度）。「処分確定」=登録+拒絶+取下+消滅のうち登録の割合（審査が終わった案件での権利化度）。")
+        with _gr_c3:
+            _gr_topn = st.slider("表示上位（出願数順）:", 5, 50, 20, key="atlas_gr_topn",
+                help="マップに表示する上位を出願数の多い順に何件までにするかです。中央値の十字は表示中の主体で計算するため、表示数を変えると象限の区切り（中央値）も動きます（十字が常に表示点群の中央に来る設計）。")
+        _gr_min = st.slider("最小出願数（ノイズ除外）:", 1, 20, 3, key="atlas_gr_min",
+            help="この件数未満の出願人・技術分野を除外します。少数出願のノイズ（権利化率が偶然極端になる等）を除き、傾向を安定させます。")
+        _gr_cl1, _gr_cl2 = st.columns(2)
+        with _gr_cl1:
+            _gr_logx = st.checkbox("横軸を対数スケール", value=True, key="atlas_gr_logx",
+                help="ONにすると横軸（出願数）を対数表示にします。少数出願と多数出願が桁違いに離れている場合でも、小規模な主体が重ならず見やすくなります（分析結果は変わりません）。")
+        with _gr_cl2:
+            _gr_expired_granted = st.checkbox(
+                "失効（満了・放棄・消滅）も「権利化成功」に含める", value=True, key="atlas_gr_expired",
+                help="ON: 一度でも登録された出願は権利化成功とみなす（失効をマイナスにしない）。OFF: 現在有効（権利継続等）のみを成功とみなす（現存権利率）。")
+
+        _gr_group_col = 'applicant_main' if _gr_unit == "出願人" else 'ipc_normalized'
+        _gr_denom = "all" if _gr_denom_label == "登録 / 全件" else "decided"
+
+        if st.button("権利化率マップを描画", key="atlas_run_grantrate"):
+            if _gr_group_col not in df_filtered.columns:
+                st.warning(f"{_gr_unit}データ（{_gr_group_col}）がありません。")
+            else:
+                _gr_stats = utils.compute_grant_rate_stats(
+                    df_filtered, _gr_group_col, _gr_status_col, denom=_gr_denom, min_count=_gr_min,
+                    expired_as_granted=_gr_expired_granted)
+                if not _gr_stats.empty:
+                    _gr_stats = _gr_stats[_gr_stats['grant_rate'].notna()]
+                if _gr_stats.empty:
+                    st.warning("該当データがありません（最小出願数を下げる／ステータス値をご確認ください）。")
+                    st.session_state.pop('atlas_gr_stats', None)
+                else:
+                    st.session_state['atlas_gr_stats'] = _gr_stats
+                    st.session_state['atlas_gr_meta'] = {
+                        'unit': _gr_unit, 'denom': _gr_denom_label, 'logx': _gr_logx,
+                        'expired_as_granted': _gr_expired_granted}
+
+        if 'atlas_gr_stats' in st.session_state:
+            _gr_stats_all = st.session_state['atlas_gr_stats']
+            _gr_meta = st.session_state.get('atlas_gr_meta', {})
+            _gr_unit_d = _gr_meta.get('unit', '出願人')
+            _gr_exp = bool(_gr_meta.get('expired_as_granted', True))
+            _gr_defn = f"{_gr_meta.get('denom', '')}／失効は{'登録に含む' if _gr_exp else '登録に含まない'}"
+            _gr_view = _gr_stats_all.head(int(_gr_topn)).copy()
+
+            # 中央値（象限の十字）は「表示中の上位N者」で計算する。
+            # 母集団全体（_gr_stats_all）の中央値だと、出願数のロングテールに引っ張られて
+            # 縦の中央値線が表示点群の左外に出てしまい、十字に分かれない（上位者は全員右側に寄る）。
+            # 表示中の主体で算出すれば、十字は常に表示点群の中央に来て4象限が機能する。
+            _med_x = float(_gr_view['total'].median())
+            _med_y = float(_gr_view['grant_rate'].median())
+
+            _smax = max(int(_gr_view['total'].max()), 1)
+            _sizes = (_gr_view['total'] / _smax * 48 + 8)
+
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=_gr_view['total'], y=_gr_view['grant_rate'],
+                mode='markers+text',
+                text=_gr_view['group'], textposition="top center", textfont=dict(size=11),
+                marker=dict(
+                    size=_sizes, sizemode='diameter',
+                    color=_gr_view['grant_rate'], colorscale='RdYlGn',
+                    cmin=0, cmax=100, showscale=True, colorbar=dict(title="権利化率(%)"),
+                    line=dict(width=1, color='#333333'), opacity=0.85),
+                customdata=_gr_view[['granted_eff', 'total', 'rejected', 'expired', 'granted']].values,
+                hovertemplate=("<b>%{text}</b><br>出願数: %{customdata[1]}<br>権利化成功: %{customdata[0]}"
+                               "（権利継続 %{customdata[4]} / 失効 %{customdata[3]}）<br>権利化率: %{y:.1f}%"
+                               "<br>拒絶: %{customdata[2]}<extra></extra>")
+            ))
+            # 注: plotly は対数軸でも add_vline の x 座標を自動で log10 変換する。
+            # 生値（_med_x）のまま渡すのが正しい（log10 を渡すと二重変換でズレる）。
+            fig.add_vline(x=_med_x, line=dict(color='#888888', dash='dash'))
+            fig.add_hline(y=_med_y, line=dict(color='#888888', dash='dash'))
+            update_fig_layout(fig, f'権利化率マップ（{_gr_unit_d}別・{_gr_defn}）', height=720, show_legend=False)
+            fig.update_layout(xaxis_title=f"出願数（{_gr_unit_d}別）", yaxis_title="権利化率 (%)")
+            fig.update_yaxes(range=[-5, 105])
+            if _gr_meta.get('logx'):
+                fig.update_xaxes(type='log')
+
+            st.plotly_chart(fig, use_container_width=True, config={'editable': False})
+            st.caption(f"中央値: 出願数={_med_x:.0f} / 権利化率={_med_y:.1f}%　｜　右上=量質両立・左上=少数精鋭・右下=量産だが権利化課題・左下=限定的")
+
+            _gr_table = _gr_view[['group', 'total', 'granted_eff', 'granted', 'expired', 'rejected', 'examining', 'pending', 'grant_rate']].rename(
+                columns={'group': _gr_unit_d, 'total': '出願数', 'granted_eff': '権利化成功', 'granted': '権利継続',
+                         'expired': '失効', 'rejected': '拒絶', 'examining': '審査中', 'pending': '係属', 'grant_rate': '権利化率(%)'})
+            st.dataframe(_gr_table, use_container_width=True, hide_index=True)
+            st.caption(f"権利化成功 = 権利継続{' + 失効' if _gr_exp else ''}（定義: {_gr_defn}）")
+
+            # CAPCOM 保存
+            try:
+                import capcom
+                if capcom.is_active():
+                    capcom.save_data("atlas_grant_rate.json", {
+                        "unit": _gr_unit_d,
+                        "definition": _gr_defn,
+                        "expired_as_granted": _gr_exp,
+                        "median_total": _med_x,
+                        "median_grant_rate": _med_y,
+                        "groups": _gr_view[['group', 'total', 'granted_eff', 'granted', 'rejected', 'examining',
+                                            'pending', 'withdrawn', 'expired', 'grant_rate']].to_dict('records'),
+                    })
+            except Exception as e:
+                st.caption(f"⚠️ WARN 権利化率マップ の CAPCOM 保存に失敗しました（要確認）: {e}")
+
+            # スナップショット
+            snap_data = utils.generate_rich_summary(df_filtered, title_col=col_map['title'], abstract_col=col_map['abstract'], n_representatives=5)
+            snap_data['module'] = 'ATLAS'
+            snap_data['chart_data'] = utils_ai.df_to_markdown(_gr_table, index=False)
+            utils.render_snapshot_button(
+                title=f"権利化率マップ（{_gr_unit_d}別）",
+                description="出願数と権利化率の象限分析。多数出願だが権利化率が低い／少数だが権利化率が高い、を比較する。",
+                key="atlas_grantrate_snap", fig=fig, data_summary=snap_data)
+
+            # AI インサイト
+            _meta_gr = utils_ai.build_common_metadata(
+                df_main=df_main, df_filtered=df_filtered, col_map=col_map,
+                filter_info=f"{int(stats_start_year)}年～{int(stats_end_year)}年")
+            _meta_gr['分析単位'] = _gr_unit_d
+            _meta_gr['権利化率の定義'] = _gr_defn
+            _meta_gr['失効の扱い'] = '登録（権利化成功）に含める' if _gr_exp else '含めない（現存権利のみ）'
+            _meta_gr['出願数の中央値'] = f"{_med_x:.0f}"
+            _meta_gr['権利化率の中央値'] = f"{_med_y:.1f}%"
+            _gr_prompt = utils_ai.generate_ai_insight_prompt(
+                role="知財戦略アナリストとして、出願数と権利化率の象限分析を行ってください。",
+                context="""\
+権利化率マップ（バブルチャート）を表示しています。
+- X軸: 出願数（活動量）／Y軸: 権利化率（= 権利化成功 ÷ 分母）／バブル径: 出願数
+- **権利化成功 = 権利継続 ＋ 失効（満了・放棄・消滅）**。一度でも登録された出願は「権利化に成功した」とみなし、失効はマイナス要素にしない（その後の失効は維持判断の結果）。具体的な設定はメタデータ「失効の扱い」を参照。
+- 破線は各軸の中央値で、4象限に分かれます。
+- 右上=量質両立、左上=少数精鋭（質）、右下=量産だが権利化に課題、左下=限定的。""",
+                data_summary=snap_data.get('chart_data', ''),
+                instructions="""\
+以下の観点で分析してください:
+1. **象限ごとの主要プレイヤー**: 各象限に位置する出願人/技術を具体名で挙げる
+2. **量産だが権利化率が低い主体**: その理由の仮説（拒絶率・取下げ率の高さ、出願戦略、技術成熟度、審査対応 等）
+3. **少数精鋭（高権利化率）の主体**: 集中特許戦略の示唆
+4. **権利化成功の内訳**: 権利継続（現存権利）と失効（過去に登録）の比率に触れ、「現存する権利の厚み」と「過去の権利化実績」を区別して論じる
+5. **競争上の含意**: 権利化率の差が事業・参入障壁に与える影響
+6. **戦略提言**: 自社・対象分野の知財戦略への示唆
+
+各主張に具体的な数値（出願数・権利化率）を必ず1つ以上含めてください。""",
+                metadata=_meta_gr,
+                constraints="権利化率は「権利化成功＝権利継続＋失効（一度でも登録された）」で算出している（失効は権利化の失敗ではなく維持判断の結果）。この定義を踏まえて解釈し、審査係属中の比率が高い主体は暫定値である点にも触れること。",
+                output_format="Markdown形式。見出し付きの構造化された分析レポート。")
+            utils_ai.render_ai_insight_button(_gr_prompt, "atlas_grantrate_insight")

@@ -109,6 +109,9 @@ typst compile --root ".." reports/report.typ reports/report.pdf
 python3 reports/generate_pptx.py  # capcom_schema/templates/apollo_template.pptx を使用
 ```
 
+> 🔑 **ヘルパーは import して使う（コピーしない）**: `generate_pptx.py` の冒頭で `import sys; sys.path.insert(0, "capcom_schema/templates"); from apollo_slides import *` し、`add_title_shape` / `add_kpi_slide` 等のヘルパーを呼ぶ。`slides_spec.md` は設計ガイド（いつ・どのヘルパーを・どんな主張骨格で使うか）として読み、ヘルパー実装を本文へ写経しない。
+> 🔑 **PPTX はレポート（`reports/report.typ`）を土台に**作る（evidence の寄せ集め禁止）。レポート各章の主張→根拠→示唆を凝縮し章順に沿わせる。出所はモジュール名でなくデータにする。詳細は `capcom_schema/templates/slides_spec.md` §0.9 を熟読。
+
 出力ファイル:
 - `reports/report.pdf` — 本レポート（Typst PDF）
 - `reports/presentation.pptx` — スライド（python-pptx、推奨25-40枚）

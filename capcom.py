@@ -91,6 +91,36 @@ def _get_store():
 # --- スナップショット出力 (画像) ---
 # ==================================================================
 
+def _snapshot_key(snap_id, index=None):
+    """
+    スナップショットの保存キー（＝ファイル名のベース）を生成する。
+    save_snapshot_image と snapshot_logical_path が共通で使う単一ソース。
+    """
+    safe_id = _sanitize_filename(snap_id)
+    return f"{safe_id}_{index}" if index is not None else safe_id
+
+
+def snapshot_logical_path(snap_id, index=None):
+    """
+    スナップショット画像の ZIP 内論理パスを返す（保存はしない）。
+
+    save_snapshot_image がキー生成に使うのと同じ規則でパスを組み立てるため、
+    「撮影時に本来名（atlas_* / saturn_* / core_* など）で保存済みのスナップショット」を、
+    VOYAGER evidence の画像参照として **再保存せずに指す** ために使う。
+    これにより、同一画像が voyager_ev* として snapshots/ に二重に入る問題（マップ重複の主因）を防ぐ。
+
+    Args:
+        snap_id: スナップショット ID（render_snapshot_button の key と同じ）
+        index: 連番（複数画像の場合）。単一画像なら None。
+
+    Returns:
+        str: ZIP 内の論理パス（例: 'snapshots/atlas_trend_snap.png'）または None
+    """
+    if not snap_id:
+        return None
+    return os.path.join("snapshots", f"{_snapshot_key(snap_id, index)}.png")
+
+
 def save_snapshot_image(snap_id, image_bytes, index=None):
     """
     スナップショット画像 (PNG bytes) を session_state に格納する。
@@ -101,23 +131,18 @@ def save_snapshot_image(snap_id, image_bytes, index=None):
         index: 連番 (複数画像の場合)
 
     Returns:
-        str: ZIP 内の論理パス (例: 'snapshots/voyager_ev1_0.png') または None
+        str: ZIP 内の論理パス (例: 'snapshots/atlas_trend_snap.png') または None
     """
     store = _get_store()
     if store is None or image_bytes is None:
         return None
 
-    safe_id = _sanitize_filename(snap_id)
-    if index is not None:
-        key = f"{safe_id}_{index}"
-    else:
-        key = safe_id
-
+    key = _snapshot_key(snap_id, index)
     store['snapshots'][key] = {
         'image': image_bytes,
         'index': index,
     }
-    return os.path.join("snapshots", f"{key}.png")
+    return snapshot_logical_path(snap_id, index)
 
 
 def save_metadata(snapshots_list):
@@ -235,6 +260,20 @@ def save_voyager_mission(mission_data):
     store['voyager']['mission'] = mission_data
 
 
+def clear_voyager_evidence():
+    """CAPCOM Export 再実行時に古い evidence を一掃する。
+
+    evidence は ev{N}_{module}.json をキーに dict 蓄積されるため、スナップショットを
+    削除/追加して再 Export すると順序や id（N）が変わり、古い ev{N}_{module}.json が
+    上書きされずに残る（id 重複・mission.json と evidence/ の件数不整合の原因）。
+    Export のたびに現在の snapshots から作り直すので、先に全消去する。
+    """
+    store = _get_store()
+    if store is None:
+        return
+    store['voyager']['evidence'] = {}
+
+
 def save_voyager_evidence(filename, evidence_data):
     """voyager/evidence/{filename} を保存"""
     store = _get_store()
@@ -321,7 +360,10 @@ def save_patents_csv():
     # EAGLE クラスタ列
     df_eagle = st.session_state.get('df_eagle')
     if df_eagle is not None and 'eagle_cluster' in df_eagle.columns:
-        df_export['eagle_cluster'] = df_eagle['eagle_cluster'].values
+        # インデックス整列で代入（直後の eagle_cluster_label や他列と統一）。
+        # df_eagle は df_main.copy() で同一インデックスのため結果は同じだが、.values の
+        # 位置代入は行順ズレに弱いので、安全側のインデックス整列にそろえる。
+        df_export['eagle_cluster'] = df_eagle['eagle_cluster']
         eagle_map = st.session_state.get('eagle_labels_map', {})
         if eagle_map:
             df_export['eagle_cluster_label'] = df_eagle['eagle_cluster'].map(
@@ -476,10 +518,21 @@ def export_session_zip(selected_tools=None):
                 json.dumps(ev_data, ensure_ascii=False, indent=2, default=str)
             )
 
-        # 5. metadata.json
+        # 5. metadata.json（解析環境情報＝使用した文埋め込みモデル等を付与）
+        export_metadata = dict(store['metadata'])
+        try:
+            import utils as _utils
+            _info = _utils.current_sbert_model_info()
+            export_metadata['analysis_environment'] = {
+                'sbert_model': _info['name'],          # 例: intfloat/multilingual-e5-base
+                'embedding_dim': _info.get('dim'),     # 例: 768
+                'text_preprocessing': 'Janome形態素解析 + 複合名詞結合',
+            }
+        except Exception:
+            pass  # メタ付与に失敗しても ZIP 出力は継続
         zf.writestr(
             f'{sid}/metadata.json',
-            json.dumps(store['metadata'], ensure_ascii=False, indent=2, default=str)
+            json.dumps(export_metadata, ensure_ascii=False, indent=2, default=str)
         )
 
         # 6. リポジトリの不変アセット（Claude Code 用の基本資材）
@@ -545,6 +598,30 @@ def _add_repo_assets_to_zip(zf, sid, project_root):
                 zf.write(full, f'{sid}/{rel}')
 
 
+def _mirror_skill_path(rel):
+    """
+    ツール固有のスキル/ワークフロー配置を、現行ツールのスキル自動探索パス
+    `.agents/`(複数形) にも複製するためのミラー相対パスを返す。該当しなければ None。
+
+    背景（2026-06 Web調査）: Codex CLI / Antigravity IDE の現行スキル自動探索対象は
+    プロジェクト直下の `.agents/skills`(複数形) であり、従来 APOLLO が同梱してきた
+    `.codex/skills` / `.agent/skills`(単数) は自動探索対象に含まれない公算が高い。
+    リポジトリ構造は従来のまま維持しつつ、ZIP には正規パスにも複製しておくことで、
+    ツールがどちらを探索しても `apollo-capcom` スキルが発見される（dual-emit）。
+
+      .codex/skills/...    → .agents/skills/...
+      .agent/skills/...    → .agents/skills/...
+      .agent/workflows/... → .agents/workflows/...
+    """
+    norm = rel.replace(os.sep, '/')
+    for src, dst in (('.codex/skills/', '.agents/skills/'),
+                     ('.agent/skills/', '.agents/skills/'),
+                     ('.agent/workflows/', '.agents/workflows/')):
+        if norm.startswith(src):
+            return dst + norm[len(src):]
+    return None
+
+
 def _add_tool_patch_to_zip(zf, sid, project_root, tool_key):
     """
     capcom_schema_patches/{tool_key}/ 配下の資材を ZIP 内セッション直下に展開同梱する。
@@ -556,6 +633,8 @@ def _add_tool_patch_to_zip(zf, sid, project_root, tool_key):
       - README.md, apply_patch.sh は同梱から除外（開発者向け・実行不要）
       - それ以外のファイル/ディレクトリ（AGENTS.md, GEMINI.md, .codex/, .agent/, etc.）は
         `capcom_schema_patches/{tool_key}/<path>` → `{sid}/<path>` に転記
+      - スキル/ワークフローは現行の自動探索パス `.agents/`(複数形) にも複製する
+        （_mirror_skill_path。スキル発見性を高める dual-emit）
       - AGENTS.md のように Codex と Antigravity で同じ arcname になるファイルは、
         既に ZIP に追加済みならスキップ（両者は共通内容のため内容は同じ）
     """
@@ -579,11 +658,16 @@ def _add_tool_patch_to_zip(zf, sid, project_root, tool_key):
             full = os.path.join(root, fname)
             rel = os.path.relpath(full, patch_root)
             arcname = f'{sid}/{rel}'
-            if arcname in existing:
-                # Codex と Antigravity が共通の AGENTS.md を持つケース等。既存を優先する
-                continue
-            zf.write(full, arcname)
-            existing.add(arcname)
+            if arcname not in existing:
+                zf.write(full, arcname)
+                existing.add(arcname)
+            # 現行ツールの自動探索パス `.agents/` にもミラー複製（dual-emit）
+            mirror_rel = _mirror_skill_path(rel)
+            if mirror_rel:
+                mirror_arc = f'{sid}/{mirror_rel}'
+                if mirror_arc not in existing:
+                    zf.write(full, mirror_arc)
+                    existing.add(mirror_arc)
 
 
 # ==================================================================

@@ -87,6 +87,9 @@ VOYAGER はスナップショット収集とCAPCOM Export を行うモジュー�
 | `dataset` | object | データセットの基本情報 |
 | `modules_used` | [string] | Evidence が収集されたモジュール名のリスト |
 | `available_data_files` | object | `data/` 内のファイル名と説明の辞書 |
+| `population_meta` | object | 母集団メタ（`query_intent` 設計意図 / `query_logic` 論理式 / `coverage_years` 収録年 / `database_name` DB名）。空文字は未指定 |
+| `report_directives` | object | レポート/スライド生成への任意指示。`image_slide_instruction`（どの画像をどこで使うか等のユーザー指示）。空文字は指示なし |
+| `capcom_tools` | object | 選択された CAPCOM ツール（`selected` 表示名 / `selected_keys` = claude_code / codex / antigravity） |
 
 #### dataset オブジェクト
 
@@ -95,7 +98,7 @@ VOYAGER はスナップショット収集とCAPCOM Export を行うモジュー�
 | `total_patents` | int | データセット全体の特許件数 | `2847` |
 | `period` | string | データセットの対象期間。`"開始年-終了年"` 形式 | `"2018-2024"` |
 | `column_mapping` | object | `col_map` の内容。カラム名のマッピング辞書 | `{"title": "発明の名称", "abstract": "要約", ...}` |
-| `preprocessing` | string | 適用された前処理パイプラインの概要 | `"Janome + SBERT(paraphrase-multilingual-MiniLM-L12-v2)"` |
+| `preprocessing` | string | 適用された前処理パイプラインの概要（SBERTモデルは選択式。実値は metadata.json の `analysis_environment.sbert_model` を参照） | `"Janome + SBERT(intfloat/multilingual-e5-base)"` |
 | `tfidf_vocab_size` | int | TF-IDF語彙サイズ（特徴語数） | `5200` |
 | `stopwords_count` | int | 適用されたストップワードの総数 | `380` |
 
@@ -122,6 +125,7 @@ CAPCOM Export パッケージを受け取った場合、以下の順序で読み
 3. **個別 Evidence ファイルを読み込む** -- `evidence/ev{N}_{module}.json` を開き、`data_summary` でモジュール固有の分析データを確認する。`description` にはスナップショットの文脈情報が含まれる。
 4. **context.json を読み込む** -- `dataset` でデータセット全体のメタ情報（件数、期間、前処理方法等）を把握する。`column_mapping` により、各フィールドの元のカラム名を確認できる。
 5. **available_data_files を確認する** -- Evidence の `data_summary` だけでは不足する場合、`data/` 内の補足ファイル（`patents.csv`, 各モジュールのJSON等）を選択的に読み込む。`context.json` の `available_data_files` にファイル名と説明の対応が記載されている。
+6. **report_directives を確認する** -- `image_slide_instruction` に値があれば、レポートの図の選定・配置、およびスライドの画像選択に **ユーザー指示として最優先で従う**（例:「表紙にクラスタ動態マップ」「権利化率マップはスライド必須」）。空ならAIが最適な画像を選ぶ。なお**レポート本文の図キャプションは常にAIが執筆**し、ユーザーの要点記入は不要。**スライドは各スライドに要点（■サブメッセージ）が必須**で、本指示があればそれに沿って作成する。
 
 ## 解釈ガイドライン
 

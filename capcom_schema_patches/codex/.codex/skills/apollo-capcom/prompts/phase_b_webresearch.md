@@ -39,9 +39,10 @@ Phase B Web 調査テーマ候補:
 3. <政策名> 政策動向（経産省「次世代電池戦略」等、国の補助金・規制）
 4. 主要学会の最新発表（<学会名>）
 5. 競合国外企業の参入動向
+6. 【立場が competitor/buyer/supplier（関係性立場）かつ own_company 指定時は**必須**】自社「<own_company>」の事業・主要製品・技術/特許ポジション・市場での立ち位置（対象企業との対比材料）
 ```
 
-その直後に `ask_user_question` を呼び出して実施可否を取得する。
+その直後に `ask_user_question` を呼び出して実施可否を取得する。**立場が `competitor` / `buyer` / `supplier`（関係性立場）で `narrative_stance.own_company` が設定されている場合は、テーマ6（自社調査）を必ず含めること**（`data_notes.md` §3、`terminology.md` §6-2-B）。
 
 ---
 

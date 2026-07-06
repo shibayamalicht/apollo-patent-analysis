@@ -1,0 +1,7 @@
+# APOLLO Streamlit 設定
+[server]
+# 大規模ラベル編集（数十〜百クラスタの data_editor）と大きなランドスケープ図/
+# クラスタ動態マップを同一ページで再描画する際、WebSocket メッセージが既定上限
+# (200MB) 付近で破損し "Bad message format / Tried to use SessionInfo before it
+# was initialized" が出ることがある。上限を引き上げて緩和する。
+maxMessageSize = 500

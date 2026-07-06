@@ -1,8 +1,10 @@
 # MEGA スキーマ
 
 ## 対象ファイル
-- `data/mega_momentum.json` (PULSE 4象限)
-- `data/mega_drilldown.json` (ポートフォリオ詳細)
+- `data/mega_momentum_<軸>.json` (PULSE 4象限。**軸別に保存される**: 出願人=`mega_momentum_applicant.json` / IPC=`mega_momentum_ipc.json` / Fターム=`mega_momentum_fterm.json`)。※旧バージョンは軸非依存の `mega_momentum.json` 単一ファイル（最後の軸で上書きされる不具合があった）
+- `data/mega_drilldown_<対象>.json` (ポートフォリオ詳細。**対象別に保存**: 例 `mega_drilldown_トヨタ自動車.json`。旧: 固定名 `mega_drilldown.json`)
+
+> 💡 複数軸を実行した場合、軸ごとに別ファイルが残る。**存在する `mega_momentum_*.json` を全て読み、各軸を個別に分析する**（`metadata.axis` で軸名を確認）。
 
 ## モジュール概要
 
@@ -13,7 +15,7 @@ MEGA (動態分析) モジュールは、特許出願の時系列動態をマク
 
 ## JSONスキーマ
 
-### mega_momentum.json (PULSE 4象限)
+### mega_momentum_<軸>.json (PULSE 4象限。軸別: applicant/ipc/fterm)
 
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
@@ -23,8 +25,8 @@ MEGA (動態分析) モジュールは、特許出願の時系列動態をマク
 | `metadata.axis` | string | 分析軸ラベル。`"出願人"` / `"IPC (メイングループ)"` / `"Fターム (テーマコード)"` のいずれか |
 | `metadata.total_entities` | integer | entities配列の要素数（フィルタ後のエンティティ総数） |
 | `entities` | array | 各エンティティ（出願人・IPC等）の動態データ |
-| `entities[].name` | string | エンティティ名 **（注意: 現行コードではバグにより `X_Present`（CAGR値）が格納される。本来はインデックス値＝出願人名等が入るべき）** |
-| `entities[].cagr` | float | CAGR値 **（注意: 現行コードでは `row.get('cagr')` だが DataFrame に `cagr` 列は存在しないため常に `0`。本来は `X_Present` の値が入るべき）** |
+| `entities[].name` | string | エンティティ名（`metadata.axis` に対応＝出願人名／IPC メイングループ／F タームテーマコード）。※v9 で修正済み（旧版は `X_Present` が誤格納されていた） |
+| `entities[].cagr` | float | CAGR 値（X 軸＝過去の勢い）。※v9 で修正済み（旧版は常に `0` だった） |
 | `entities[].activity` | integer | 現在の活動量（Y_Present: 直近N年の出願件数合計） |
 | `entities[].total` | integer | 累計総出願件数（Bubble_Present: バブルサイズに対応） |
 | `entities[].quadrant` | string | 所属する象限ラベル（下記「4象限の定義」参照） |
@@ -62,7 +64,9 @@ MEGA (動態分析) モジュールは、特許出願の時系列動態をマク
 }
 ```
 
-### mega_drilldown.json (TELESCOPE ドリルダウン)
+### mega_drilldown_<対象>.json (TELESCOPE ドリルダウン)
+
+> 💡 v9 以降、**対象別ファイル名で保存**される（`mega_drilldown_<対象>.json`）ため、複数対象を続けて深掘りしても上書きされず全て残る。存在する `mega_drilldown_*.json` を各々分析する。レポートでは各ファイルの `metadata.drilldown_target` を確認し、その対象の話として書く（旧版は固定名 `mega_drilldown.json` で最後の対象のみ）。
 
 | フィールド | 型 | 説明 |
 |-----------|-----|------|
@@ -75,7 +79,7 @@ MEGA (動態分析) モジュールは、特許出願の時系列動態をマク
 | `clusters[].cluster_id` | integer | クラスタID。`-1` はノイズ（HDBSCANが未分類とした特許群） |
 | `clusters[].label` | string | クラスタラベル。TF-IDFの上位語から自動生成。形式: `"[ID] 単語1, 単語2, 単語3"`（ノイズの場合は `"ノイズ"`） |
 | `clusters[].count` | integer | クラスタ内の特許件数 |
-| `clusters[].representatives` | array | 代表特許のリスト（文字列配列）。各要素は `"  * [公開番号]【タイトル】(出願人, 年, IPC:分類): 要約先頭200文字..."` 形式 **（注意: 現行コードでは `embeddings` 変数未定義のため空リストになる可能性が高い）** |
+| `clusters[].representatives` | array | 代表特許のリスト（文字列配列）。各要素は `"  * [公開番号]【タイトル】(出願人, 年, IPC:分類): 要約先頭200文字..."` 形式。※v9 で修正済み（旧版は変数未定義で空リストになっていた） |
 
 #### サンプル構造
 
@@ -106,16 +110,22 @@ MEGA (動態分析) モジュールは、特許出願の時系列動態をマク
 }
 ```
 
-## 既知のバグ
+## 分析軸（出願人 / IPC / F ターム）— ⚠️ レポート執筆時の最重要注意
 
-### mega_momentum.json
+MEGA PULSE は **3 つの分析軸**で実行できる（UI のセレクトボックス）。各軸が独立した 4 象限マップを生成する。
 
-1. **`name` フィールドの値が不正**: コード `row.get('X_Present', row.name ...)` により、DataFrame の列 `X_Present` が存在するためその値（CAGR の float 値）が `name` に格納される。本来は `row.name`（インデックス値＝出願人名等）が入るべき。
-2. **`cagr` フィールドが常に 0**: コード `row.get('cagr', 0)` だが、DataFrame には `cagr` という名前の列は存在しない（CAGRの値は `X_Present` 列に格納されている）。そのためデフォルト値 `0` が常に返る。
+| 軸 | `metadata.axis` の値 | 説明 | 利用条件 |
+|----|--------------------|------|---------|
+| 出願人 | `"出願人"` | 出願人ごとの成長×活動量 | 常時 |
+| IPC | `"IPC (メイングループ)"` | IPC メイングループごとの動態 | 常時 |
+| F ターム | `"Fターム (テーマコード)"` | F タームテーマごとの動態 | F ターム列がマッピングされている場合のみ |
 
-### mega_drilldown.json
+**⚠️ 執筆時に必ず踏まえる**: v9 以降、JSON は**軸別ファイル名で保存**される（`mega_momentum_applicant.json` / `_ipc.json` / `_fterm.json`）ため上書き衝突は解消した。スナップショット画像のタイトルにも軸名が入る（「MEGA PULSE: 〇〇軸 …」）。このため:
+- **存在する `mega_momentum_*.json` を全て読み、各軸を個別に分析する**。JSON の `metadata.axis` で軸名を確認し、「どの軸の数値か」を明示する（出願人の数値を F タームの話に混ぜない）。
+- **スナップショット画像を貼るなら、その軸を本文で必ず分析する**。スナップショットのタイトルにある軸名と本文の軸を一致させる。分析しない図は貼らない（前回レポートの「F タームのみ分析なのに出願人マップも貼付」はこの取り違えが原因）。
+- 旧バージョンの単一 `mega_momentum.json` しか無いセッションでは、その 1 軸（`metadata.axis`）のみを分析対象とする。
 
-3. **`representatives` が空リストになる**: コード内で `embeddings` 変数を参照しているが、ドリルダウン処理では変数名は `emb` として定義されており、`embeddings` はスコープ内に存在しない。結果として例外が発生し `_reps = []` のまま空リストが出力される。
+> 旧版にあった `name`/`cagr`/`representatives` の不具合は **v9 で修正済み**（`name`=軸のインデックス名、`cagr`=X_Present の CAGR、`representatives`=代表特許が入る）。
 
 ## 解釈ガイドライン
 

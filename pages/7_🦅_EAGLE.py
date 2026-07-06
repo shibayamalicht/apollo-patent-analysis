@@ -29,7 +29,7 @@ import matplotlib.font_manager as fm
 warnings.filterwarnings('ignore')
 
 # ページ設定
-st.set_page_config(page_title="APOLLO v8 | EAGLE", page_icon="🦅", layout="wide")
+st.set_page_config(page_title="APOLLO v9 | EAGLE", page_icon=utils.module_icon("eagle"), layout="wide")
 
 st.session_state['current_page'] = 'EAGLE'
 
@@ -44,7 +44,7 @@ if FONT_PATH:
 # サイドバー
 utils.render_sidebar()
 
-st.title("🦅 EAGLE")
+utils.module_header("eagle", "EAGLE")
 st.markdown("投げ縄ツールで技術マップ上の任意の領域を手動選択し、独自のクラスタを構築・分析します。")
 
 # ==================================================================
@@ -107,7 +107,7 @@ def extract_compound_nouns(text, stopwords_list):
     text = normalize_text(text)
     text = apply_ngram_filters(text)
     text = re.sub(r'【.*?】', '', text)
-    text = re.sub(r'[!\"#$%&\'()*+,-./:;<=>?@[\]^_`{|}~]', ' ', text)
+    text = re.sub(r'[!"#$%&\'()*+,\-./:;<=>?@\[\\\]^_`{|}~]', ' ', text)
 
     try:
         tokens = t.tokenize(text)
@@ -143,14 +143,10 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_k
     if not words: return None
     word_freq = Counter(words)
     try:
-        wc = WordCloud(
-            width=800, height=400, background_color='white',
-            font_path=font_path, collocations=False,
-            max_words=100
-        ).generate_from_frequencies(word_freq)
+        wc_array = utils.compute_wordcloud_array(tuple(sorted(word_freq.items())), font_path)
 
         fig, ax = plt.subplots(figsize=(12, 6))
-        ax.imshow(wc, interpolation='bilinear')
+        ax.imshow(wc_array, interpolation='bilinear')
         ax.set_title(title, fontsize=20)
         ax.axis('off')
         st.pyplot(fig)
@@ -170,8 +166,8 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_k
                     fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
                     buf.seek(0)
                     capcom.save_snapshot_image(f"{capcom_key}_wordcloud", buf.read())
-            except Exception:
-                pass
+            except Exception as e:
+                st.caption(f"⚠️ WARN ワードクラウド の CAPCOM 保存に失敗しました（要確認）: {e}")
 
         # VOYAGERスナップショットボタン
         if capcom_key:
@@ -232,15 +228,28 @@ def get_top_tfidf_words(row_vector, feature_names, top_n=5):
 
 # ヘルパー: ホバーテキスト更新 (EAGLE用)
 def update_hover_text_eagle(df, col_map, labels_map=None, cluster_col='eagle_cluster'):
-    hover_texts = []
-    for index, row in df.iterrows():
-        text = ""
-        if col_map['title'] and pd.notna(row[col_map['title']]): text += f"<b>名称:</b> {str(row[col_map['title']])[:50]}...<br>"
-        if col_map['app_num'] and pd.notna(row[col_map['app_num']]): text += f"<b>番号:</b> {row[col_map['app_num']]}<br>"
-        if col_map['applicant'] and pd.notna(row[col_map['applicant']]): text += f"<b>出願人:</b> {str(row[col_map['applicant']])[:50]}...<br>"
-        if 'characteristic_words' in row: text += f"<b>特徴語:</b> {row['characteristic_words']}<br>"
-        hover_texts.append(text)
-    return hover_texts
+    # ベクトル化: pandas の文字列演算で一括処理する（数千〜万行でも高速）
+    parts = pd.Series([""] * len(df), index=df.index)
+
+    title_c = col_map.get('title')
+    if title_c and title_c in df.columns:
+        seg = "<b>名称:</b> " + df[title_c].astype(str).str[:50] + "...<br>"
+        parts = parts + seg.where(df[title_c].notna(), "")
+
+    num_c = col_map.get('app_num')
+    if num_c and num_c in df.columns:
+        seg = "<b>番号:</b> " + df[num_c].astype(str) + "<br>"
+        parts = parts + seg.where(df[num_c].notna(), "")
+
+    app_c = col_map.get('applicant')
+    if app_c and app_c in df.columns:
+        seg = "<b>出願人:</b> " + df[app_c].astype(str).str[:50] + "...<br>"
+        parts = parts + seg.where(df[app_c].notna(), "")
+
+    if 'characteristic_words' in df.columns:
+        parts = parts + ("<b>特徴語:</b> " + df['characteristic_words'].astype(str) + "<br>")
+
+    return parts.tolist()
 
 # データ読み込み
 if not st.session_state.get("preprocess_done", False):
@@ -288,7 +297,9 @@ if 'characteristic_words' not in st.session_state.df_eagle.columns:
              st.session_state.df_eagle['characteristic_words'] = st.session_state.df_main['characteristic_words']
 
 # hover_textの存在確認
-if 'hover_text' not in st.session_state.df_eagle.columns or 'characteristic_words' not in st.session_state.df_eagle['hover_text'].iloc[0]:
+if ('hover_text' not in st.session_state.df_eagle.columns
+        or st.session_state.df_eagle.empty
+        or '特徴語' not in st.session_state.df_eagle['hover_text'].iloc[0]):
     st.session_state.df_eagle['hover_text'] = update_hover_text_eagle(st.session_state.df_eagle, col_map)
 
 # ヘルパー: ラベル生成（単一クラスタ用、投げ縄選択時に使用）
@@ -301,7 +312,7 @@ def generate_label_for_cluster(df_sub, tfidf_mat, feat_names, top_n=3):
     # 全件を同一クラスタ(0)として扱い、c-TF-IDFでラベル生成
     import numpy as np
     dummy_labels = np.zeros(len(df_sub), dtype=int)
-    label_map = patiroha.auto_label(texts, dummy_labels, method='c-tfidf', top_n=top_n)
+    label_map = utils.safe_auto_label(texts, dummy_labels, method='c-tfidf', top_n=top_n)
     # "[0] term1, term2, term3" から "[0] " を除去して返す
     raw = label_map.get(0, "Empty")
     return raw.split("] ", 1)[-1] if "] " in raw else raw
@@ -336,7 +347,7 @@ def get_density_trace(x, y, mesh_size):
 # --- 共通設定 ---
 col_common, _ = st.columns([1, 2])
 with col_common:
-    resolution = st.number_input("メッシュサイズ (Grid)", min_value=10, max_value=200, value=30, step=5, key="eagle_resolution_common")
+    resolution = st.number_input("メッシュサイズ (Grid)", min_value=10, max_value=200, value=30, step=5, key="eagle_resolution_common", help="密度マップ（ヒートマップ）を描くときの格子の細かさです。大きいほど細かい格子になり局所的な濃淡が見えますが、点がまばらだと粗く見えます。小さいほど滑らかで大まかな分布になります。")
 
 st.markdown("---")
 
@@ -426,7 +437,7 @@ st.subheader("手動選択クラスタリング")
 # クラスタ管理UI
 c_mgmt1, c_mgmt2 = st.columns([1, 1])
 with c_mgmt1:
-    edit_mode = st.radio("モード:", ["編集中 (Edit)", "閲覧中 (FIX)"], horizontal=True, key="eagle_edit_mode")
+    edit_mode = st.radio("モード:", ["編集中 (Edit)", "閲覧中 (FIX)"], horizontal=True, key="eagle_edit_mode", help="マップの操作モードを切り替えます。編集中＝投げ縄（Lasso）で範囲を選び、新規クラスタを作成・削除できます。閲覧中（FIX）＝クラスタ構成をロックし、点をクリックして特許の詳細を確認できます。クラスタを作るときは編集中、結果を見るときは閲覧中にします。")
 
 is_editing = (edit_mode == "編集中 (Edit)")
 
@@ -438,119 +449,189 @@ else:
 # コントロール (ラベル & 密度固定)
 col_ctrl1, col_ctrl2 = st.columns([1, 2])
 with col_ctrl1:
-    show_labels_chk = st.checkbox("マップにラベルを表示する", value=True, key="eagle_main_show_labels")
+    show_labels_chk = st.checkbox("マップにラベルを表示する", value=True, key="eagle_main_show_labels", help="俯瞰図に各クラスタの名前ラベルを重ねて表示するかどうかです。オンにすると技術テーマが一目で分かりますが、クラスタが多いと重なって読みにくくなります。点の分布だけを見たいときはオフにします。")
 with col_ctrl2:
-    fix_density_chk = st.checkbox("密度マップを固定 (全体基準)", value=True, key="eagle_fix_density")
+    fix_density_chk = st.checkbox("密度マップを固定 (全体基準)", value=True, key="eagle_fix_density", help="密度マップ（ヒートマップ）の濃淡の基準を全データ共通に固定するかどうかです。オンにすると期間や出願人で絞り込んでも色の濃さが同じ尺度になり、期間どうしの混雑度を正しく比較できます。オフにすると表示中のデータだけで色を割り当てるため、絞り込んだ範囲内の相対的な濃淡が見やすくなります。")
 
 # 現在のクラスタを表示
-fig_lasso = go.Figure()
-
-# 1. 密度背景 (トレンドに基づく)
-# fix_density_chkがONの場合、絶対スケール比較にglobal zmaxを利用
-if not df_trend.empty:
-    density_trace = get_density_trace(df_trend['umap_x'], df_trend['umap_y'], resolution)
-    if fix_density_chk and eagle_global_zmax is not None:
-        density_trace.update(zauto=False, zmin=0, zmax=eagle_global_zmax)
-    fig_lasso.add_trace(density_trace)
-
-# 2. ゴーストポイント (除外データ)
-if not df_ghost.empty:
-    fig_lasso.add_trace(go.Scattergl(
-        x=df_ghost['umap_x'], y=df_ghost['umap_y'], mode='markers',
-        marker=dict(color='#dddddd', size=3, opacity=0.3),
-        name='その他 (Ghost)',
-        hoverinfo='skip'
-    ))
-
-# 3. フォーカスポイント (クラスタリング対象)
-uniq = sorted(df_focus['eagle_cluster'].unique())
-color_seq = utils.APOLLO_COLORS
-
-is_applicant_filtered = "ALL" not in selected_apps
-
-# 編集モード用マーカー枠線
-marker_border = dict(width=1, color='#333333') if is_editing else dict(width=0)
-
-if is_applicant_filtered:
-    # 出願人着色モード (Saturn Vスタイル)
-    palette = px.colors.qualitative.Bold
-    
-    for i, app_name in enumerate(selected_apps):
-        # この出願人でフィルタ
-        mask = df_focus[col_map['applicant']].fillna('').str.contains(re.escape(app_name))
-        d_app = df_focus[mask]
-        
-        if not d_app.empty:
-                # 動的ホバーテキスト構築
-                # 内部クラスタIDをラベルにマッピング
-                current_labels = d_app['eagle_cluster'].map(lambda x: st.session_state.eagle_labels_map.get(x, str(x)) if x != -1 else "")
-                dynamic_hover = d_app['hover_text'] + d_app['eagle_cluster'].apply(lambda x: f"<b>クラスタ:</b> {st.session_state.eagle_labels_map.get(x, str(x))}" if x != -1 else "")
-                
-                fig_lasso.add_trace(go.Scattergl(
-                    x=d_app['umap_x'], y=d_app['umap_y'], mode='markers',
-                    marker=dict(color=palette[i % len(palette)], size=6, opacity=0.9, line=marker_border),
-                    name=app_name,
-                    customdata=d_app.index,
-                    hoverinfo='text',
-                    hovertext=dynamic_hover,
-                    showlegend=True
-                ))
+# fig_lasso をフィルタ・表示条件・クラスタ構成が変わったときだけ再構築し、
+# それ以外のリラン（投げ縄選択・他ウィジェット操作等）では session_state のキャッシュを再利用する。
+_eagle_fig_key = (
+    date_filter_val, tuple(selected_apps), is_editing, fix_density_chk, show_labels_chk,
+    int(resolution),
+    tuple(sorted(st.session_state.eagle_labels_map.items())),
+    tuple(st.session_state.df_eagle['eagle_cluster'].value_counts().sort_index().items()),
+)
+if (st.session_state.get('eagle_main_fig_key') == _eagle_fig_key
+        and 'eagle_main_fig' in st.session_state):
+    fig_lasso = st.session_state['eagle_main_fig']
 else:
-    # クラスタ着色モード (オリジナル)
-    for i, c in enumerate(uniq):
-        d = df_focus[df_focus['eagle_cluster'] == c]
-        if d.empty: continue
-        name = st.session_state.eagle_labels_map.get(c, str(c))
-        color = '#dddddd' if c == -1 else color_seq[i % len(color_seq)]
-        opacity = 0.3 if c == -1 else 0.8
-        
-        # クラスタモードの場合、d内の全点はクラスタc(name)に属する
-        dynamic_hover_c = d['hover_text'] + (f"<b>クラスタ:</b> {name}" if c != -1 else "")
+    fig_lasso = go.Figure()
 
+    # 1. 密度背景 (トレンドに基づく)
+    # fix_density_chkがONの場合、絶対スケール比較にglobal zmaxを利用
+    if not df_trend.empty:
+        density_trace = get_density_trace(df_trend['umap_x'], df_trend['umap_y'], resolution)
+        if fix_density_chk and eagle_global_zmax is not None:
+            density_trace.update(zauto=False, zmin=0, zmax=eagle_global_zmax)
+        fig_lasso.add_trace(density_trace)
+
+    # 2. ゴーストポイント (除外データ)
+    if not df_ghost.empty:
         fig_lasso.add_trace(go.Scattergl(
-            x=d['umap_x'], y=d['umap_y'], mode='markers',
-            marker=dict(color=color, size=5, opacity=opacity, line=marker_border),
-            name=name,
-            customdata=d.index,
-            hoverinfo='text',
-            hovertext=dynamic_hover_c,
-            showlegend=False
+            x=df_ghost['umap_x'], y=df_ghost['umap_y'], mode='markers',
+            marker=dict(color='#dddddd', size=3, opacity=0.3),
+            name='その他 (Ghost)',
+            hoverinfo='skip'
         ))
 
-# 3. アノテーション
-annotations_main = []
-if show_labels_chk:
-    for c in uniq:
-        if c == -1: continue
-        d = df_focus[df_focus['eagle_cluster'] == c]
-        if d.empty: continue
+    # 3. フォーカスポイント (クラスタリング対象)
+    uniq = sorted(df_focus['eagle_cluster'].unique())
+    color_seq = utils.APOLLO_COLORS
+
+    is_applicant_filtered = "ALL" not in selected_apps
+
+    # 編集モード用マーカー枠線
+    marker_border = dict(width=1, color='#333333') if is_editing else dict(width=0)
+
+    if is_applicant_filtered:
+        # 出願人着色モード (Saturn Vスタイル)
+        palette = px.colors.qualitative.Bold
+    
+        for i, app_name in enumerate(selected_apps):
+            # この出願人でフィルタ
+            mask = df_focus[col_map['applicant']].fillna('').str.contains(re.escape(app_name))
+            d_app = df_focus[mask]
         
-        mean_x = d['umap_x'].mean()
-        mean_y = d['umap_y'].mean()
-        label_text = st.session_state.eagle_labels_map.get(c, str(c))
+            if not d_app.empty:
+                    # 動的ホバーテキスト構築
+                    # 内部クラスタIDをラベルにマッピング
+                    current_labels = d_app['eagle_cluster'].map(lambda x: st.session_state.eagle_labels_map.get(x, str(x)) if x != -1 else "")
+                    dynamic_hover = d_app['hover_text'] + d_app['eagle_cluster'].apply(lambda x: f"<b>クラスタ:</b> {st.session_state.eagle_labels_map.get(x, str(x))}" if x != -1 else "")
+                
+                    fig_lasso.add_trace(go.Scattergl(
+                        x=d_app['umap_x'], y=d_app['umap_y'], mode='markers',
+                        marker=dict(color=palette[i % len(palette)], size=6, opacity=0.9, line=marker_border),
+                        name=app_name,
+                        customdata=d_app.index,
+                        hoverinfo='text',
+                        hovertext=dynamic_hover,
+                        showlegend=True
+                    ))
+    else:
+        # クラスタ着色モード (オリジナル)
+        for i, c in enumerate(uniq):
+            d = df_focus[df_focus['eagle_cluster'] == c]
+            if d.empty: continue
+            name = st.session_state.eagle_labels_map.get(c, str(c))
+            color = '#dddddd' if c == -1 else color_seq[i % len(color_seq)]
+            opacity = 0.3 if c == -1 else 0.8
         
-        try:
-            c_idx_strict = uniq.index(c)
-            border_color = color_seq[c_idx_strict % len(color_seq)]
-        except: 
-            border_color = "#333333"
+            # クラスタモードの場合、d内の全点はクラスタc(name)に属する
+            dynamic_hover_c = d['hover_text'] + (f"<b>クラスタ:</b> {name}" if c != -1 else "")
 
-        annotations_main.append(go.layout.Annotation(
-            x=mean_x, y=mean_y, text=label_text, showarrow=False, 
-            font=dict(size=11, color='black', family="Helvetica"), 
-            bgcolor='rgba(255,255,255,0.7)',
-            bordercolor=border_color,
-            borderwidth=1,
-            borderpad=3
-        ))
+            fig_lasso.add_trace(go.Scattergl(
+                x=d['umap_x'], y=d['umap_y'], mode='markers',
+                marker=dict(color=color, size=5, opacity=opacity, line=marker_border),
+                name=name,
+                customdata=d.index,
+                hoverinfo='text',
+                hovertext=dynamic_hover_c,
+                showlegend=False
+            ))
 
-fig_lasso.update_layout(annotations=annotations_main)
-update_fig_eagle(fig_lasso, "Current Clusters", show_legend=False)
+    # 3. アノテーション
+    annotations_main = []
+    if show_labels_chk:
+        for c in uniq:
+            if c == -1: continue
+            d = df_focus[df_focus['eagle_cluster'] == c]
+            if d.empty: continue
+        
+            mean_x = d['umap_x'].mean()
+            mean_y = d['umap_y'].mean()
+            label_text = st.session_state.eagle_labels_map.get(c, str(c))
+        
+            try:
+                c_idx_strict = uniq.index(c)
+                border_color = color_seq[c_idx_strict % len(color_seq)]
+            except: 
+                border_color = "#333333"
 
+            annotations_main.append(go.layout.Annotation(
+                x=mean_x, y=mean_y, text=label_text, showarrow=False, 
+                font=dict(size=11, color='black', family="Helvetica"), 
+                bgcolor='rgba(255,255,255,0.7)',
+                bordercolor=border_color,
+                borderwidth=1,
+                borderpad=3
+            ))
+
+    fig_lasso.update_layout(annotations=annotations_main)
+    update_fig_eagle(fig_lasso, "Current Clusters", show_legend=False)
+
+    # 表示範囲を明示固定し、かつフィルタやクラスタ構成に依存せず一定にする。
+    # 必ず全宇宙 df_universe の【全点】から範囲を算出する（ノイズ/クラスタで絞らない）。
+    # ※ 有効クラスタ(eagle_cluster != -1)だけで算出すると、EAGLE は投げ縄で
+    #   手動クラスタを作るため、1つ目のクラスタを作った瞬間に範囲がそのクラスタの外接矩形へ
+    #   縮小し「最初のクラスタにズームインする」ことになる。全点基準なら枠が動かず、
+    #   「全体表示に戻す」のオートスケール（全データ収容）とも一致する。
+    _bounds_df = df_universe
+    if not _bounds_df.empty and 'umap_x' in _bounds_df.columns and 'umap_y' in _bounds_df.columns:
+        _ex_min, _ex_max = _bounds_df['umap_x'].min(), _bounds_df['umap_x'].max()
+        _ey_min, _ey_max = _bounds_df['umap_y'].min(), _bounds_df['umap_y'].max()
+        _ex_pad = (_ex_max - _ex_min) * 0.02 if _ex_max > _ex_min else 1.0
+        _ey_pad = (_ey_max - _ey_min) * 0.02 if _ey_max > _ey_min else 1.0
+        fig_lasso.update_layout(
+            xaxis=dict(range=[_ex_min - _ex_pad, _ex_max + _ex_pad], autorange=False, constrain="domain"),
+            yaxis=dict(range=[_ey_min - _ey_pad, _ey_max + _ey_pad], autorange=False,
+                       scaleanchor="x", scaleratio=1, constrain="domain"),
+        )
+        # 「全体表示に戻す」で固定レンジを再適用できるよう、算出した範囲を保持する。
+        st.session_state['_eagle_xy_range'] = (
+            [_ex_min - _ex_pad, _ex_max + _ex_pad],
+            [_ey_min - _ey_pad, _ey_max + _ey_pad],
+        )
+
+    st.session_state['eagle_main_fig'] = fig_lasso
+    st.session_state['eagle_main_fig_key'] = _eagle_fig_key
 # インタラクティブロジック
 if is_editing:
+    # 操作UI（選択数・新規クラスタ作成・削除）をマップの「上」に表示するためのプレースホルダ。
+    # 中身はチャートを描画して選択（戻り値）を得たあとで埋めるので、ボタンが上にあっても
+    # 直近の選択を確実に使える。
+    top_ui = st.container()
+    st.markdown("---")
+
+    # --- マップ（投げ縄選択）---
+    # 選択はチャートの戻り値から取得する（最も確実な方法）。disable_selection_fade で
+    # 非選択点のフェード（選択部だけ浮き上がって見える現象）を無効化する。
+    # チャートの key を可変にし、「全体表示に戻す」ボタンや新規クラスタ作成時に key を変えることで、
+    # 新規コンポーネントとして全体表示で再生成する（＝選択ズームのリセット）。
+    _map_key_suffix = int(st.session_state.get('_eagle_map_key_suffix', 0))
     fig_lasso.update_layout(dragmode='lasso', clickmode='event+select')
-    selection = st.plotly_chart(fig_lasso, use_container_width=True, on_select="rerun", config={
+    # 「全体表示に戻す」ボタンの挙動 = Plotly のオートスケールと同じ。ボタン押下時のみ
+    # 軸を autorange に切り替え、全データが収まる範囲へ自動調整する（手動オートスケール相当）。
+    # それ以外のリランでは、フレームを安定させる固定レンジを再適用する。
+    # さらに uirevision を suffix に連動させる: 値が変わると Plotly はユーザーの手動ズーム/
+    # パン/選択を破棄して新しい軸設定（autorange）を適用するため、ズーム中でも確実にリセットされる。
+    # 値が変わらない通常リラン（投げ縄選択等）ではズームを保持する。
+    if st.session_state.pop('_eagle_autoscale', False):
+        fig_lasso.update_layout(
+            xaxis=dict(autorange=True, constrain="domain"),
+            yaxis=dict(autorange=True, scaleanchor="x", scaleratio=1, constrain="domain"),
+        )
+    else:
+        _xy_range = st.session_state.get('_eagle_xy_range')
+        if _xy_range:
+            fig_lasso.update_layout(
+                xaxis=dict(range=_xy_range[0], autorange=False, constrain="domain"),
+                yaxis=dict(range=_xy_range[1], autorange=False,
+                           scaleanchor="x", scaleratio=1, constrain="domain"),
+            )
+    fig_lasso.update_layout(uirevision=f"eagle_edit_{_map_key_suffix}")
+    utils.disable_selection_fade(fig_lasso)
+    selection = st.plotly_chart(fig_lasso, use_container_width=True, on_select="rerun", key=f"eagle_edit_map_{_map_key_suffix}", config={
         'editable': True,
         'edits': {
             'annotationPosition': True,
@@ -562,77 +643,103 @@ if is_editing:
             'titleText': False
         }
     })
-    
+
+    # 選択をチャートの戻り値から取得
     selected_indices = []
-    if selection and "selection" in selection:
-        points = selection["selection"]["points"]
-        selected_indices = [p["customdata"] for p in points]
-    
-    st.write(f"選択中: {len(selected_indices)} 件")
-    
-    # 新規クラスタ作成
-    if selected_indices:
-        col_l1, col_l2 = st.columns(2)
-        with col_l1:
-            all_ids = st.session_state.df_eagle['eagle_cluster'].unique()
-            max_id = max(all_ids) if len(all_ids) > 0 else 0
-            if max_id < 0: max_id = 0
-            rec_id = max(max_id + 1, 1)
-            new_id = st.number_input("新規クラスタID", min_value=1, value=int(rec_id))
-        with col_l2:
-            if st.button("選択範囲を新規クラスタにする"):
-                st.session_state.df_eagle.loc[selected_indices, 'eagle_cluster'] = new_id
-                sub_df = st.session_state.df_eagle.loc[selected_indices]
-                lbl = generate_label_for_cluster(sub_df, tfidf_matrix, feature_names)
-                st.session_state.eagle_labels_map[new_id] = f"[{new_id}] {lbl}"
-                # CAPCOM: patents.csvにeagle_cluster列を更新
-                try:
-                    import capcom
-                    if capcom.is_active():
-                        capcom.save_patents_csv()
-                except Exception:
-                    pass
-                st.success(f"ID {new_id} を作成しました！")
+    try:
+        if selection and selection.get("selection") and selection["selection"].get("points"):
+            selected_indices = [(p["customdata"][0] if isinstance(p.get("customdata"), (list, tuple)) else p.get("customdata"))
+                                for p in selection["selection"]["points"]]
+    except Exception:
+        selected_indices = []
+
+    # 上のプレースホルダに操作UIを描画
+    with top_ui:
+        col_info, col_reset = st.columns([3, 1])
+        with col_info:
+            st.write(f"選択中: {len(selected_indices)} 件")
+        with col_reset:
+            # 押すとオートスケール（全データが収まる範囲へ自動調整）を作動させる。
+            # autoscale フラグ + suffix（key/uirevision）変更で、手動ズーム状態からも確実にリセット。
+            if st.button("🔄 全体表示に戻す", key="eagle_reset_view", use_container_width=True):
+                st.session_state['_eagle_autoscale'] = True
+                st.session_state['_eagle_map_key_suffix'] = _map_key_suffix + 1
                 st.rerun()
 
-    # クラスタ削除UI
-    st.markdown("#### クラスタ削除")
-    del_ids = [c for c in sorted(st.session_state.df_eagle['eagle_cluster'].unique()) if c != -1]
-    if del_ids:
-        col_d1, col_d2 = st.columns([1, 1])
-        with col_d1:
-            del_target_id = st.selectbox("削除するクラスタID:", del_ids, key="eagle_delete_target")
-        with col_d2:
-            if st.button("削除実行"):
-                # Reset to -1
-                st.session_state.df_eagle.loc[st.session_state.df_eagle['eagle_cluster'] == del_target_id, 'eagle_cluster'] = -1
-                if del_target_id in st.session_state.eagle_labels_map:
-                    del st.session_state.eagle_labels_map[del_target_id]
-                # CAPCOM: patents.csvにeagle_cluster列を更新
-                try:
-                    import capcom
-                    if capcom.is_active():
-                        capcom.save_patents_csv()
-                except Exception:
-                    pass
-                st.success(f"ID {del_target_id} を削除しました")
-                st.rerun()
+        # 新規クラスタ作成
+        if selected_indices:
+            col_l1, col_l2 = st.columns(2)
+            with col_l1:
+                all_ids = st.session_state.df_eagle['eagle_cluster'].unique()
+                max_id = max(all_ids) if len(all_ids) > 0 else 0
+                if max_id < 0: max_id = 0
+                rec_id = max(max_id + 1, 1)
+                new_id = st.number_input("新規クラスタID", min_value=1, value=int(rec_id))
+            with col_l2:
+                st.write("")
+                if st.button("選択範囲を新規クラスタにする"):
+                    st.session_state.df_eagle.loc[selected_indices, 'eagle_cluster'] = new_id
+                    sub_df = st.session_state.df_eagle.loc[selected_indices]
+                    lbl = generate_label_for_cluster(sub_df, tfidf_matrix, feature_names)
+                    st.session_state.eagle_labels_map[new_id] = f"[{new_id}] {lbl}"
+                    # CAPCOM: patents.csvにeagle_cluster列を更新
+                    try:
+                        import capcom
+                        if capcom.is_active():
+                            capcom.save_patents_csv()
+                    except Exception as e:
+                        st.caption(f"⚠️ WARN クラスタ列付き特許データ の CAPCOM 保存に失敗しました（要確認）: {e}")
+                    # 作成後は key を変えて選択をクリア＋全体表示に戻す
+                    st.session_state['_eagle_map_key_suffix'] = _map_key_suffix + 1
+                    st.success(f"ID {new_id} を作成しました！")
+                    st.rerun()
+
+        # クラスタ削除UI
+        st.markdown("#### クラスタ削除")
+        del_ids = [c for c in sorted(st.session_state.df_eagle['eagle_cluster'].unique()) if c != -1]
+        if del_ids:
+            col_d1, col_d2 = st.columns([1, 1])
+            with col_d1:
+                del_target_id = st.selectbox("削除するクラスタID:", del_ids, key="eagle_delete_target")
+            with col_d2:
+                st.write("")
+                if st.button("削除実行"):
+                    # Reset to -1
+                    st.session_state.df_eagle.loc[st.session_state.df_eagle['eagle_cluster'] == del_target_id, 'eagle_cluster'] = -1
+                    if del_target_id in st.session_state.eagle_labels_map:
+                        del st.session_state.eagle_labels_map[del_target_id]
+                    # CAPCOM: patents.csvにeagle_cluster列を更新
+                    try:
+                        import capcom
+                        if capcom.is_active():
+                            capcom.save_patents_csv()
+                    except Exception as e:
+                        st.caption(f"⚠️ WARN クラスタ列付き特許データ の CAPCOM 保存に失敗しました（要確認）: {e}")
+                    st.success(f"ID {del_target_id} を削除しました")
+                    st.rerun()
 
 else:
     # 固定モード
     fig_lasso.update_layout(dragmode='pan') # 選択ロック
-    st.plotly_chart(fig_lasso, use_container_width=True, config={
-        'editable': True,
-        'edits': {
-            'annotationPosition': True,
-            'annotationText': False,
-            'axisTitleText': False,
-            'legendPosition': False,
-            'legendText': False,
-            'shapePosition': False,
-            'titleText': False
-        }
-    })
+    @st.fragment
+    def _eagle_click_main():
+        utils.disable_selection_fade(fig_lasso)
+        selection_eagle = st.plotly_chart(fig_lasso, use_container_width=True,
+            on_select="rerun", selection_mode="points", key="eagle_main_map", config={
+            'editable': True,
+            'edits': {
+                'annotationPosition': True,
+                'annotationText': False,
+                'axisTitleText': False,
+                'legendPosition': False,
+                'legendText': False,
+                'shapePosition': False,
+                'titleText': False
+            }
+        })
+        # 閲覧(FIX)モードでは点クリック → 特許詳細ポップアップ（編集モードは投げ縄選択を維持）
+        utils.handle_map_click(selection_eagle, "eagle_main", title="クリックした特許")
+    _eagle_click_main()
 
     # エクスポート & インサイトボタン
     snap_data = utils.generate_rich_summary(df_focus, title_col=col_map['title'], abstract_col=col_map['abstract'])
@@ -710,9 +817,44 @@ else:
         data_summary=snap_data
     )
 
+    # 🖼️ 整理版ランドスケープ（スライド/レポート用・上位クラスタのみ）
+    if st.checkbox("🖼️ 整理版ランドスケープ（スライド/レポート用・上位クラスタのみ）を表示", key="eagle_curated_show"):
+        st.caption("全クラスタを密にラベルすると重なるため、件数上位クラスタだけを大きく示したスライド向けの俯瞰図です。")
+        _ecl_topn = st.slider("ラベル表示するクラスタ数（件数上位）", 3, 15, 8, key="eagle_curated_topn", help="整理版（スライド/レポート用）の俯瞰図で、件数が多い上位何クラスタにだけ大きなラベルを付けるかです。全クラスタに付けると重なって読めないため、主要クラスタだけを強調します。")
+        _ecl_style_lbl = st.radio("表示モード:", ["クラスタ領域 (Clusters)", "密度マップ (Density)", "散布図 (Scatter)"],
+                                  horizontal=True, key="eagle_curated_style", help="俯瞰図の描き方を切り替えます。クラスタ領域＝各クラスタを色付きの領域で表示、密度マップ＝点の混み具合をヒートマップで表示、散布図＝個々の特許を点で表示。全体像は領域、混雑度は密度、個別確認は散布図が見やすいです。")
+        _ecl_style = {"クラスタ領域 (Clusters)": "hull", "密度マップ (Density)": "density", "散布図 (Scatter)": "points"}.get(_ecl_style_lbl, "hull")
+        try:
+            _ecl_df = df_focus.copy()
+            _ecl_df['_curated_label'] = _ecl_df['eagle_cluster'].map(st.session_state.get('eagle_labels_map', {}))
+            _ecl_fig = utils.build_curated_landscape(
+                _ecl_df, cluster_col='eagle_cluster', label_col='_curated_label',
+                x_col='umap_x', y_col='umap_y', top_n=_ecl_topn, region_style=_ecl_style)
+            st.plotly_chart(_ecl_fig, use_container_width=True, config={'editable': False})
+            _ecl_nall = int(df_focus[df_focus['eagle_cluster'] != -1]['eagle_cluster'].nunique()) if 'eagle_cluster' in df_focus.columns else 0
+            # CAPCOMアクティブ時はクリーンPNGをZIPに同梱（スライド/レポート用の整理版を下流へ）
+            utils.save_curated_to_capcom(
+                _ecl_fig, snap_id="eagle_curated_landscape",
+                cache_token=f"{_ecl_topn}_{_ecl_style}")
+            utils.render_report_png_button(
+                _ecl_fig, key="eagle_curated_report",
+                default_title="技術ランドスケープ：主要クラスタ",
+                default_subtitle=f"出願 {len(df_focus):,}件 / 上位{_ecl_topn}クラスタ（全{_ecl_nall}クラスタ）",
+                default_caption="",
+                label="🎨 整理版をスライド/レポート用PNGに書き出す")
+        except Exception as _e:
+            st.warning(f"整理版ランドスケープの生成に失敗しました: {_e}")
+
+    # クラスタ動態（前回ラン分を session_state から）とノイズ（萌芽技術）を insight に反映。
+    # 動態は本 insight より後段（クラスタ動態マップ）で計算されるため前回ラン分を参照する。
+    _eg_noise = (int((df_focus['eagle_cluster'] == -1).sum())
+                 if 'eagle_cluster' in df_focus.columns and -1 in df_focus['eagle_cluster'].values else 0)
+    _eg_map_extra, _eg_map_inst = utils_ai.build_map_dynamics_noise_addon(
+        dynamics_data=st.session_state.get('eagle_dynamics_data'),
+        noise_count=_eg_noise, total_count=len(df_focus))
     main_prompt = utils_ai.generate_ai_insight_prompt(
-        insight_role, insight_context, snap_data, insight_instruction,
-        extra_content=f"\n# 空間配置情報 (Spatial Context)\n{spatial_info}"
+        insight_role, insight_context, snap_data, insight_instruction + _eg_map_inst,
+        extra_content=f"\n# 空間配置情報 (Spatial Context)\n{spatial_info}\n{_eg_map_extra}"
     )
     utils_ai.render_ai_insight_button(main_prompt, "eagle_main_insight")
 
@@ -726,19 +868,21 @@ else:
                 if cid == -1:
                     continue
                 label = st.session_state.eagle_labels_map.get(cid, f"Cluster {cid}")
-                count = int(cluster_counts_eagle.get(cid, 0))
+                _eg_count_raw = cluster_counts_eagle.get(cid, 0)
+                count = int(_eg_count_raw) if pd.notna(_eg_count_raw) else 0
                 cid_mask = df_focus['eagle_cluster'] == cid
                 cx = float(df_focus.loc[cid_mask, 'umap_x'].mean()) if cid_mask.any() else 0
                 cy = float(df_focus.loc[cid_mask, 'umap_y'].mean()) if cid_mask.any() else 0
                 reps_raw = cluster_reps.get(cid, []) if 'cluster_reps' in dir() and cid in cluster_reps else []
                 eagle_clusters_json.append({
-                    "cluster_id": int(cid),
+                    "cluster_id": int(cid) if pd.notna(cid) else -1,
                     "label": label,
                     "count": count,
                     "centroid": [round(cx, 4), round(cy, 4)],
                     "representative_patents": reps_raw
                 })
-            noise_count = int((df_focus['eagle_cluster'] == -1).sum()) if -1 in df_focus['eagle_cluster'].values else 0
+            _eg_noise_raw = (df_focus['eagle_cluster'] == -1).sum() if -1 in df_focus['eagle_cluster'].values else 0
+            noise_count = int(_eg_noise_raw) if pd.notna(_eg_noise_raw) else 0
             eagle_json = {
                 "metadata": {
                     "module": "EAGLE",
@@ -752,7 +896,7 @@ else:
             }
             capcom.save_data("eagle_clusters.json", eagle_json)
     except Exception as e:
-        pass
+        st.caption(f"⚠️ WARN EAGLEクラスタ の CAPCOM 保存に失敗しました（要確認）: {e}")
 
     # --- クラスタ動態マップ ---
     if 'eagle_cluster' in df_focus.columns and 'year' in df_focus.columns:
@@ -765,12 +909,14 @@ else:
                 module_name='EAGLE',
             )
             if dyn_data:
+                # メインマップ insight が次回ラン時に参照できるよう session_state に保持
+                st.session_state['eagle_dynamics_data'] = dyn_data
                 try:
                     import capcom
                     if capcom.is_active():
                         capcom.save_data('eagle_cluster_dynamics', {'cluster_dynamics': dyn_data})
-                except Exception:
-                    pass
+                except Exception as e:
+                    st.caption(f"⚠️ WARN クラスタ動態 の CAPCOM 保存に失敗しました（要確認）: {e}")
 
 # --- ラベルエディタ ---
 st.markdown("---")
@@ -840,7 +986,7 @@ if drilldown_target_id != "NONE":
     col1, col2 = st.columns(2)
     with col1:
         if 'year' in df_subset_filter.columns and df_subset_filter['year'].notna().any():
-            def on_drill_interval_change(): pass # minimal
+            def on_drill_interval_change(): pass
             drill_bin_interval_w_val = st.selectbox("期間の粒度:", [5, 3, 2, 1], index=0, key="eagle_drill_interval_w", on_change=on_drill_interval_change)
             drill_date_bin_options = get_date_bin_options(df_subset_filter, int(drill_bin_interval_w_val), 'year')
             drill_date_bin_filter_w = st.selectbox("表示期間:", drill_date_bin_options, key="eagle_drill_date_filter_w")
@@ -871,17 +1017,45 @@ if drilldown_target_id != "NONE":
             drill_applicant_filter_w = [(f"(全出願人) ({len(df_subset_filter)}件)", "ALL")]
 
     st.subheader("詳細クラスタリングモード")
-    drill_method = st.radio("手法を選択:", ["自動 (HDBSCAN)", "手動 (Lasso)"], horizontal=True, key="eagle_drill_method")
+    drill_method = st.radio("手法を選択:", ["自動 (HDBSCAN)", "手動 (Lasso)"], horizontal=True, key="eagle_drill_method", help="選択したクラスタの内部をさらに細かく分ける方法を切り替えます。自動 (HDBSCAN)＝密度ベースのアルゴリズムが自動でサブクラスタに分割します。手動 (Lasso)＝再計算した詳細マップ上で投げ縄選択し、自分でサブクラスタを作ります。客観的に分けたいときは自動、意図した区切りで分けたいときは手動が向きます。")
 
     if drill_method == "自動 (HDBSCAN)":
         c1, c2, c3 = st.columns(3)
-        with c1: drill_min_cluster_size_w = st.number_input('最小クラスタサイズ:', min_value=2, value=5, key="eagle_drill_min_cluster_size_w")
-        with c2: drill_min_samples_w = st.number_input('最小サンプル数:', min_value=1, value=5, key="eagle_drill_min_samples_w")
-        with c3: drill_label_top_n_w = st.number_input('ラベル単語数:', min_value=1, value=3, key="eagle_drill_label_top_n_w")
+        with c1: drill_min_cluster_size_w = st.number_input('最小クラスタサイズ:', min_value=2, value=5, key="eagle_drill_min_cluster_size_w", disabled=st.session_state.get("eagle_drill_auto_hdbscan", False), help="1つのクラスタとして認める最小の特許件数です（クラスタの粒度設定）。小さくすると細かい技術テーマまで分かれてクラスタ数が増えますが、どこにも属さないノイズ（外れ値）も増えます。大きくすると少数の大まかなクラスタにまとまり安定しますが、細部は埋もれます。目安は母集団の約1〜2%（例: 2,000件なら20前後）。推奨10〜50。")
+        with c2: drill_min_samples_w = st.number_input('最小サンプル数:', min_value=1, value=5, key="eagle_drill_min_samples_w", disabled=st.session_state.get("eagle_drill_auto_hdbscan", False), help="クラスタの「核」と認める密度の厳しさです。大きいほど判定が厳しくなり、ノイズ（外れ値）が増えてクラスタは密な中心部だけになります。小さいほど緩くなり、多くの点がクラスタに取り込まれます。通常は最小クラスタサイズ以下に設定します。推奨5〜20。")
+        with c3: drill_label_top_n_w = st.number_input('ラベル単語数:', min_value=1, value=3, key="eagle_drill_label_top_n_w", help="各クラスタの自動命名に使う特徴語の数です。クラスタを特徴づける語を上位から何語ラベルに並べるかを決めます。多いほど内容を詳しく表せますが冗長になり、少ないほど簡潔になります。")
+        # 🤖 自動最適化（メインと同じ HDBSCAN 2パラメータ掃引をドリルダウンにも）
+        drill_auto_hdbscan = st.checkbox(
+            "🤖 自動最適化（最小クラスタサイズ・最小サンプル数を掃引してサブクラスタ数を適正化）",
+            key="eagle_drill_auto_hdbscan",
+            help="ドリルダウン対象の件数に合わせて HDBSCAN の2パラメータを自動で掃引し、サブクラスタ数を適正化します。ONの間は上の手動値は無視されます。")
+        drill_target_k_w = None
+        if drill_auto_hdbscan:
+            # メインマップと同じく、対象の件数に応じて目標サブクラスタ数を初期化する（suggest_target_k）。
+            # 対象クラスタを変えるたびに初期値が件数適応されるよう、key に対象IDを含める。
+            _n_sub = len(df_subset_filter)
+            drill_target_k_w = st.number_input(
+                "目標サブクラスタ数（目安）", min_value=2, max_value=80,
+                value=utils.suggest_target_k(_n_sub), key=f"eagle_drill_target_k_w_{drilldown_target_id}",
+                help="この数に近づくよう2パラメータを掃引します（対象の件数から自動初期化）。"
+                     "結果のサブクラスタ数や粒度に満足できない場合は、この値を増減して再度「選択クラスタで詳細マップ作成」を押してください。"
+                     "実際の値は密度構造に依存するため、目標ちょうどにならないこともあります（品質 DBCV を優先して選びます）。")
+            utils.render_dbcv_help()
+            # 前回の自動決定を常時再表示（メインマップと同じ挙動）。対象が一致する結果のみ表示する。
+            _dar = st.session_state.get('eagle_drill_auto_result')
+            if _dar and _dar.get('target_id') == drilldown_target_id:
+                _rv = _dar.get('validity')
+                _rv_txt = f"・品質DBCV={_rv:.2f}" if isinstance(_rv, (int, float)) else ""
+                st.info(
+                    f"🤖 前回の自動決定: 最小クラスタサイズ=**{_dar['mcs']}** / 最小サンプル数=**{_dar['ms']}** "
+                    f"→ サブクラスタ **{_dar['k']}**・ノイズ {_dar['noise'] * 100:.1f}%（目標≈{_dar['target_k']}{_rv_txt}）。"
+                    f"　数が合わない/粒度が好みでない場合は上の「目標サブクラスタ数」を変えて再描画してください。")
     else:
         drill_min_cluster_size_w, drill_min_samples_w, drill_label_top_n_w = 0, 0, 3 # Dummy
+        drill_auto_hdbscan = False
+        drill_target_k_w = None
 
-    drill_show_labels_chk = st.checkbox('マップにラベルを表示する', value=True, key="eagle_drill_show_labels_chk")
+    drill_show_labels_chk = st.checkbox('マップにラベルを表示する', value=True, key="eagle_drill_show_labels_chk", help="詳細マップに各サブクラスタの名前ラベルを重ねて表示するかどうかです。オンにするとサブテーマが一目で分かりますが、数が多いと重なって読みにくくなります。点の分布だけを見たいときはオフにします。")
 
     if st.button("選択クラスタで詳細マップ作成", type="primary", key="eagle_drill_run_button"):
         with st.spinner(f"クラスタ {drilldown_target_id} の詳細分析を実行中..."):
@@ -900,7 +1074,7 @@ if drilldown_target_id != "NONE":
                     except: pass 
 
                 drill_app_values = [val[1] for val in drill_applicant_filter_w]
-                if "ALL" not in drill_app_values:
+                if drill_app_values and "ALL" not in drill_app_values:
                     mask_list_drill = [df_subset[col_map['applicant']].fillna('').str.contains(re.escape(app)) for app in drill_app_values]
                     df_subset = df_subset[pd.concat(mask_list_drill, axis=1).any(axis=1)]
                 
@@ -922,7 +1096,25 @@ if drilldown_target_id != "NONE":
                     
                     drill_labels_map = {}
                     
-                    if drill_method == "自動 (HDBSCAN)":
+                    if drill_method == "自動 (HDBSCAN)" and drill_auto_hdbscan:
+                        _dpb = st.progress(0.0, text="サブクラスタのパラメータを掃引中...")
+                        _dsweep = utils.sweep_hdbscan_params(
+                            embedding_drill, target_k=int(drill_target_k_w),
+                            progress_callback=lambda f: _dpb.progress(min(f, 1.0), text="サブクラスタのパラメータを掃引中..."))
+                        _dpb.empty()
+                        df_subset['drill_cluster'] = _dsweep['labels']
+                        # 自動決定の結果を保持し、次回以降も「前回の自動決定」として再表示する（メインマップと同じ）。
+                        st.session_state['eagle_drill_auto_result'] = {
+                            'mcs': _dsweep['min_cluster_size'], 'ms': _dsweep['min_samples'],
+                            'k': _dsweep['n_clusters'], 'noise': _dsweep['noise_ratio'],
+                            'target_k': _dsweep['target_k'], 'validity': _dsweep.get('validity'),
+                            'target_id': drilldown_target_id}
+                        _drv = _dsweep.get('validity')
+                        _drv_txt = f"・品質DBCV={_drv:.2f}" if isinstance(_drv, (int, float)) else ""
+                        st.caption(
+                            f"🤖 自動決定: 最小クラスタサイズ={_dsweep['min_cluster_size']} / 最小サンプル数={_dsweep['min_samples']} "
+                            f"→ サブクラスタ {_dsweep['n_clusters']}・ノイズ {_dsweep['noise_ratio'] * 100:.0f}%（目標≈{_dsweep['target_k']}{_drv_txt}）")
+                    elif drill_method == "自動 (HDBSCAN)":
                         clusterer_drill = hdbscan.HDBSCAN(min_cluster_size=int(drill_min_cluster_size_w), min_samples=int(drill_min_samples_w), metric='euclidean', cluster_selection_method='eom')
                         df_subset['drill_cluster'] = clusterer_drill.fit_predict(embedding_drill)
                     else:
@@ -936,7 +1128,7 @@ if drilldown_target_id != "NONE":
                             df_subset[col_map['title']].fillna('') + ' ' +
                             df_subset[col_map['abstract']].fillna('')
                         )
-                        drill_labels_map = patiroha.auto_label(
+                        drill_labels_map = utils.safe_auto_label(
                             drill_texts,
                             df_subset['drill_cluster'].values,
                             method='c-tfidf',
@@ -970,13 +1162,13 @@ if drilldown_target_id != "NONE":
         with tab_drill_map:
             st.subheader("ドリルダウンマップ")
             
-            drill_map_mode = st.radio("表示モード:", ["散布図 (Scatter)", "密度マップ (Density)", "クラスタ領域 (Clusters)"], horizontal=True, key="eagle_drill_map_mode_radio")
-            
+            drill_map_mode = st.radio("表示モード:", ["クラスタ領域 (Clusters)", "密度マップ (Density)", "散布図 (Scatter)"], horizontal=True, key="eagle_drill_map_mode_radio", help="俯瞰図の描き方を切り替えます。クラスタ領域＝各クラスタを色付きの領域で表示、密度マップ＝点の混み具合をヒートマップで表示、散布図＝個々の特許を点で表示。全体像は領域、混雑度は密度、個別確認は散布図が見やすいです。")
+
             d_c1, d_c2, d_c3 = st.columns(3)
             with d_c1:
-                drill_mesh_size = st.number_input("メッシュサイズ", value=40, min_value=10, max_value=200, step=5, key="eagle_drill_mesh_size")
+                drill_mesh_size = st.number_input("メッシュサイズ", value=40, min_value=10, max_value=200, step=5, key="eagle_drill_mesh_size", help="密度マップ（ヒートマップ）を描くときの格子の細かさです。大きいほど細かい格子になり局所的な濃淡が見えますが、点がまばらだと粗く見えます。小さいほど滑らかで大まかな分布になります。")
             with d_c2:
-                drill_remove_noise_chk = st.checkbox("ノイズを除く", value=False, key="eagle_drill_remove_noise")
+                drill_remove_noise_chk = st.checkbox("ノイズを除く", value=False, key="eagle_drill_remove_noise", help="どのサブクラスタにも属さないノイズ（外れ値）の点を表示から除くかどうかです。オンにすると主要なサブクラスタだけが残り見やすくなりますが、孤立した特許は見えなくなります。萌芽的・例外的な技術も確認したいときはオフにします。")
             with d_c3: pass
 
             if drill_remove_noise_chk:
@@ -1040,7 +1232,9 @@ if drilldown_target_id != "NONE":
                  c_color = '#dddddd' if cid == -1 else color_sequence[i % len(color_sequence)]
                  c_name = drill_labels_map.get(cid, str(cid))
                  
-                 fig_drill.add_trace(go.Scattergl(
+                 # 凸包（go.Scatter=SVG）と座標系を揃えるため Scatter を使う（Scattergl=WebGL だと
+                 # 凸包領域とプロット点がズレる）。サブクラスタは点数が少なく lasso/性能とも問題なし。
+                 fig_drill.add_trace(go.Scatter(
                     x=d_sub['drill_x'], y=d_sub['drill_y'], mode='markers',
                     marker=dict(color=c_color, size=5, opacity=0.8, line=marker_line_d),
                     hoverinfo='text', hovertext=d_sub['drill_hover_text'], name=c_name,
@@ -1130,10 +1324,13 @@ if drilldown_target_id != "NONE":
 
 
             # --- Snapshot: ドリルダウンマップ ---
+            # 対象クラスタ別の key（静的キーだと対象を切り替えても「保存済み」のまま出るため）
+            _eagle_drill_slug = re.sub(r'\W+', '_', str(drilldown_target_id))[:30] or 'target'
             utils.render_snapshot_button(
-                title="EAGLE: ドリルダウンマップ",
+                title=f"EAGLE: ドリルダウンマップ（{drilldown_target_id}）",
                 description="選択クラスタの詳細分析マップ（サブクラスタリング）。",
-                key="eagle_drill_snap",
+                key=f"eagle_drill_snap_{_eagle_drill_slug}",
+                group="eagle_drill_snap",
                 fig=fig_drill,
                 data_summary=snap_data_d
             )
@@ -1148,7 +1345,8 @@ if drilldown_target_id != "NONE":
             # --- Manual Lasso Logic for Drill-down ---
             s_indices_d = []
             if selection_drill and "selection" in selection_drill:
-                s_indices_d = [p["customdata"] for p in selection_drill["selection"]["points"]]
+                s_indices_d = [(p["customdata"][0] if isinstance(p.get("customdata"), (list, tuple)) else p.get("customdata"))
+                               for p in selection_drill["selection"]["points"]]
             
             if s_indices_d:
                 st.write(f"サブクラスタ選択中: {len(s_indices_d)} 件")
@@ -1191,16 +1389,20 @@ if drilldown_target_id != "NONE":
             st.subheader("クラスタ・テキスト分析 (Text Mining)")
             col_tm1, col_tm2 = st.columns(2)
             with col_tm1:
-                cooc_top_n = st.slider("共起: 上位単語数", 30, 100, 70, key="eagle_cooc_top_n")
-                cooc_threshold = st.slider("共起: Jaccard係数 閾値", 0.01, 0.3, 0.03, 0.01, key="eagle_cooc_threshold")
+                cooc_top_n = st.slider("共起: 上位単語数", 30, 100, 70, key="eagle_cooc_top_n", help="ネットワークに表示するキーワード（ノード）の数です。出現頻度の上位から何語を使うかを決めます。多いほど網羅的ですが密集して読みにくく、少ないほど主要語に絞られ見やすくなります。")
+                cooc_threshold = st.slider("共起: Jaccard係数 閾値", 0.01, 0.3, 0.03, 0.01, key="eagle_cooc_threshold", help="2つのキーワードを線（エッジ）で結ぶ基準の強さです。共起の強さを0〜1で表すJaccard係数がこの値以上のペアだけを結びます。高くすると強い関係だけが残ってスッキリし、低くすると弱い関係も含め線が増えて密になります。")
             
             if st.button("テキスト分析を実行", key="eagle_run_text_mining"):
                 with st.spinner("分析中..."):
-                    all_text = ""
+                    # 文献ごとに抽出して集約（doc_words は共起ネットワークでも再利用し二度抽出を回避）
+                    words, doc_words = [], []
                     for _, row in df_drill.iterrows():
-                        if col_map['title'] and pd.notna(row[col_map['title']]): all_text += row[col_map['title']] + " "
-                        if col_map['abstract'] and pd.notna(row[col_map['abstract']]): all_text += row[col_map['abstract']] + " "
-                    words = extract_compound_nouns(all_text, stopwords)
+                        dt = ""
+                        if col_map['title'] and pd.notna(row[col_map['title']]): dt += str(row[col_map['title']]) + " "
+                        if col_map['abstract'] and pd.notna(row[col_map['abstract']]): dt += str(row[col_map['abstract']]) + " "
+                        dw = extract_compound_nouns(dt, stopwords)
+                        words.extend(dw)
+                        doc_words.append(dw)
                     
                     if not words: st.warning("有効なキーワードなし")
                     else:
@@ -1211,12 +1413,8 @@ if drilldown_target_id != "NONE":
                         word_freq = Counter(words)
                         top_words = [w for w, c in word_freq.most_common(cooc_top_n)]
                         pair_counts = Counter()
-                        for _, row in df_drill.iterrows():
-                            dt = ""
-                            if col_map['title']: dt += str(row[col_map['title']]) + " "
-                            if col_map['abstract']: dt += str(row[col_map['abstract']]) + " "
-                            dw = set(extract_compound_nouns(dt, stopwords))
-                            dw = {w for w in dw if w in top_words}
+                        for dw_list in doc_words:
+                            dw = {w for w in set(dw_list) if w in top_words}
                             if len(dw) >= 2:
                                 for pair in combinations(sorted(list(dw)), 2): pair_counts[pair] += 1
                         
@@ -1301,10 +1499,10 @@ if drilldown_target_id != "NONE":
                          if not valid_years.empty:
                              auto_min_year, auto_max_year = int(valid_years.min()), int(valid_years.max())
                      except: pass
-                s_year = st.number_input('開始年:', min_value=1900, max_value=2100, value=auto_min_year, key="eagle_stats_start_year", step=1)
-                e_year = st.number_input('終了年:', min_value=1900, max_value=2100, value=auto_max_year, key="eagle_stats_end_year", step=1)
+                s_year = st.number_input('開始年:', min_value=1900, max_value=2100, value=auto_min_year, key="eagle_stats_start_year", step=1, help="集計・表示の対象年の範囲です。")
+                e_year = st.number_input('終了年:', min_value=1900, max_value=2100, value=auto_max_year, key="eagle_stats_end_year", step=1, help="集計・表示の対象年の範囲です。")
             with c2:
-                n_apps = st.number_input('表示人数:', min_value=1, value=15, key="eagle_stats_num_assignees")
+                n_apps = st.number_input('表示人数:', min_value=1, value=15, key="eagle_stats_num_assignees", help="ランキングで上位何件まで表示するかです（表示数のみ変わり分析結果は不変）。")
             
             if st.button("特許マップを描画", key="eagle_stats_run_button"):
                 df_s = df_drill[(df_drill['year'] >= s_year) & (df_drill['year'] <= e_year)]

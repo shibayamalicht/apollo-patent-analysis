@@ -17,6 +17,7 @@ from sklearn.preprocessing import normalize
 from wordcloud import WordCloud
 import os
 import utils
+import utils_ai
 import patiroha
 utils.configure_matplotlib_font()
 
@@ -24,17 +25,14 @@ utils.configure_matplotlib_font()
 #  1. ページ設定 (最優先)
 # ==============================================================================
 st.set_page_config(
-    page_title="APOLLO v8 | CREW", 
-    page_icon="🔗", 
+    page_title="APOLLO v9 | CREW", 
+    page_icon=utils.module_icon("crew"), 
     layout="wide"
 )
 
 # ==============================================================================
-# ==============================================================================
 #  2. フォント設定
 # ==============================================================================
-# ==============================================================================
-
 
 # --- カスタムCSS ---
 st.markdown("""
@@ -210,8 +208,16 @@ class PatentAnalyzer:
                 topic_names[i] = f"Topic {i}"
                 continue
             try:
-                tfidf = TfidfVectorizer(max_features=3, token_pattern=r"(?u)\b\w+\b")
-                tfidf_matrix = tfidf.fit_transform(texts)
+                # 日本語を形態素解析し、ストップワード・定型句(【選択図】【課題】【解決手段】等)を
+                # 除去してからTF-IDFにかける。生テキスト直接 + \b\w+\b では日本語を分割できず、
+                # 括弧内の定型見出しばかりが topic に選ばれてしまうため。
+                tokenized = [' '.join(utils.extract_keywords(str(t)[:3000])) for t in texts]
+                tokenized = [t for t in tokenized if t.strip()]
+                if not tokenized:
+                    topic_names[i] = f"Topic {i}"
+                    continue
+                tfidf = TfidfVectorizer(max_features=3)
+                tfidf_matrix = tfidf.fit_transform(tokenized)
                 feature_names = tfidf.get_feature_names_out()
                 sums = tfidf_matrix.sum(axis=0)
                 data = []
@@ -383,7 +389,9 @@ class PatentAnalyzer:
         cache = self.get_current_cache()
         try:
             idx = cache['names'].index(name)
-            words = cache['processed_corpus'][idx].split()
+            # 形態素解析で複合名詞を抽出（定型句・ストップワードを除去）。
+            # 生テキストの単純splitだと日本語が分割できず定型見出しが上位に来てしまう。
+            words = utils.extract_keywords(str(cache['processed_corpus'][idx])[:6000])
             return pd.Series(words).value_counts().head(top_n).to_dict()
         except:
             return {}
@@ -421,7 +429,7 @@ class PatentAnalyzer:
 #  5. メインUIロジック
 # ==============================================================================
 # ==============================================================================
-st.title("🔗 CREW")
+utils.module_header("crew", "CREW")
 st.markdown("発明者・出願人の共願ネットワークを構築し、媒介中心性・コミュニティ構造から技術の中核プレイヤーとアライアンスを可視化します。")
 
 st.markdown("""
@@ -475,7 +483,8 @@ with st.expander("分析パラメータ設定", expanded=True):
         
     with col2:
         st.info("※テキスト分析にはMission Controlで生成されたベクトルを使用します。")
-        mode = st.radio("分析モード", ["発明者ネットワーク", "企業アライアンス"] if col_assignee != '(なし)' else ["発明者ネットワーク"], horizontal=True)
+        mode = st.radio("分析モード", ["発明者ネットワーク", "企業アライアンス"] if col_assignee != '(なし)' else ["発明者ネットワーク"], horizontal=True,
+                        help="ネットワークを誰の共同関係で作るかです。発明者＝個人どうしの協働関係、出願人＝企業間の共同出願（アライアンス）関係を可視化します。")
 
     if st.button("🔄 分析実行 (Initialize / Update)", type="primary"):
         real_assignee = col_assignee if col_assignee != '(なし)' else None
@@ -505,7 +514,8 @@ if st.session_state.analyzer:
             years = sorted(analyzer.df['year'].dropna().unique())
             year_range = None
             if years:
-                year_range = st.slider("対象期間", int(min(years)), int(max(years)), (int(min(years)), int(max(years))))
+                year_range = st.slider("対象期間", int(min(years)), int(max(years)), (int(min(years)), int(max(years))),
+                                       help="分析対象とする出願年の範囲です。")
             
             app_opts, app_counts = analyzer.get_applicant_info()
             sel_apps = st.multiselect(
@@ -515,21 +525,25 @@ if st.session_state.analyzer:
             )
 
         with c_f2:
-            min_node = st.number_input("最小出願件数 (ノード)", 1, 100, 1)
-            min_edge = st.number_input("最小共願回数 (エッジ)", 1, 20, 1)
-            recent_years_win = st.number_input("急上昇判定期間 (年)", 1, 10, 3)
+            min_node = st.number_input("最小出願件数 (ノード)", 1, 100, 1,
+                                       help="ネットワークに含める最小の出願件数です。これ未満の小規模なノード（人/企業）を除外し、主要プレイヤーに絞ります。")
+            min_edge = st.number_input("最小共願回数 (エッジ)", 1, 20, 1,
+                                       help="2者を線（エッジ）で結ぶ最小の共同出願回数です。大きくすると強い協働関係だけが残り、小さくすると弱いつながりも線になり密になります。")
+            recent_years_win = st.number_input("急上昇判定期間 (年)", 1, 10, 3,
+                                               help="「急上昇」プレイヤーを判定する直近の期間（年数）です。この期間での活動の伸びを評価します。")
         
         with c_f3:
-            n_topics = st.slider("分類トピック数 (KMeans)", 3, 20, 6)
+            n_topics = st.slider("分類トピック数 (KMeans)", 3, 20, 6,
+                                 help="発明者/企業を技術トピックへ分類する数(k)です。KMeansでこの数のグループに分けます。大きいほど細かく分かれます。")
             
             color_mode = st.selectbox("色分け基準", [
-                'コミュニティ (派閥)', 
-                '技術トピック', 
-                '媒介中心性', 
-                '技術ブローカー', 
-                '生産性スコア',    
+                'コミュニティ (派閥)',
+                '技術トピック',
+                '媒介中心性',
+                '技術ブローカー',
+                '生産性スコア',
                 '急上昇スコア'
-            ])
+            ], help="ネットワーク図のノードを何の指標で色分けするかです。コミュニティ＝共願が密な派閥、技術トピック＝主に扱う技術領域、媒介中心性＝派閥を橋渡しする結節点、技術ブローカー＝複数領域をまたぐ越境者、生産性スコア＝少人数連携での多産度、急上昇スコア＝直近の活動の伸びを表します。")
 
     # データ構築
     G = analyzer.build_graph_at_year(year_range, applicants=sel_apps)
@@ -585,6 +599,110 @@ if st.session_state.analyzer:
             fig_net.update_yaxes(scaleanchor=None, scaleratio=None)
             st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
 
+            # --- スナップショット（CAPCOM/VOYAGER 用）+ ネットワークデータの CAPCOM 出力 ---
+            # color_mode（色分け基準）ごとに、その指標の「読み方」をスナップショットへ埋め込む。
+            # 各指標で別々にスナップショットを撮れば、指標固有の解釈が CAPCOM/レポートに渡る。
+            _crew_metric_guide = {
+                'コミュニティ (派閥)': "色=協働グループ（派閥）。同色は共願が密な派閥。アライアンス構造・派閥の分断/結合を読む。",
+                '技術トピック': "色=各プレイヤーが主に扱う技術領域。どの技術に誰が集まるか（人材・技術の分布）を読む。",
+                '媒介中心性': "高=異なる派閥を橋渡しする結節点。除去すると分断が起きるキーパーソン。採用・提携・引き抜き防止の重点人物。",
+                '技術ブローカー': "高=複数の技術コミュニティをまたぐ越境者。技術融合の担い手。新規融合の起点候補。",
+                '生産性スコア': "出願数/(次数+1)。高=少人数連携で多産（効率的）。低=大人数だが出願少。R&D効率の差を読む。",
+                '急上昇スコア': "高=直近で活動を急拡大するプレイヤー。新興の要注意株。早期警戒・新興競合の発見に使う。",
+            }
+            _crew_guide = _crew_metric_guide.get(color_mode, '')
+            # 数値指標ならその指標で並べ替え、カテゴリ指標（派閥/技術トピック）は媒介中心性で代表化
+            _sort_col = color_mode if (color_mode in metrics_df.columns and color_mode not in ('コミュニティ (派閥)', '技術トピック')) else '媒介中心性'
+            # ⚠️ トークン対策: 全ノードを載せると肥大化するため上位15ノード・主要数値列のみに切り取る
+            #   （技術トピック等の長文列は除外。全件は画面のMetricsタブ/CSVで参照可能）
+            _CREW_TOP = 15
+            _keep_cols = [c for c in ['出願数', 'コミュニティ', '媒介中心性', '技術ブローカー', '生産性スコア', '急上昇スコア'] if c in metrics_df.columns]
+            _crew_top = metrics_df.sort_values(_sort_col, ascending=False).head(_CREW_TOP)
+            _crew_top_view = _crew_top[_keep_cols].copy()
+            _crew_top_view.insert(0, 'ノード', _crew_top.index.astype(str))
+            _crew_snap = {'module': 'CREW', 'network_mode': mode, 'metric_guide': _crew_guide}
+            try:
+                _crew_snap['chart_data'] = utils_ai.df_to_markdown(_crew_top_view.round(3), index=False)
+            except Exception:
+                pass
+            try:
+                import capcom
+                if capcom.is_active():
+                    # 指標別トップ15を全て保存（最後に選んだ色分け基準に依存せず、
+                    # 各指標のトップ層が常に揃うようにする。各レコードは全指標カラムを含む）
+                    _metric_cols = [c for c in ['媒介中心性', '技術ブローカー', '生産性スコア', '急上昇スコア']
+                                    if c in metrics_df.columns]
+                    _top_by_metric = {}
+                    for _mc in _metric_cols:
+                        _t = metrics_df.sort_values(_mc, ascending=False).head(_CREW_TOP)
+                        _tv = _t[_keep_cols].copy()
+                        _tv.insert(0, 'ノード', _t.index.astype(str))
+                        _top_by_metric[_mc] = _tv.round(3).to_dict('records')
+                    capcom.save_data("crew_network.json", {
+                        "mode": mode,
+                        "color_mode": color_mode,
+                        "metric_guide": _crew_guide,
+                        "node_count": int(len(metrics_df)),
+                        "shown_top": int(len(_crew_top_view)),
+                        "sorted_by": _sort_col,
+                        "top_nodes": _crew_top_view.round(3).to_dict('records'),
+                        "top_by_metric": _top_by_metric,
+                    })
+            except Exception as e:
+                st.caption(f"⚠️ WARN 共起ネットワーク の CAPCOM 保存に失敗しました（要確認）: {e}")
+            # キー設計（2つのセレクタを性質で分ける）:
+            #   ・分析モード（発明者ネットワーク / 企業アライアンス）は「別グラフ」なので key に含めて
+            #     独立した base スナップショットにする（切替で新規「Save Snapshot」になる）。
+            #   ・色分け基準（color_mode）は同一グラフの「配色オプション」なので key に含めない。
+            #     → 一度撮った後に色分けを変えると「➕別カット追加」ボタンになり、配色違いを別カット（__sN）
+            #       として積める（ボタンの説明文「配色などを変えた別バージョン」と一致）。各カットは保存時点の
+            #       色分けの読み方（description/data_summary）を保持するので CAPCOM 側の情報は失われない。
+            #   ・group="crew_network" で「このマップで N 枚」をモード/配色を跨いで通算表示（ドリルダウン系と同様）。
+            _safe_mode = 'inv' if mode == "発明者ネットワーク" else 'corp'
+            _safe_cm = color_mode.replace(' ', '_').replace('(', '').replace(')', '')  # AIインサイトのキー用（色分け別にプロンプトが変わる）
+            utils.render_snapshot_button(
+                title=f"共起ネットワーク図［{mode}・色分け: {color_mode}］",
+                description=f"{mode}の協働（共願）ネットワーク。ノード色={color_mode}・サイズ=出願数。【{color_mode}の読み方】{_crew_guide}",
+                key=f"crew_network_{_safe_mode}", fig=fig_net, data_summary=_crew_snap,
+                group="crew_network")
+
+            # --- AI Insight: 協働ネットワーク分析 ---
+            _node_label = '発明者' if mode == "発明者ネットワーク" else '出願人（企業）'
+            _crew_meta = utils_ai.build_common_metadata(
+                df_main=st.session_state.get('df_main'), df_filtered=None, col_map=st.session_state.get('col_map'))
+            _crew_meta['分析単位'] = _node_label
+            _crew_meta['ネットワーク規模'] = f"ノード{int(len(metrics_df))}・上位{int(len(_crew_top_view))}表示"
+            _crew_meta['色分け基準'] = color_mode
+            _crew_meta['並べ替え指標'] = _sort_col
+            try:
+                _n_comm = int(metrics_df['コミュニティ'].nunique())
+                _crew_meta['コミュニティ数'] = _n_comm
+            except Exception:
+                pass
+            _crew_prompt = utils_ai.generate_ai_insight_prompt(
+                role=f"技術経営・ネットワーク分析の専門家として、{_node_label}の協働（共願）ネットワークから組織・人材戦略を分析してください。",
+                context=(f"共起ネットワーク図を表示しています。ノード={_node_label}、エッジ=共願（共同出願）関係、"
+                         f"ノードサイズ=出願数、ノード色={color_mode}。下記データは{_sort_col}の上位ノードと各指標です。"
+                         f"指標の意味: 媒介中心性=異なる派閥を橋渡しする結節点（除去で分断が起きるキーパーソン）、"
+                         f"技術ブローカー=複数コミュニティをまたぐ越境者（技術融合の担い手）、"
+                         f"生産性スコア=出願数/(次数+1)で少人数連携の多産度、急上昇スコア=直近の活動急拡大度、"
+                         f"コミュニティ=共願が密な派閥。【現在の色分け『{color_mode}』の読み方】{_crew_guide}"),
+                data_summary=_crew_snap.get('chart_data', ''),
+                instructions="""\
+以下の観点で分析してください:
+1. **キーパーソン/中核プレイヤー**: 媒介中心性・出願数の上位ノードを特定し、ネットワーク上の役割（ハブ/橋渡し/専門特化）を論じる
+2. **派閥・アライアンス構造**: コミュニティ（派閥）の数と規模から、協働クラスタの分断/結合・系列構造を読み解く
+3. **技術ブローカー**: コミュニティをまたぐ越境プレイヤーを特定し、技術融合・オープンイノベーションの担い手を示す
+4. **R&D効率と新興プレイヤー**: 生産性スコア（少人数で多産か）と急上昇スコア（新興の要注意株）の観点で注目ノードを抽出
+5. **戦略的示唆**: 採用・提携・引き抜き防止・新興競合の早期警戒など、人材・組織戦略へのインプリケーション
+
+各主張には必ずノード名と具体的な数値を1つ以上含めてください。""",
+                metadata=_crew_meta,
+                constraints="出願数の多さは必ずしも質や影響力と一致しない点、ネットワーク指標は表示上位ノードに基づく点に注意すること。",
+                output_format="Markdown形式。見出し付きの構造化された分析レポート。"
+            )
+            utils_ai.render_ai_insight_button(_crew_prompt, f"crew_network_{_safe_mode}_{_safe_cm}_insight")
+
         with tab2:
             st.dataframe(metrics_df.sort_values('媒介中心性', ascending=False), use_container_width=True)
             st.download_button("CSVダウンロード", metrics_df.to_csv().encode('utf-8'), "crew_metrics.csv", "text/csv")
@@ -630,6 +748,7 @@ if st.session_state.analyzer:
                 
                 utils.update_fig_layout(fig_hm, "コミュニティ × 技術トピック", height=600, show_axes=True)
                 st.plotly_chart(fig_hm, use_container_width=True, config={'editable': False})
+                # （ヒートマップにはスナップショット不要 — ユーザー指示。ネットワーク図のみ採取する）
 
             else: st.info("データなし")
 
@@ -644,7 +763,8 @@ if st.session_state.analyzer:
                 
                 st.markdown("##### タイムライン")
                 col_tl, _ = st.columns([1, 2])
-                with col_tl: top_n_tl = st.slider("トップ表示数", 5, 50, 20)
+                with col_tl: top_n_tl = st.slider("トップ表示数", 5, 50, 20,
+                                                  help="ランキングで上位何件まで表示するかです（表示数のみ変わり、分析結果は変わりません）。")
                 df_time = analyzer.get_inventor_timeline(year_range=year_range, applicants=sel_apps, top_n=top_n_tl)
                 if not df_time.empty:
                     # 出願数が多い順に上から表示
@@ -680,8 +800,8 @@ if st.session_state.analyzer:
                                     "word_frequencies": dict(kws)
                                 }
                                 capcom.save_data(f"crew_wordcloud.json", wc_data)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            st.caption(f"⚠️ WARN ワードクラウド の CAPCOM 保存に失敗しました（要確認）: {e}")
                 with c2:
                     if kws: st.dataframe(pd.DataFrame(list(kws.items()), columns=['Word', 'Freq']), height=200)
                     st.write(metrics_df.loc[sel])

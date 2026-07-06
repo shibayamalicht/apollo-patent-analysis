@@ -43,6 +43,7 @@ description: >
    - 〈出願人名〉の2024-2025年プレスリリース
    - 〈技術分野〉市場規模予測（調査会社レポート）
    - 政策動向（経産省/NEDO の戦略文書）
+   - 【立場が competitor/buyer/supplier（関係性立場）かつ own_company 指定時は**必須**】自社「〈own_company〉」の事業・技術/特許ポジション・市場での立ち位置（対象企業との対比材料。buyer/supplier は対象ドメインのHHI・集中度を交渉力シグナルとして読む。SKILL.md STOP-GATE 2、`terminology.md` §6-2-B）
 
 8. **Artifact 更新**: `implementation_plan.md` § Web Research Themes に候補記載
 

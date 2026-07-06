@@ -1,12 +1,30 @@
 import streamlit as st
 import pandas as pd
 import os
+import re
 import json
+import threading
 import datetime
 import utils
 import matplotlib.pyplot as plt
 utils.configure_matplotlib_font()
 import google.generativeai as genai
+
+
+# genai.configure() はプロセス全体のグローバル設定を書き換えるため、公開 Web アプリで
+# 複数ユーザーが同時にレポート生成すると API キーを取り違える恐れがある。
+# configure→生成を 1 つのロックで原子化し、キーの取り違えを防ぐ。
+_GENAI_LOCK = threading.Lock()
+
+
+def _redact_secret(text, secret=None) -> str:
+    """エラーメッセージ等から API キーを伏せる（UI 表示・サーバログ漏洩対策）。"""
+    s = str(text)
+    if secret:
+        s = s.replace(secret, "***")
+    # Google API キーの典型形（AIza... ）を念のためマスク
+    s = re.sub(r"AIza[0-9A-Za-z_\-]{10,}", "***", s)
+    return s
 
 
 # ==================================================================
@@ -16,37 +34,47 @@ class LLMClient:
     """Gemini API クライアント（VOYAGER レポート生成用）"""
 
     def __init__(self, api_key, model_name="gemini-2.5-flash"):
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(model_name)
+        # キーはインスタンスに保持し、生成のたびにロック内で configure する
+        # （グローバル設定への依存を最小化し、多人数同時実行でのキー取り違えを防止）。
+        self.api_key = (api_key or "").strip()
+        self.model_name = model_name
 
     def generate_text(self, system_prompt, user_prompt, max_retries=3):
-        """テキスト生成（レートリミット対応）"""
+        """テキスト生成（レートリミット対応・キー取り違え/漏洩対策）"""
         import time as _time
         for attempt in range(max_retries):
             try:
-                response = self.model.generate_content(
-                    f"{system_prompt}\n\n{user_prompt}",
-                    generation_config=genai.GenerationConfig(
-                        temperature=0.7,
-                        max_output_tokens=65536,
-                    ),
-                )
+                # configure→GenerativeModel生成→generate を 1 ロックで原子化する。
+                # （他ユーザーが間に configure を挟んでも自分のキーが使われることを保証）
+                with _GENAI_LOCK:
+                    genai.configure(api_key=self.api_key)
+                    model = genai.GenerativeModel(self.model_name)
+                    response = model.generate_content(
+                        f"{system_prompt}\n\n{user_prompt}",
+                        generation_config=genai.GenerationConfig(
+                            temperature=0.7,
+                            max_output_tokens=65536,
+                        ),
+                    )
                 return response.text
             except Exception as e:
                 if '429' in str(e) and attempt < max_retries - 1:
                     wait = 60
                     _time.sleep(wait)
                     continue
-                raise
+                # 例外メッセージからキーを伏せて再送出（万一の漏洩防止・原例外チェーンも遮断）
+                raise RuntimeError(_redact_secret(f"Gemini 生成エラー: {e}", self.api_key)) from None
+        # ここには到達しないが保険
+        raise RuntimeError("Gemini 生成に失敗しました（最大リトライ回数超過）")
 
 
 # ==================================================================
 # --- ページ設定 ---
 # ==================================================================
-st.set_page_config(page_title="APOLLO v8 | VOYAGER", page_icon="📝", layout="wide")
+st.set_page_config(page_title="APOLLO v9 | VOYAGER", page_icon=utils.module_icon("record"), layout="wide")
 utils.render_sidebar()
 
-st.title("📝 VOYAGER")
+utils.module_header("record", "VOYAGER")
 st.markdown("スナップショットを収集し、Gemini AIが戦略レポートの骨格を自動生成します。")
 
 st.markdown("""
@@ -180,7 +208,7 @@ with col_act:
             if snap.get('images') and len(snap['images']) > 1:
                 c_str += f"- [Visual Reference Note]: This evidence consists of multiple images. Refer to [Evidence {i+1}-1] for the first chart (e.g. Growth/Ranking) and [Evidence {i+1}-2] for the second (e.g. Network).\n"
 
-            # --- 構造化データ処理 (v5.1 High-Res) ---
+            # --- 構造化データ処理 ---
             
             # リストアーティファクトの再帰的クリーナー (['a', 'b'] -> "a, b")
             def clean_data_for_prompt(data, key=None):
@@ -297,7 +325,7 @@ with col_act:
                     # コミュニティ（新形式 communities リスト / 旧形式 文字列 両対応）
                     if 'communities' in ns:
                         c_str += f"  - Community Groups: {clean_join(ns['communities'])}\n"
-                    # ブリッジエッジ（新規）
+                    # ブリッジエッジ
                     if 'bridge_edges' in ns and ns['bridge_edges']:
                         bridges = ns['bridge_edges'][:5] if isinstance(ns['bridge_edges'], list) else ns['bridge_edges']
                         c_str += f"  - Bridge Edges (Cross-Community): {clean_join(bridges)}\n"
@@ -335,7 +363,7 @@ with col_act:
                 if 'error' in data_sum:
                      c_str += f"- [Note] Data extraction partial error: {data_sum['error']}\n"
                 
-                # --- NEBULA統合スナップショット処理 (v5.3) ---
+                # --- NEBULA統合スナップショット処理 ---
                 if data_sum.get('type') == 'trend_network_consolidated':
                     c_str += f"- [Consolidated Analysis Data]\n"
                     
@@ -371,7 +399,7 @@ with col_act:
                 # レガシー文字列
                 c_str += f"- Data Summary: {data_sum}\n"
         
-        # 2. システムプロンプト選択 (2段階アーキテクチャ v6.0)
+        # 2. システムプロンプト選択 (2段階アーキテクチャ)
         
         # --- 共通ルール ---
         common_evidence_rules = """
@@ -642,13 +670,19 @@ if st.button("📝 レポート生成", type="primary", key="voyager_generate_re
                                         'entropy', 'gini', 'quadrant_summary', 'noise_analysis',
                                         'cluster_dynamics', 'spatial_context', 'type',
                                         'total_papers', 'n_clusters', 'noise_count',
-                                        'patent_trend', 'academic_trend', 'news_trend']:
+                                        'patent_trend', 'academic_trend', 'news_trend',
+                                        # 権利化率マップ（量×質）— atlas_grant_rate.json
+                                        'definition', 'median_total', 'median_grant_rate', 'groups',
+                                        # 共願ネットワーク指標 — crew_network.json
+                                        'sorted_by', 'top_nodes', 'top_by_metric', 'metric_guide']:
                                 if key in jdata:
                                     val = jdata[key]
                                     if isinstance(val, (dict, list)):
-                                        val_str = json.dumps(val, ensure_ascii=False, default=str)[:800]
+                                        # 権利化率の groups / CREW の top_by_metric 等のリストを
+                                        # 数社で切らないよう余裕を持たせる（gemini-2.5-flashは100万トークン窓で余裕大）
+                                        val_str = json.dumps(val, ensure_ascii=False, default=str)[:2500]
                                     else:
-                                        val_str = str(val)[:200]
+                                        val_str = str(val)[:500]
                                     summary_parts.append(f"- {key}: {val_str}")
                             # クラスタ一覧（ラベルと件数のみ）
                             if 'clusters' in jdata and isinstance(jdata['clusters'], list):
@@ -680,7 +714,7 @@ if st.button("📝 レポート生成", type="primary", key="voyager_generate_re
 
                 if data_summaries:
                     capcom_data_context = "\n".join(data_summaries)
-                    capcom_data_context = capcom_data_context[:30000]  # データは惜しまず送る
+                    capcom_data_context = capcom_data_context[:60000]  # データは惜しまず送る（100万トークン窓に対し十分小さい）
         except Exception:
             pass
 
@@ -691,7 +725,10 @@ if st.button("📝 レポート生成", type="primary", key="voyager_generate_re
 - 出願人ランキング（上位集中度 vs 分散、新規参入者の有無）
 - 市場集中度指標（HHI/Entropy/Giniの3指標を組み合わせた構造分析）
 - IPC分布（技術領域の広がり、ニッチ vs 汎用技術の判別）
-- ライフサイクル（出願人数 vs 出願件数の相関から成長段階を判定）""",
+- ライフサイクル（出願人数 vs 出願件数の相関から成長段階を判定）
+- 権利化率マップ＝出願の「量」×「質」の象限分析（最重要）: 横軸=出願数（量）・縦軸=権利化率（質）。
+  中央値で4象限に分け、右上=量質両立（強者）／左上=少数精鋭（質特化・高効率）／右下=量産だが権利化に課題（質に難）／左下=限定的、で各プレイヤー（または技術分野）を必ず位置づける。
+  「出願数が多い＝強い」と短絡せず、権利化率（質）の差を明示的に論じること。権利化率の定義（全件 or 処分確定）と median_grant_rate（中央値）も併記する。""",
 
             'Saturn V': """Saturn Vは意味的クラスタリングモジュール。以下を分析せよ:
 - クラスタ全体構造（何個のクラスタに分かれたか、それぞれの技術テーマ）
@@ -717,11 +754,13 @@ if st.button("📝 レポート生成", type="primary", key="voyager_generate_re
 - 衰退キーワード（かつての主流技術の退潮）
 - トルネードチャート（競合比較のキーワード優位性）""",
 
-            'CREW': """CREWはネットワーク分析モジュール。以下を分析せよ:
+            'CREW': """CREWはネットワーク分析モジュール（発明者ネットワーク／企業アライアンスの2モード）。以下を分析せよ:
 - 共願ネットワークの密度（協業が活発か孤立的か）
-- 媒介中心性上位者（技術ブローカー＝異分野を橋渡しするキーパーソン）
-- コミュニティ構造（組織間アライアンスの実態）
-- 急上昇スコア（新規参入者 or 活動再開者）""",
+- 媒介中心性上位者（異なる派閥を橋渡しする結節点＝除去すると分断が起きるキーパーソン）
+- 技術ブローカー（複数の技術コミュニティをまたぐ越境者＝技術融合の担い手）
+- 生産性スコア（出願数/(次数+1)＝少人数連携での多産度。高=効率的なR&D体制）
+- コミュニティ構造（共願が密な派閥＝組織間アライアンスの実態）
+- 急上昇スコア（直近で活動を急拡大する新規参入者 or 活動再開者）""",
 
             'CORE': """COREはルールベース分類モジュール。以下を分析せよ:
 - 分類軸間のクロス集計結果（どの技術×どの課題の組合せが多い/少ないか）
@@ -759,8 +798,8 @@ if st.button("📝 レポート生成", type="primary", key="voyager_generate_re
                 desc = s.get('description', '')
                 data = s.get('data_summary', '')
                 if isinstance(data, dict):
-                    data = json.dumps(data, ensure_ascii=False, indent=2, default=str)[:10000]
-                evidence_text += f"\n[[Evidence {eid}]] {title}\n説明: {desc}\nデータ:\n{str(data)[:5000]}\n"
+                    data = json.dumps(data, ensure_ascii=False, indent=2, default=str)[:16000]
+                evidence_text += f"\n[[Evidence {eid}]] {title}\n説明: {desc}\nデータ:\n{str(data)[:16000]}\n"
 
             guide = MODULE_ANALYSIS_GUIDE.get(mod, "提供されたエビデンスを詳細に分析してください。")
 
@@ -814,7 +853,8 @@ Layer 4 — 提言 (Recommendation): 洞察に基づく具体的アクション�
 {mod_data_section}
 
 上記のエビデンスとCAPCOMデータに基づき、{mod}モジュールの分析結果を4層モデルで詳細に記述してください。
-CAPCOMデータにクラスタ動態マップ（cluster_dynamics）、ノイズ分析（noise_analysis）、多様性指標（entropy/gini）、学術クラスタ（nebula_academic_clusters）、空間配置（spatial_context）等がある場合は必ず言及すること。"""
+CAPCOMデータに権利化率マップ（median_grant_rate/groups＝出願の量×質）、クラスタ動態マップ（cluster_dynamics）、ノイズ分析（noise_analysis）、多様性指標（entropy/gini）、共願ネットワーク指標（媒介中心性/技術ブローカー/生産性スコア＝top_by_metric）、学術クラスタ（nebula_academic_clusters）、空間配置（spatial_context）等がある場合は必ず言及すること。
+特に権利化率（質）のデータがある場合は、出願数（量）と必ず対比し「量は多いが質は低い／量は少ないが質は高い」を具体的なプレイヤー名・数値で論じること。"""
 
             result = client.generate_text(
                 system_prompt=analyst_system,
@@ -835,6 +875,9 @@ CAPCOMデータにクラスタ動態マップ（cluster_dynamics）、ノイズ�
 
 ## クロスモジュール分析パターン（利用可能なものから最低3つ選択）
 - Saturn Vクラスタ構造 × MEGA成長率 → 高成長・低参入クラスタの特定
+- ATLAS権利化率（質）× ATLAS出願数ランキング（量）→ 「量は多いが権利化率が低い」量産型 vs 「少数だが権利化率が高い」少数精鋭型のプレイヤー峻別
+- ATLAS権利化率（質）× MEGA成長率 → 急成長しているが権利化（質）が伴っているか（量だけの膨張か実力か）の判定
+- ATLAS権利化率（技術分野別）× Saturn Vクラスタ → 権利化率が高い＝参入障壁が築けている技術領域の特定
 - Explorerバーストキーワード × Saturn Vクラスタラベル → 急上昇テーマの所在特定
 - CREWネットワーク × Saturn Vクラスタ → 誰がどの技術を研究しているか
 - ATLASの時系列ピーク × NEBULAマクロイベント → 政策・市場要因の照合
@@ -855,10 +898,10 @@ CAPCOMデータにクラスタ動態マップ（cluster_dynamics）、ノイズ�
 {', '.join(modules_list)}
 
 # モジュール別分析結果
-{all_analyst_text[:12000]}
+{all_analyst_text[:40000]}
 
 # CAPCOMセッションのデータ要約（全モジュール横断）
-{capcom_data_context[:8000]}
+{capcom_data_context[:40000]}
 
 上記のモジュール分析結果とCAPCOMデータに基づき、クロスモジュール分析を実施してください。
 特にクラスタ動態マップ（cluster_dynamics）とノイズ分析（noise_analysis）、学術-特許クロス分析のデータがある場合は必ず使用すること。"""
@@ -890,8 +933,9 @@ Mission Objectiveに対する直接回答。結論→根拠→推奨アクショ
 
 # 競争環境分析
 - 主要プレイヤーのポジショニング（MEGA 4象限）
+- 出願の量×質（権利化率マップ）: 量産型（出願多・権利化率低）と少数精鋭型（出願少・権利化率高）を峻別し、権利化率が高い＝参入障壁を築けているプレイヤー/技術領域を特定。出願数の多さだけで強さを判断しない
 - 市場集中度の構造（HHI/Entropy/Giniの3指標統合解釈）
-- 発明者・出願人ネットワークのキープレイヤー
+- 発明者・出願人ネットワークのキープレイヤー（媒介中心性・技術ブローカー・生産性スコア）
 - 新規参入者・急成長者の特定
 
 # 環境分析（NEBULAデータがある場合）
@@ -931,6 +975,7 @@ Mission Objectiveに対する市場視点での直接回答。
 
 # 競争インテリジェンス
 - 主要プレイヤーの戦略ポジション
+- 権利化率（質）で見た真の実力者の特定（出願数の多さに惑わされず、量×質の象限で評価）
 - 新規参入の脅威評価
 - アライアンス・オープンイノベーション機会
 
@@ -954,6 +999,7 @@ Mission Objectiveに対する直接回答。
 
 # 競争環境分析
 - 主要プレイヤーと市場集中度
+- 出願の量と質（権利化率）の対比＝量産型 vs 少数精鋭型のプレイヤー峻別
 - キーワード戦略のポジション
 
 # 戦略的示唆と提言
@@ -979,6 +1025,7 @@ Mission Objectiveに対する直接回答。
   - 技術ランドスケープ（Saturn Vクラスタマップ）
   - クラスタ動態マップ（4象限）
   - 出願トレンド（ATLAS時系列）
+  - 権利化率マップ（量×質の象限・ATLAS）※ある場合は競争環境の章で必ず引用
   - 共起ネットワーク（Explorerネットワーク図）
   - MEGA 4象限プロット
 - NEBULAデータがある場合: Hype Cycle、学術ランドスケープも必ず引用
@@ -1016,17 +1063,18 @@ Mission Objectiveに対する直接回答。
 {evidence_catalog}
 
 # モジュール別分析結果（Phase 1）
-{all_analyst_text[:12000]}
+{all_analyst_text[:40000]}
 
 # クロスモジュール分析結果（Phase 2）
-{cross_result[:5000]}
+{cross_result[:12000]}
 
 # CAPCOMセッションのデータ要約（定量的根拠として使用すること）
-{capcom_data_context[:8000]}
+{capcom_data_context[:40000]}
 
 上記の全分析結果とデータを統合し、レポート構成に従って戦略レポートを執筆してください。
 各章は # で始め、節は ## で始めてください。
-CAPCOMデータに含まれるクラスタ動態、ノイズ分析、多様性指標、学術ランドスケープ、Hype Cycle等の全データを分析に活用すること。
+CAPCOMデータに含まれる権利化率（量×質）、クラスタ動態、ノイズ分析、多様性指標、共願ネットワーク指標、学術ランドスケープ、Hype Cycle等の全データを分析に活用すること。
+特に権利化率（median_grant_rate/groups）がある場合は、出願数（量）の多寡だけでなく権利化率（質）の差を必ず競争環境の章で論じること。
 「データがない」「アクセスできない」という記述は禁止。CAPCOMデータ要約に情報が含まれている。
 
 ## Evidence 引用の必須ルール (再強調)
@@ -1053,7 +1101,8 @@ CAPCOMデータに含まれるクラスタ動態、ノイズ分析、多様性�
         st.session_state['voyager_generated_report'] = final_report
 
     except Exception as e:
-        st.error(f"レポート生成エラー: {e}")
+        # 万一例外にキーが含まれても UI・ログに出さない（防御的にマスク）
+        st.error(f"レポート生成エラー: {_redact_secret(e, gemini_key)}")
 
 # ==================================================================
 # --- レポート表示（APOLLO SPACE レベル）---
