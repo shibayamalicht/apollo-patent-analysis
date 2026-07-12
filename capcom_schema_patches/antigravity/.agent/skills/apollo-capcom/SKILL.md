@@ -11,6 +11,20 @@ description: >
 > **Antigravity IDE 専用版**。Claude Code 用の `capcom_schema/SKILL.md` を Antigravity の **Artifact-first パラダイム** に翻案しています。
 > 共有資産（`analysis/`, `references/`, `exemplars/`, `templates/`, `scripts/`）は既存の `capcom_schema/` 配下をそのまま参照します。
 
+## 進行様式の分岐（自律生成 / 対話型 KATHERINE）— 最初に確認
+
+作業開始時に **`voyager/context.json` の `report_mode` を必ず確認**する:
+
+- **`"autonomous"`（既定・未指定含む）**: 本ファイルの手順（自律生成モード）でそのまま進行する。
+- **`"interactive"`（またはユーザーが対話型を明示した場合）**: **`capcom_schema/interactive/SKILL_INTERACTIVE.md` を進行の正本として読み**、`capcom_schema/interactive/dialogue_points.md`（対話ポイント CP-1〜8）を併読して**対話型レポート作成モード（KATHERINE）**で進行する。起動点は `.agent/workflows/06_interactive.md`。品質ゲート・成果物形式・トークン効率制約は自律生成モードと完全に同一（本ファイルの §0・トークン効率制約・各 Phase 完了条件はそのまま適用）。
+
+**対話型の Antigravity 翻案**（詳細は `GEMINI.md`「レポート生成の進行様式」）:
+- SKILL_INTERACTIVE.md の `AskUserQuestion` は **Artifact Review 承認**に読み替える（✅確定 = チェックボックス `[x]` / ✏️修正・🔄別案 = Google Docs 式コメント → 修正 → 再レビュー / 🤖おまかせ = 第4のチェックボックス）
+- 確定必須ブロックには `<!-- ANTIGRAVITY_REVIEW_REQUIRED -->`、応答不要の情報提示（CP-7 突合サマリ等）には `<!-- ANTIGRAVITY_INFO_ONLY -->` マーカーを使う（INFO_ONLY では承認待ちにしない）
+- CP-4/6/7 の対話は **`dialogue_review.md`**（雛形: `artifacts_templates/dialogue_review.md.tmpl`）で運用する。CP-1/2/3/5/8 は `implementation_plan.md` の対応欄（4部構成欄・結論候補節・WARN トリアージ表）を使う
+- **対話型では Review Policy = "Request Review" が必須**。他設定を検出したら Phase 0 で停止し、ユーザーに変更を依頼する（`review_policy_recommendation.md`）
+- ⚠️ 対話型は Claude Code で検証済み・**Antigravity では実機検証未了のベストエフォート対応**（進行様式は同一、確定手段のみ読み替え）
+
 ## 0. 絶対遵守ゲートルール (最優先)
 
 **以下は他の全ルール(トークン効率制約含む)に優先する。例外なく適用する。**
@@ -115,10 +129,11 @@ session_YYYYMMDD_HHMMSS/
 ├── .agent/                # Antigravity スキル配置（本ファイル等）
 │   ├── skills/apollo-capcom/SKILL.md
 │   └── workflows/*.md     # Phase別起動点
-├── artifacts_templates/   # 本スキルで使う Artifact 雛形
+├── artifacts_templates/   # 本スキルで使う Artifact 雛形（対話型用 dialogue_review.md.tmpl 含む）
 ├── task.md                # Artifact: 4フェーズチェックリスト（本スキル起動時に生成）
 ├── implementation_plan.md # Artifact: 承認対象セクション群（同上）
 ├── walkthrough.md         # Artifact: ゲート結果記録（Phase C/D 完了時）
+├── dialogue_review.md     # Artifact: 対話型 KATHERINE のみ（CP-4/6/7 のローリング対話）
 ├── GEMINI.md              # Antigravity最優先ルール
 ├── AGENTS.md              # fallback / Codex互換
 └── metadata.json
@@ -249,7 +264,7 @@ voyager/mission.json を読み、data/以下のJSONとpatents.csvを把握する
 4. `snapshots/` のファイル一覧を取得し、Evidence と紐付け
 5. `data/patents.csv` を読む: `head -5` + pandas で出願人上位 10 社・クラスタ別・年別件数把握 → § Dataset Context に記録
 6. `data/` 以下の全 JSON ファイルから主要数値を抽出 → メモ
-7. `prompts/` の AI インサイトを **最低 3-5 件** 読み、要点を § Key AI Insights に記録
+7. `prompts/` の AI インサイトを **主要モジュール（Saturn V/MEGA/ATLAS/Explorer/CREW/NEBULA/CORE）各1件以上、かつ全体で最低8件** 読み（インサイトが少なければ全件読む。読了数が少ないと deep_dive が表面的になる）、要点を § Key AI Insights に記録
 8. `task.md` の Phase A チェックボックスを更新
 
 コンテキスト管理: `saturn_drill_insight.md`（最大 220KB）や `crew_network_insight.md`（最大 400KB）は全量読み込み禁止。対象箇所のみ `grep` で部分読み込みすること。
@@ -365,8 +380,8 @@ print("\n[クラスタ別件数]\n", df.groupby(['cluster','cluster_label']).siz
 - [ ] `capcom_schema/analysis/common_framework.md` を読了 → 4層分析モデル把握
 - [ ] `capcom_schema/analysis/data_notes.md` を読了 → 特許/NPL非対称性・Web調査ルール把握
 - [ ] `capcom_schema/analysis/cross_module.md` を読了 → 13種クロスパターン把握
-- [ ] `implementation_plan.md` § Cross-Module Pattern Selection に13パターン + Agent推奨3つ（★）を記載
-- [ ] **Artifact Review: ユーザーが3パターン選定**（✅ or Other でカスタム指定）
+- [ ] `implementation_plan.md` § Cross-Module Pattern Selection に13パターン + Agent推奨5つ（★）を記載
+- [ ] **Artifact Review: ユーザーが5パターン以上選定**（✅ or Other でカスタム指定）
 - [ ] ユーザー選定後、§ Confirmed Cross Patterns に転記
 
 🛑 **STOP-GATE 2 (Web調査の意思確認)**
@@ -404,10 +419,10 @@ print("\n[クラスタ別件数]\n", df.groupby(['cluster','cluster_label']).siz
 3. 優先度の高い5-8件を1件ずつ順次読む
 4. 各Evidenceを読む際に: AIインサイトとの照合 / `capcom_schema/analysis/map_reading.md` の該当セクション読解 / 代表特許の抽出 / スナップショット画像パス記録
 5. **代表特許の具体的確認**: `data/patents.csv` を pandas で条件検索し、代表特許のタイトル・出願人・公開番号を **最低15件** 取得
-6. `capcom_schema/analysis/cross_module.md` の基本原則を読み、選定した3パターンを実行
+6. `capcom_schema/analysis/cross_module.md` の基本原則を読み、選定した5パターン以上を実行
 7. クロス分析の洞察を `implementation_plan.md` § Phase B Output Summary に記録
 
-→ **完了条件**: Evidence 5件以上精読済み / AIインサイト照合メモ作成済み / 代表特許15件以上取得済み / クロス分析3パターン以上の仮説→検証→結論を完了済み / `task.md` Phase B 全チェック
+→ **完了条件**: Evidence 5件以上精読済み / AIインサイト照合メモ作成済み / 代表特許15件以上取得済み / クロス分析5パターン以上の仮説→検証→結論を完了済み / `task.md` Phase B 全チェック
 
 ---
 
@@ -422,21 +437,29 @@ print("\n[クラスタ別件数]\n", df.groupby(['cluster','cluster_label']).siz
 exemplars を参照し、全モジュールのdeep_dive.typを生成する。Phase DはPhase Cの出力ファイルを前提とする。
 
 1. **`capcom_schema/analysis/deep_dive_guide.md` を読む** → 各Stepの必須セクション数と最低行数把握
-2. 各モジュールの exemplar を読む → deep_dive.typを生成（exemplar は `capcom_schema/exemplars/`）
-3. 全deep_diveにミクロ分析A（代表特許15件以上）+ B（出願人5社以上、各5行以上）を含める
-4. Step 0: NEBULA → Step 1: Saturn V → Step 2: Explorer → Step 3: MEGA → Step 4: ATLAS → Step 5: CORE → Step 6: CREW の順で処理
-5. **Phase C 完了ゲート (必須実行)**: 以下のスクリプトを実行し、exit code が 0 でない場合は Phase D 開始禁止
+2. **代表特許の決定的選定（Phase C の最初に1回だけ・v9 必須）**: 代表特許は「決まった手順」で選ぶ（**自由選択の禁止**。モデルが自由に選ぶ限り、結論に都合の良い特許を選べてしまう＝つまみ食い）。選定スクリプトを実行する:
+
+   ```bash
+   python3 capcom_schema/scripts/select_representatives.py
+   ```
+
+   `reports/representative_patents.json` が生成される（Saturn V=SBERT重心近傍〔patiroha算出済み〕、MEGA=象限内で出願年昇順→番号昇順、Explorer/CREW=中心性上位ノード対応。全て決定的でタイブレークまで固定）。**ミクロ分析A で引用する特許番号は、この JSON に載った番号だけ**とする（`phase_d_gate.sh` Check 35 が、ミクロ分析節にリスト外の番号があれば警告する）。JSON の `cite_as` / `title` / `applicant` を使い、技術的意義と戦略的文脈を1-2文添えて引用する。プレースホルダ番号（`特開2023-XXXXXX` 等）・捏造番号は自動不合格（詳細: `analysis/deep_dive_guide.md` ミクロ分析A）
+3. 各モジュールの exemplar を読む → deep_dive.typを生成（exemplar は `capcom_schema/exemplars/`）
+4. 全deep_diveにミクロ分析A（代表特許15件以上・**引用は `reports/representative_patents.json` の番号のみ**）+ B（出願人5社以上、各5行以上）を含める
+5. **走査層（v9）**: 各番号セクション冒頭に `#point-lead[...]` を1個、各章末に `#chapter-summary[...]` を置く（散文の代替にしない。gate Check 25/26）
+6. Step 0: NEBULA → Step 1: Saturn V → Step 2: Explorer → Step 3: MEGA → Step 4: ATLAS → Step 5: CORE → Step 6: CREW の順で処理
+7. **Phase C 完了ゲート (必須実行)**: 以下のスクリプトを実行し、exit code が 0 でない場合は Phase D 開始禁止
 
    ```bash
    bash capcom_schema/scripts/phase_c_gate.sh
    ```
 
-6. **スクリプトの stdout/stderr を `walkthrough.md` § Phase C Gate Result に全文転記**（加工・要約禁止）
-7. `task.md` Phase C チェックボックスを更新
+8. **スクリプトの stdout/stderr を `walkthrough.md` § Phase C Gate Result に全文転記**（加工・要約禁止）
+9. `task.md` Phase C チェックボックスを更新
 
 **「実質的にOK」等の AI の質的判断による上書きは禁止**(`## 0. 絶対遵守ゲートルール` 第3項)。
 
-→ **完了条件**: deep_dive 4ファイル以上（Saturn V + Explorer + MEGA + ATLAS）、各最低行数を満たす / `phase_c_gate.sh` exit 0 / `walkthrough.md` 転記済み
+→ **完了条件**: `reports/representative_patents.json` 生成済み（決定的選定）/ deep_dive 4ファイル以上（Saturn V + Explorer + MEGA + ATLAS）、各最低行数を満たす / `phase_c_gate.sh` exit 0 / `walkthrough.md` 転記済み
 
 #### 最低行数一覧（クイックリファレンス）
 
@@ -470,6 +493,7 @@ exemplars を参照し、全モジュールのdeep_dive.typを生成する。Pha
 3. Phase C で生成した全 deep_dive ファイルを読む
 4. `report.typ` を生成する（→ `capcom_schema/analysis/report_structure.md` セクション1の構造）
 5. **deep_dive の全文コピー**: 要約・圧縮・省略は一切禁止（→ `capcom_schema/analysis/report_structure.md` セクション2）
+   - Phase D で新規に書く章（クロスモジュール統合分析・結論等）にも**走査層**（各番号セクション冒頭の `#point-lead` + 各章末の `#chapter-summary`）を適用する（gate Check 25/26）
 6. **品質検証ゲート (必須実行)**:
 
    ```bash
@@ -529,7 +553,7 @@ target = df[df['cluster'] == 3][['title', 'applicant_main', 'year']].head(20)  #
 
 1. **数値根拠**: 全ての主張に具体的な数値を含める
 2. **特許引用**: 代表特許を具体的に引用する（番号、タイトル、出願人）
-3. **クロス検証**: 最低3パターン実施（→ `capcom_schema/analysis/cross_module.md`）
+3. **クロス検証**: 最低5パターン実施（→ `capcom_schema/analysis/cross_module.md`）
 4. **事実と推論の分離**: 4層分析モデルを適用（→ `capcom_schema/analysis/common_framework.md`）
 5. **可視化参照（全章必須）**: 全ての章に最低1つの `#snapshot-figure()` を含める
 6. **AIインサイト活用**: `prompts/` のAIインサイトを必ず参照
@@ -552,13 +576,14 @@ target = df[df['cluster'] == 3][['title', 'applicant_main', 'year']].head(20)  #
 - `evidence-box(番号, "タイトル")[...]` — Evidenceボックス
 - `insight-box[...]` — Key Insightボックス
 - `point-lead[...]` — **要点ストリップ**（番号セクション見出し直後に置く結論先出し1〜2行＝走査層。散文の上に重ねる。散文の代替ではない）
+- `chapter-summary[...]` — **本章のまとめ**（各章末に置く走査層。まとめの後に本文を続けない。gate Check 25/26）
 - `hl[...]` — インライン強調（数値以外のキーワードを選択的に。1セクション数語まで。多用禁止）
 - `snapshot-figure("パス", caption: "説明")` — スナップショット画像
 - `styled-table(columns: ..., header: (...), ..body)` — BCG風テーブル
 - `conclusion-box("タイトル")[本文]` — 主要結論
 - `recommendation-card("高", "タイトル", "説明", timeframe: "短期")` — 優先度付き推奨
 
-> 📐 **読みやすさ（走査層）— 詳細は `analysis/deep_dive_guide.md`「読みやすさ（走査層）」**: ①**各番号セクション冒頭に `#point-lead[...]` を1個**置き結論を1〜2行で先出し（散文は下にそのまま＝薄くしない）②**数値＋単位はテンプレートが自動で太字強調**＝**手動で数字を太字化しない**③余白・見出しバーも自動。要点だけ書いて散文を削るのは Check 1（文字数）で不合格。
+> 📐 **読みやすさ（走査層）— 詳細は `analysis/deep_dive_guide.md`「読みやすさ（走査層）」**: ①**各番号セクション冒頭に `#point-lead[...]` を1個**置き結論を1〜2行で先出し（散文は下にそのまま＝薄くしない）②**各章末に `#chapter-summary[...]`**（本章のまとめ。散文の代替にしない。gate Check 25/26）③**数値＋単位はテンプレートが自動で太字強調**＝**手動で数字を太字化しない**④余白・見出しバーも自動。要点だけ書いて散文を削るのは Check 1（文字数）で不合格。
 
 **注意**: `report_style.typ` のフォント設定を変更しないこと。画像パスは `reports/` からの相対パス。`--root ".."` 必須。
 
@@ -585,7 +610,7 @@ Antigravity は Claude Code/Codex と異なり **Artifact-first** です：
 | Phase Gate | Artifact 操作 |
 |---|---|
 | Phase A-2: タイトル3案 | `implementation_plan.md` § Title Candidates にチェックボックス付き3案 → ユーザーが ✅ |
-| Phase B-1: クロスパターン3つ | `implementation_plan.md` § Cross-Module Pattern Selection の13パターンから3つ選定 |
+| Phase B-1: クロスパターン5つ以上 | `implementation_plan.md` § Cross-Module Pattern Selection の13パターンから5つ以上選定（Phase B 完了条件・gate Check 4 の最低数と同じ） |
 | Phase B-2: Web調査可否 | `task.md` § Phase B Gates の Web Research 3択チェックボックス |
 | Phase C: Deep Dive Plan | `implementation_plan.md` § Deep Dive Plan にテーブル → ユーザー承認 |
 | Phase C: 完了ゲート | `bash phase_c_gate.sh` + `walkthrough.md` § Phase C Gate Result に全文転記 |
@@ -611,6 +636,7 @@ Antigravity の設定パネルで `apollo-capcom` skill に対して **"Request 
 - `.agent/workflows/03_phase_b_evidence_cross.md` — Phase B のみ
 - `.agent/workflows/04_phase_c_deep_dive.md` — Phase C のみ
 - `.agent/workflows/05_phase_d_integration.md` — Phase D のみ
+- `.agent/workflows/06_interactive.md` — 対話型レポート作成モード（KATHERINE）の起動点（`report_mode=interactive` 時）
 
 各 Phase 個別起動時は、前 Phase の Artifact（特に `implementation_plan.md`）が完成していることを前提とします。
 

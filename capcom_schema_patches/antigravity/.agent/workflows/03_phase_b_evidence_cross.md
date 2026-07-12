@@ -2,7 +2,7 @@
 name: phase-b-evidence-cross
 description: >
   APOLLO CAPCOM Phase B: エビデンス精読 + クロスモジュール分析。
-  2つの Artifact ゲート（クロスパターン3つ選定 / Web調査可否）を経て本体作業を実施。
+  2つの Artifact ゲート（クロスパターン5つ以上選定 / Web調査可否）を経て本体作業を実施。
 ---
 
 # Phase B: Evidence & Cross-Module 🛑 ARTIFACT GATE x2
@@ -22,18 +22,18 @@ description: >
 2. `capcom_schema/analysis/data_notes.md` 読了 → 特許/NPL非対称性、Web調査ルール把握
 3. `capcom_schema/analysis/cross_module.md` 読了 → 13種クロスパターン把握
 
-### 🛑 GATE 1: クロスパターン3つ選定
+### 🛑 GATE 1: クロスパターン5つ以上選定
 
-4. **Artifact 更新**: `implementation_plan.md` § Cross-Module Pattern Selection に13パターン + Agent推奨3つ（★）を記載
+4. **Artifact 更新**: `implementation_plan.md` § Cross-Module Pattern Selection に13パターン + Agent推奨5つ（★）を記載
 
    Agent推奨の選び方:
    - Mission Objective と最も直結するパターン 1つ
    - データの強み（例: Saturn V クラスタ多数）を活かすパターン 1つ
    - 不明点を解消できるパターン（例: NEBULA ギャップ）1つ
 
-5. **🛑 Artifact Review GATE 1**: ユーザーが3つ選定するまで待機（☐ → ✅、または Other でカスタム）
+5. **🛑 Artifact Review GATE 1**: ユーザーが5つ以上選定するまで待機（☐ → ✅、または Other でカスタム）
 
-6. **Confirmed Cross Patterns 記録**: ユーザー選択後、§ Confirmed Cross Patterns に3パターン記入
+6. **Confirmed Cross Patterns 記録**: ユーザー選択後、§ Confirmed Cross Patterns に5パターン以上記入
 
 ### 🛑 GATE 2: Web調査可否
 
@@ -60,7 +60,7 @@ description: >
 
 13. **代表特許取得**: `data/patents.csv` を pandas で条件検索、**最低15件** 取得（タイトル・出願人・公開番号）
 
-14. **クロス分析実行**: 選定した3パターンを実行
+14. **クロス分析実行**: 選定した5パターン以上を実行
     - 各パターンで 仮説 → 検証 → 結論 (15-20行)
     - 結果を § Phase B Output Summary に記録
 
@@ -74,16 +74,16 @@ description: >
 ## 完了条件
 
 - [ ] リファレンス3ファイル読了済み
-- [ ] § Confirmed Cross Patterns に3パターン記入済み（ユーザー承認経由）
+- [ ] § Confirmed Cross Patterns に5パターン以上記入済み（ユーザー承認経由）
 - [ ] § Confirmed Web Research 決定済み（ユーザー承認経由）
 - [ ] Evidence 5件以上精読済み
 - [ ] 代表特許15件以上取得済み
-- [ ] 3クロスパターンの仮説→検証→結論完了
+- [ ] 5クロスパターン以上の仮説→検証→結論完了
 - [ ] `task.md` Phase B 全チェック `[x]`
 
 ## 禁止事項
 
-- **Agent 側で勝手に3パターン確定して進めるのは禁止**
+- **Agent 側で勝手にパターンを確定して進めるのは禁止**
 - **「Web調査不要と判断しました」AI自己判断も禁止**
 - ユーザーの明示的な承認（Artifact Review）を必ず経由
 

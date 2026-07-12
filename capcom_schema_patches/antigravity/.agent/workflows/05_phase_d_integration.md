@@ -75,6 +75,8 @@ description: >
 
 8. **deep_dive 全文コピー**: 全 deep_dive ファイルを **要約・圧縮・省略せず** そのまま `#include` または内容コピー
    - `capcom_schema/analysis/report_structure.md` セクション2 の deep_dive コピールール厳守
+   - Phase D で新規に書く章（クロスモジュール統合分析・結論等）にも**走査層**（各番号セクション冒頭の `#point-lead[...]` + 各章末の `#chapter-summary[...]`）を適用する（gate Check 25/26。散文の代替にしない）
+   - 結論・提言章は `capcom_schema/analysis/structured_techniques.md` を執筆**直前**に読み、主要結論に「結論の検証（別解釈＋決め手）」・主要結論1〜3個に「結論の前提と見直しのサイン」を付す（gate Check 30/31。技法名は本文に書かず読者向け呼称を使う＝Check 8f）
 
 ### 🛑 SCRIPTED GATE: Phase D 品質判定
 
@@ -85,14 +87,17 @@ description: >
 
 10. **結果を walkthrough.md に転記**: `walkthrough.md` § Phase D Gate Result にスクリプト出力を **全文コピペ**
 
-11. **判定**:
+11. **判定**（Check 1〜37。**項目・基準の正本は `capcom_schema/scripts/phase_d_gate.sh` の実出力** — 以下は代表例のみ）:
     - exit 0 → Gate 通過、PDF 出力へ
     - exit 1 → FAIL。不合格 Check 項目を修正して再実行
-      - Check 1 (行数 < 800): deep_dive の全文コピー確認、結論章の充実化
-      - Check 2 (代表特許 < 15): 各章の代表特許引用を追加
-      - Check 4 (クロス統合 < 80行): クロスモジュール統合分析章を充実
+      - Check 1 (非空白文字数 < 45000字): deep_dive の全文コピー確認、固有事実（新しい代表特許・数値根拠・別クロスパターン・Web裏付け）で充実化（行数は1文1行で水増し可のため参考値）
+      - Check 2 (代表特許 < 15): 各章の代表特許引用を追加（ミクロ分析Aは `reports/representative_patents.json` の番号のみ）
+      - Check 4 (クロス統合 < 120行): クロスモジュール統合分析章を充実
       - Check 5 (snapshot-figure < 8): スナップショット画像を追加挿入
-      - Check 6 (Web情報出所不足): 全Web情報に footnote で出所追加
+      - Check 6 (Web情報出所不足): 全Web情報に `#footnote[...]` で出所追加
+      - Check 19/19a (水増し・本文スクリプト生成): 重複文を削除し固有内容に置換（検出のすり抜けは禁止）
+      - Check 30/31 (構造化分析): 主要結論に「結論の検証（別解釈＋決め手）」「結論の前提と見直しのサイン」を追加
+      - Check 35 (決定的選定): ミクロ分析節のリスト外番号を選定リストの番号に引き直す
 
 ### PDF 出力
 

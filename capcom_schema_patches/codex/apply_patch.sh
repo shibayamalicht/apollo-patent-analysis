@@ -2,13 +2,14 @@
 # APOLLO CAPCOM Codex パッチ適用スクリプト
 # 使い方:
 #   bash apply_patch.sh <session_dir>
-#   例) bash /path/to/apollo_v7/capcom_schema_patches/codex/apply_patch.sh ~/Downloads/session_20260416_143022
+#   例) bash /path/to/apollo/capcom_schema_patches/codex/apply_patch.sh ~/Downloads/session_20260416_143022
 #
 # 本スクリプトは以下のファイルを <session_dir> に追加します:
 #   - .codex/skills/apollo-capcom/SKILL.md
 #   - .codex/skills/apollo-capcom/prompts/*.md (5ファイル)
 #   - AGENTS.md
 #   - exec_mode_addendum.md
+#   - interactive_codex_addendum.md (対話型モード KATHERINE の Codex 補遺)
 #
 # 既存の capcom_schema/ には一切手を加えません。
 
@@ -49,7 +50,7 @@ echo "適用先:   $SESSION_DIR"
 echo ""
 
 # 1. .codex/skills/apollo-capcom/ をコピー
-echo "1/3: .codex/skills/apollo-capcom/ をコピー..."
+echo "1/4: .codex/skills/apollo-capcom/ をコピー..."
 mkdir -p "$SESSION_DIR/.codex/skills/apollo-capcom/prompts"
 cp "$PATCH_DIR/.codex/skills/apollo-capcom/SKILL.md" \
    "$SESSION_DIR/.codex/skills/apollo-capcom/SKILL.md"
@@ -59,7 +60,7 @@ echo "   ✅ SKILL.md + prompts/ 5ファイル"
 
 # 2. AGENTS.md を配置（既存があれば上書き確認）
 echo ""
-echo "2/3: AGENTS.md を配置..."
+echo "2/4: AGENTS.md を配置..."
 if [ -f "$SESSION_DIR/AGENTS.md" ]; then
   echo "   ⚠️  $SESSION_DIR/AGENTS.md は既に存在します"
   echo "   既存ファイルを上書きしますか? [y/N]"
@@ -80,8 +81,14 @@ fi
 
 # 3. exec_mode_addendum.md を配置
 echo ""
-echo "3/3: exec_mode_addendum.md を配置..."
+echo "3/4: exec_mode_addendum.md を配置..."
 cp "$PATCH_DIR/exec_mode_addendum.md" "$SESSION_DIR/exec_mode_addendum.md"
+echo "   ✅ 配置完了"
+
+# 4. interactive_codex_addendum.md を配置（対話型モード KATHERINE の Codex 補遺）
+echo ""
+echo "4/4: interactive_codex_addendum.md を配置..."
+cp "$PATCH_DIR/interactive_codex_addendum.md" "$SESSION_DIR/interactive_codex_addendum.md"
 echo "   ✅ 配置完了"
 
 # 検証
@@ -96,6 +103,7 @@ added_files=(
   ".codex/skills/apollo-capcom/prompts/phase_d_plan.md"
   "AGENTS.md"
   "exec_mode_addendum.md"
+  "interactive_codex_addendum.md"
 )
 
 missing=0

@@ -11,7 +11,8 @@
 - **Session ID**: （例）session_20260416_143022_abc123
 - **Generated at**: （Phase D 完了時刻、ISO 8601）
 - **Agent**: Antigravity IDE
-- **Skill**: apollo-capcom (v7 overlay patch)
+- **Skill**: apollo-capcom (v9 対応パッチ)
+- **Report Mode**: autonomous / interactive（KATHERINE）のいずれかを記載
 - **Confirmed Title**: （`implementation_plan.md` § Confirmed Title から転記）
 
 ---
@@ -21,17 +22,19 @@
 > `bash capcom_schema/scripts/phase_c_gate.sh` の stdout/stderr をそのまま転記してください。
 
 ```
-（ここに phase_c_gate.sh の実行結果を貼り付け）
+（ここに phase_c_gate.sh の実行結果を貼り付け。以下は v9 の出力様式サンプル —
+ 判定は行数でなく非空白文字数で行われる）
 
 === Phase C ゲート判定 ===
 Reports dir: reports
+判定基準: 非空白文字数（行数は1文1行で水増し可能なため参考値）
 
-✅ OK:   reports/nebula_deep_dive.typ = 125行 (要 120行)
-✅ OK:   reports/saturnv_deep_dive.typ = 268行 (要 250行)
-✅ OK:   reports/explorer_deep_dive.typ = 215行 (要 200行)
-✅ OK:   reports/mega_deep_dive.typ = 134行 (要 120行)
-✅ OK:   reports/atlas_deep_dive.typ = 128行 (要 120行)
-✅ OK:   reports/core_deep_dive.typ = 92行 (要 80行)
+✅ OK:   reports/nebula_deep_dive.typ = 7213字 (要 6500字・行数=131)
+✅ OK:   reports/saturnv_deep_dive.typ = 14102字 (要 13000字・行数=272)
+✅ OK:   reports/explorer_deep_dive.typ = 11240字 (要 10500字・行数=218)
+✅ OK:   reports/mega_deep_dive.typ = 7008字 (要 6500字・行数=139)
+✅ OK:   reports/atlas_deep_dive.typ = 6987字 (要 6500字・行数=127)
+✅ OK:   reports/core_deep_dive.typ = 4890字 (要 4400字・行数=95)
 ℹ️  INFO: reports/crew_deep_dive.typ = 67行 (CREW は最低行数指定なし)
 
 ✅ Phase C GATE PASSED. Phase D に進めます。
@@ -46,23 +49,31 @@ Reports dir: reports
 > `bash capcom_schema/scripts/phase_d_gate.sh` の stdout/stderr をそのまま転記してください。
 
 ```
-（ここに phase_d_gate.sh の実行結果を貼り付け）
+（ここに phase_d_gate.sh の実行結果を貼り付け。Check 1〜37 の全出力を省略せず転記する。
+ 以下は v9 の出力様式サンプル — Check 1 は行数でなく非空白文字数で判定される）
 
 === Phase D 品質ゲート判定 ===
 Target: reports/report.typ
 
-✅ Check 1 OK:   report.typ = 912行 (要 800行以上)
+✅ Check 1 OK:   report.typ = 52340字 (要 45000字以上・行数=1024)
 ✅ Check 2 OK:   代表特許引用 = 23件 (要 15件以上)
 ℹ️  Check 3: Layer2(解釈)=12, Layer3(洞察)=8, Layer4(提言)=9 (各5件以上が目安)
-✅ Check 4 OK:   クロスモジュール統合分析 = 94行 (要 80行以上)
+✅ Check 4 OK:   クロスモジュール統合分析 = 138行 (要 120行以上)
 ✅ Check 5 OK:   snapshot-figure = 12枚 (要 8枚以上)
-✅ Check 6 OK:   Web情報使用=5件、出所記載=5件
+✅ Check 6b OK:  Web情報使用=5件、#footnote 引用=5件
 ℹ️  Check 7: 仮説導出=15件 vs 検証=18件 (近い値が望ましい)
+（… 中略: Check 8〜34 の実出力をそのまま転記 …）
+✅ Check 35 OK:  ミクロ分析節の引用 18件 すべて選定リスト由来
+✅ Check 36 OK:  裏付けのない断定なし
+✅ Check 37 OK:  壁テキストなし
 
 ✅ Phase D GATE PASSED. レポート完成。
 ```
 
 **Gate 通過判定**: ✅ PASSED / ❌ FAILED（該当を残す）
+
+> 対話型（KATHERINE）の場合: WARN の「直す / 残す」の判断と理由は `implementation_plan.md`
+> § CP-8 (b) WARN トリアージ表に記録する（**gate 出力の全文転記は本ファイル側の役割**。二重転記しない）。
 
 ---
 
@@ -73,7 +84,7 @@ Target: reports/report.typ
 | Phase | Artifact | 承認日時 | 承認者 | 内容 |
 |---|---|---|---|---|
 | A-2 | implementation_plan.md § Title Candidates | _未記録_ | _未記録_ | Confirmed Title: _未確定_ |
-| B-1 | implementation_plan.md § Cross-Module Pattern Selection | _未記録_ | _未記録_ | 3 patterns: _未確定_ |
+| B-1 | implementation_plan.md § Cross-Module Pattern Selection | _未記録_ | _未記録_ | 5 patterns 以上: _未確定_ |
 | B-2 | task.md § Phase B Gates > Web Research | _未記録_ | _未記録_ | 選択: _未確定_ |
 | C | implementation_plan.md § Deep Dive Plan | _未記録_ | _未記録_ | 承認内容: _未確定_ |
 | D | implementation_plan.md § Report Structure & Quality Plan | _未記録_ | _未記録_ | 承認内容: _未確定_ |

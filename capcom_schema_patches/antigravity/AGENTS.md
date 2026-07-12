@@ -32,6 +32,14 @@
 
 ---
 
+## レポート生成の進行様式（自律生成 / 対話型 KATHERINE）
+
+`voyager/context.json` の `report_mode` を必ず確認すること。
+- `"autonomous"`（既定・未指定含む）: 従来どおり本パッチのスキル手順（自律生成モード）で進行する。
+- `"interactive"`（またはユーザーが対話型を明示した場合）: **`capcom_schema/interactive/SKILL_INTERACTIVE.md` を進行の正本として読み**、`capcom_schema/interactive/dialogue_points.md`（対話ポイント CP-1〜8）を併読して対話型レポート作成モード（KATHERINE）で進行する。品質ゲート・成果物形式・トークン効率制約は自律生成モードと完全に同一。対話ツールの読替は SKILL_INTERACTIVE.md 冒頭の読替表に従う（本ツールでの実機検証は未了・ベストエフォート）。
+
+---
+
 ## 🚫 禁止事項
 
 - **スキル未起動でレポート着手**: `apollo-capcom` を起動せずに `data/` を解析してレポート本体を書き始めるのは禁止
@@ -82,7 +90,7 @@ session_YYYYMMDD_HHMMSS/               ← cwd
 - **スキル優先**: プロジェクトスコープのスキル（自動探索 `.agents/skills/apollo-capcom/SKILL.md`、無ければ `.codex/skills/apollo-capcom/SKILL.md`）が本 AGENTS.md より詳細なため、両者が衝突した場合スキル側を優先
 
 ### Antigravity IDE
-- **Review Policy = "Request Review"** を推奨（5箇所の STOP-GATE で必須）
+- **Review Policy = "Request Review"** を推奨（各 STOP-GATE の Artifact Review で必須。ゲート構成の正本はスキル本体の各 Phase 節。**対話型 KATHERINE では "Request Review" が必須**）
 - **Artifact 駆動**: `task.md` / `implementation_plan.md` / `walkthrough.md` がユーザー承認の媒体
 - **GEMINI.md** が Antigravity 固有のルールを定義（本 AGENTS.md は fallback）
 - **🔄 セッション・チェックポイント（各フェーズ境界で必須）**: 各フェーズの区切り（Phase A完了・Phase B完了・Phase Cの各モジュール完了ごと・Phase D着手前）で必ず、ゲート/Artifact 通過＋`_carryover.md` 更新の後に「新タスクに切り替えますか？」と提案して一旦停止する（続行/切替/`/compact` をユーザーが選ぶ）。切替時は新タスクが `_carryover.md`＋Artifact から自動再開。詳細はスキル本体 `### 🔄 セッション・チェックポイント`

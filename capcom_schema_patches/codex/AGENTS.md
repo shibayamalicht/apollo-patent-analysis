@@ -32,6 +32,14 @@
 
 ---
 
+## レポート生成の進行様式（自律生成 / 対話型 KATHERINE）
+
+`voyager/context.json` の `report_mode` を必ず確認すること。
+- `"autonomous"`（既定・未指定含む）: 従来どおり本パッチのスキル手順（自律生成モード）で進行する。
+- `"interactive"`（またはユーザーが対話型を明示した場合）: **`capcom_schema/interactive/SKILL_INTERACTIVE.md` を進行の正本として読み**、`capcom_schema/interactive/dialogue_points.md`（対話ポイント CP-1〜8）を併読して対話型レポート作成モード（KATHERINE）で進行する。品質ゲート・成果物形式・トークン効率制約は自律生成モードと完全に同一。対話ツールの読替は SKILL_INTERACTIVE.md 冒頭の読替表に従う（本ツールでの実機検証は未了・ベストエフォート）。
+
+---
+
 ## 🚫 禁止事項
 
 - **スキル未起動でレポート着手**: `apollo-capcom` を起動せずに `data/` を解析してレポート本体を書き始めるのは禁止

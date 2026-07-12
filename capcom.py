@@ -43,6 +43,9 @@ def _init_store(session_id):
             'snapshots': [],
         },
         'telemetry': {'snapshots': 0, 'prompts': 0, 'data': 0},
+        # ストア内容の更新カウンタ。save_* / clear_* のたびに +1 され、
+        # ZIP キャッシュキーの一部になる（件数が同じままの内容更新でも新 ZIP を構築させる）
+        'revision': 0,
     }
 
 
@@ -85,6 +88,20 @@ def get_session_id():
 def _get_store():
     """内部ヘルパ: capcom_store を取得。非アクティブなら None"""
     return st.session_state.get('capcom_store') if is_active() else None
+
+
+def _bump_revision(store):
+    """内部ヘルパ: ストア更新カウンタを +1 する（旧ストアに revision が無くても動く）"""
+    if store is not None:
+        store['revision'] = store.get('revision', 0) + 1
+
+
+def get_store_revision():
+    """ストア内容の更新カウンタを返す（ZIP キャッシュキー用）。非アクティブなら 0"""
+    store = _get_store()
+    if store is None:
+        return 0
+    return store.get('revision', 0)
 
 
 # ==================================================================
@@ -142,6 +159,7 @@ def save_snapshot_image(snap_id, image_bytes, index=None):
         'image': image_bytes,
         'index': index,
     }
+    _bump_revision(store)
     return snapshot_logical_path(snap_id, index)
 
 
@@ -173,6 +191,7 @@ def save_metadata(snapshots_list):
     store['metadata']['snapshots'] = serializable_snapshots
     store['metadata']['updated_at'] = datetime.datetime.now().isoformat()
     store['metadata']['snapshot_count'] = len(serializable_snapshots)
+    _bump_revision(store)
 
 
 # ==================================================================
@@ -197,6 +216,7 @@ def save_prompt(filename, prompt_text):
     safe_name = _sanitize_filename(filename)
     store['prompts'][safe_name] = prompt_text
     _increment_counter('prompt')
+    _bump_revision(store)
 
 
 # ==================================================================
@@ -221,6 +241,7 @@ def save_data(filename, data):
     safe_name = _sanitize_filename(filename)
     store['data'][safe_name] = data
     _increment_counter('data')
+    _bump_revision(store)
 
 
 def get_data(filename):
@@ -258,6 +279,7 @@ def save_voyager_mission(mission_data):
     if store is None or mission_data is None:
         return
     store['voyager']['mission'] = mission_data
+    _bump_revision(store)
 
 
 def clear_voyager_evidence():
@@ -272,6 +294,7 @@ def clear_voyager_evidence():
     if store is None:
         return
     store['voyager']['evidence'] = {}
+    _bump_revision(store)
 
 
 def save_voyager_evidence(filename, evidence_data):
@@ -283,6 +306,7 @@ def save_voyager_evidence(filename, evidence_data):
     if not safe_name.endswith('.json'):
         safe_name += '.json'
     store['voyager']['evidence'][safe_name] = evidence_data
+    _bump_revision(store)
 
 
 def save_voyager_context(context_data):
@@ -291,6 +315,7 @@ def save_voyager_context(context_data):
     if store is None or context_data is None:
         return
     store['voyager']['context'] = context_data
+    _bump_revision(store)
 
 
 def get_voyager_mission():
@@ -419,6 +444,7 @@ def save_patents_csv():
     # CSV bytes 化して store に格納
     csv_bytes = df_export.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
     store['data']['patents.csv'] = csv_bytes
+    _bump_revision(store)
 
 
 # ==================================================================
@@ -455,7 +481,7 @@ def _increment_counter(key):
 # --- ZIP エクスポート ---
 # ==================================================================
 
-def export_session_zip(selected_tools=None):
+def export_session_zip(selected_tools=None, report_mode="autonomous", selected_tool_labels=None):
     """
     session_state['capcom_store'] から ZIP を動的に組み立ててバイト列で返す。
     リポジトリの不変アセット (capcom_schema/, CLAUDE.md, .claude/skills/) も同梱する。
@@ -468,6 +494,17 @@ def export_session_zip(selected_tools=None):
                                （AGENTS.md, .codex/skills/, exec_mode_addendum.md 等）
             "antigravity" を含む場合: capcom_schema_patches/antigravity/ の資材を展開する
                                      （GEMINI.md, AGENTS.md, .agent/, artifacts_templates/ 等）
+        report_mode: str
+            レポート生成の進行様式。"autonomous"（自律生成・従来）または
+            "interactive"（対話型レポート作成モード KATHERINE）。
+            ZIP 構築時に voyager/context.json と metadata.json へ反映する
+            （CAPCOM Export 後にモードを切り替えても最新の選択が ZIP に入る）。
+            同梱内容自体はモードで分岐しない（interactive/ スキーマは capcom_schema/ の
+            一部として常時同梱される）。
+        selected_tool_labels: list[str] or None
+            selected_tools に対応する表示ラベル。指定時は context.json の capcom_tools も
+            ZIP 構築時点の選択で上書きする（Export 後にツール選択を変えても、同梱パッチと
+            context.json の記載がズレないようにする。report_mode と同じ扱い）。
 
     Returns:
         tuple: (zip_bytes, zip_filename) または (None, None)
@@ -479,6 +516,8 @@ def export_session_zip(selected_tools=None):
     # デフォルトは Claude Code のみ
     if not selected_tools:
         selected_tools = ["claude_code"]
+    if report_mode not in ("autonomous", "interactive"):
+        report_mode = "autonomous"
 
     sid = store['session_id']
     project_root = os.path.dirname(os.path.abspath(__file__))
@@ -508,9 +547,18 @@ def export_session_zip(selected_tools=None):
                 json.dumps(store['voyager']['mission'], ensure_ascii=False, indent=2, default=str)
             )
         if store['voyager'].get('context'):
+            # report_mode / capcom_tools は ZIP 構築時点の UI 選択を正とする
+            # （Export 後のモード・ツール切替に追随し、同梱パッチと context.json のズレを防ぐ）
+            context_out = dict(store['voyager']['context'])
+            context_out['report_mode'] = report_mode
+            if selected_tool_labels is not None:
+                context_out['capcom_tools'] = {
+                    'selected': list(selected_tool_labels),
+                    'selected_keys': list(selected_tools),
+                }
             zf.writestr(
                 f'{sid}/voyager/context.json',
-                json.dumps(store['voyager']['context'], ensure_ascii=False, indent=2, default=str)
+                json.dumps(context_out, ensure_ascii=False, indent=2, default=str)
             )
         for ev_fname, ev_data in store['voyager']['evidence'].items():
             zf.writestr(
@@ -520,6 +568,7 @@ def export_session_zip(selected_tools=None):
 
         # 5. metadata.json（解析環境情報＝使用した文埋め込みモデル等を付与）
         export_metadata = dict(store['metadata'])
+        export_metadata['report_mode'] = report_mode  # 再現性注記用（生成様式の記録）
         try:
             import utils as _utils
             _info = _utils.current_sbert_model_info()
@@ -568,9 +617,9 @@ def _add_repo_assets_to_zip(zf, sid, project_root):
     if os.path.exists(src):
         zf.write(src, f'{sid}/CLAUDE.md')
 
-    # requirements-session.txt（CAPCOM スライド生成用の最小依存）
+    # requirements-session.txt（CAPCOM セッション用の最小依存）
     # ZIP 展開後、ユーザーは `pip install -r requirements-session.txt` で
-    # python-pptx / Pillow を一括インストールできる。
+    # pandas / python-pptx / Pillow を一括インストールできる。
     req_src = os.path.join(project_root, 'requirements-session.txt')
     if os.path.exists(req_src):
         zf.write(req_src, f'{sid}/requirements-session.txt')

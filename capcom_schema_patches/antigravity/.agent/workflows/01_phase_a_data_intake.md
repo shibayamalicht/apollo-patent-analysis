@@ -9,7 +9,7 @@ description: >
   Artifact Review ゲート複数あり。
 ---
 
-# Phase A: Mission & Data Intake + 母集団設計読解（4 Artifact Review Gate）
+# Phase A: Mission & Data Intake + 母集団設計読解（Artifact Review Gate 複数・全て指定時は最大 7）
 
 本ワークフローは **Phase A のみ** を実行します。前提として `apollo-capcom` スキルの初期化（task.md / implementation_plan.md / walkthrough.md 生成）が完了していること。
 
@@ -92,7 +92,7 @@ description: >
     - pandas で出願人上位 10 社・クラスタ別件数・年別件数 → § Dataset Context に記録
     - **`print(df)` / `cat` は禁止**
 24. **モジュール JSON 抽出**: `data/` 以下の全 JSON から主要数値抽出（クラスタ数・ノイズ率・HHI/Entropy/Gini・CAGR 等）
-25. **AI Insights 読了**: `prompts/` から最低 3-5 件選定、1 件ずつ読む:
+25. **AI Insights 読了**: `prompts/` から **主要モジュール（Saturn V/MEGA/ATLAS/Explorer/CREW/NEBULA/CORE）各1件以上、かつ全体で最低8件** を 1 件ずつ読む（インサイトが少なければ全件読む。読了数が少ないと deep_dive が表面的になる）:
     - 50KB 以下 → 全量読み込み可
     - 50KB 超 → 部分読み込み（grep）
     - `saturn_drill_insight.md` (最大 220KB) と `crew_network_insight.md` (最大 400KB) は必ず部分読み込み

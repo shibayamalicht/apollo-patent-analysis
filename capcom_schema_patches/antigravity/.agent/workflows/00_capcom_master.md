@@ -9,6 +9,13 @@ description: >
 
 本ワークフローは `apollo-capcom` スキルの **全 Phase 実行** 用マスターです。通常はチャットで `apollo-capcom` スキルを起動すれば自動で実行されますが、Antigravity の workflows UI から明示的に起動したい場合は本ファイルを呼び出してください。
 
+## 進行様式の分岐（最初に確認）
+
+**`voyager/context.json` の `report_mode` を必ず確認する**:
+
+- `"autonomous"`（既定・未指定含む）: 本ワークフローの実行手順（自律生成モード）でそのまま進行する
+- `"interactive"`（またはユーザーが対話型を明示した場合）: **本ワークフローではなく `.agent/workflows/06_interactive.md`（対話型 KATHERINE の起動点）から開始**する。正本 2 ファイル（`capcom_schema/interactive/SKILL_INTERACTIVE.md` + `dialogue_points.md`）読了 → Phase 0 深さゲート → 下記ステップ 2〜6 を対話ポイント CP-1〜8 のオーバーレイ付きで実行する。品質ゲート・成果物形式・トークン効率制約は自律生成モードと完全に同一（対話型では Review Policy = "Request Review" が必須）
+
 ## 実行手順
 
 1. **初期化**: Artifact 3ファイル + フェーズ間引き継ぎ日誌を生成
@@ -21,7 +28,7 @@ description: >
 > 🔄 **セッション・チェックポイント（各フェーズ境界で必須・枯渇/クォータの予防）**: 下記ステップ 2〜6 の **各フェーズ完了後、および Phase C（ステップ5）の各モジュール（deep_dive 1本）完了ごと** に、ゲート/Artifact 通過＋`reports/_carryover.md` 更新を確認したうえで、ユーザーに「**新タスクに切り替えますか？**（続行／切替／`/compact`）」と提案して **一旦停止** する。「枯渇しそうな時だけ」ではなく **予防として各境界で必ず出す**。切替時は新タスクが `_carryover.md`＋Artifact から自動再開（→ 後述「実行中断時の復帰」）。詳細はスキル本体 `.agent/skills/apollo-capcom/SKILL.md` の `### 🔄 セッション・チェックポイント`。
 
 2. **Phase A 実行**: `.agent/workflows/01_phase_a_data_intake.md` を呼び出し
-   - 🛑 Artifact Review ゲート: **最大 6 つ**
+   - 🛑 Artifact Review ゲート: **以下の一式（構成・個数の正本はスキル本体 Phase A 節。全て指定時は最大 7）**
      - 別冊（経営層向け要約版）生成確認
      - STOP-GATE A: query_logic 構造化読解（指定時）
      - query_intent 3 点整理（指定時）
@@ -40,20 +47,18 @@ description: >
 
 5. **Phase C 実行**: `.agent/workflows/04_phase_c_deep_dive.md` を呼び出し
    - 🛑 Artifact Review ゲート: Deep Dive Plan 承認
+   - **決定的選定（Phase C 冒頭・1回だけ）**: `python3 capcom_schema/scripts/select_representatives.py` → `reports/representative_patents.json` 生成。ミクロ分析A の引用はこの JSON の番号のみ（gate Check 35）
    - 🛑 Scripted Gate: `bash capcom_schema/scripts/phase_c_gate.sh`
    - Step 0（NEBULA deep_dive）は `nebula_strategy` で分岐: execute / web_compensation（外部環境分析章として）/ omit（省略）
 
 6. **Phase D 実行**: `.agent/workflows/05_phase_d_integration.md` を呼び出し
    - 🛑 Artifact Review ゲート: Report Plan 承認
-   - 🛑 Scripted Gate: `bash capcom_schema/scripts/phase_d_gate.sh` — **20 系統の Check** で自動検証
-     - Check 1-9: 内容量（**非空白文字数 45000字以上**・行数は参考）/ 代表特許15件 / 4 層モデル / クロス分析（120行以上＝5パターン）/ snapshot 8枚 / Web 出所 / 仮説検証 / 用語統一（内部識別子＋**工程ナレーション節 8e**）/ J-PlatPat 補完
-     - Check 10: スコープ限定ルール（本母集団 vs 業界全体）
-     - Check 11: 母集団タイプ別の不適切表現検出（B/C/D で市場・業界解釈禁止）
-     - Check 12: 設計意図の一貫性（意図参照 / 問い形式禁止 / サブクエスチョンキーワード対応）
-     - Check 13: NEBULA 戦略検証（モード別検証）
-     - Check 14: メタラベル（4層）の本文露出 / Check 15: 国籍トートロジー（WARN）
-     - Check 16: PPTX 12 項目（存在時）/ Check 17: 過剰修辞（WARN）/ Check 18: 別冊充実度
-     - Check 19: 反復・水増し検出（＋19a 本文スクリプト生成）/ Check 20: スナップショット網羅（WARN）
+   - 🛑 Scripted Gate: `bash capcom_schema/scripts/phase_d_gate.sh` — **Check 1〜37 で自動検証（項目の正本は gate スクリプト本体。以下は代表例のみ）**
+     - Check 1: 内容量（**非空白文字数 45000字以上**・行数は参考）/ Check 2: 代表特許15件 / Check 4: クロス分析（120行以上＝5パターン）/ Check 5: snapshot 8枚
+     - Check 8: 用語統一（内部識別子・工程ナレーション節 8e・技法名露出 8f）/ Check 10〜13: スコープ限定・母集団タイプ別禁止表現・設計意図の一貫性・NEBULA 戦略検証
+     - Check 19/19a: 反復・水増し検出＋本文スクリプト生成 / Check 25/26: 走査層（`#point-lead` / `#chapter-summary`）
+     - Check 30/31: 結論の検証（別解釈＋決め手）・結論の前提と見直しのサイン / Check 33/34: 仮説検証サマリ・提言の検証結論参照
+     - Check 35: ミクロ分析A の引用が決定的選定リスト（`reports/representative_patents.json`）由来のみ
    - 別冊フラグ ON 時は `reports/report_executive.typ` も生成
 
 7. **最終成果物確認**: `reports/report.pdf` (+ 別冊 `report_executive.pdf`) + `reports/*_deep_dive.typ` + `walkthrough.md` 完成
@@ -76,6 +81,7 @@ description: >
 ## 参照
 
 - スキル本体: `.agent/skills/apollo-capcom/SKILL.md`
+- 対話型（KATHERINE）起動点: `.agent/workflows/06_interactive.md`（正本: `capcom_schema/interactive/SKILL_INTERACTIVE.md` + `dialogue_points.md`）
 - Artifact 雛形: `artifacts_templates/`
 - 共通ルール: `GEMINI.md` / `AGENTS.md`
 - 品質ゲート: `capcom_schema/scripts/phase_c_gate.sh`, `phase_d_gate.sh`

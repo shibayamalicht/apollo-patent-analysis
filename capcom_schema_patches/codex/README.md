@@ -10,6 +10,7 @@
 - **`ask_user_question` ベースのゲート**: Phase A-2 / B / C / D の各ユーザー確認
 - **共通 bash ゲート利用**: `capcom_schema/scripts/phase_c_gate.sh` と `phase_d_gate.sh` で品質を客観判定
 - **`AGENTS.md`**: Codex の階層ルールに則ったプロジェクトルール配置
+- **対話型レポート作成モード（KATHERINE）対応（v9.1）**: `report_mode` の自動判別 + Codex 補遺 `interactive_codex_addendum.md`（実機検証待ち・下記参照）
 
 ---
 
@@ -23,7 +24,7 @@
 ### パッチ適用（1コマンド）
 
 ```bash
-bash /path/to/apollo_v7/capcom_schema_patches/codex/apply_patch.sh ~/Downloads/session_20260416_143022
+bash /path/to/apollo/capcom_schema_patches/codex/apply_patch.sh ~/Downloads/session_20260416_143022
 ```
 
 ### Codex CLI 起動 → レポート生成
@@ -53,12 +54,25 @@ $apollo-capcom レポートを書いてください
 1. **Phase A**: ミッション理解 + データ精読
 2. **Phase A-2**: タイトル3案提示 → `ask_user_question` でユーザー選択
 3. **Phase B**: エビデンス精読 + クロス分析
-   - STOP-GATE 1: クロスパターン3つを `ask_user_question` で承認
+   - STOP-GATE 1: クロスパターン5つ以上を `ask_user_question` で承認
    - STOP-GATE 2: Web調査可否を `ask_user_question` で承認
 4. **Phase C**: モジュール別 deep_dive 生成
    - 完了時: `bash capcom_schema/scripts/phase_c_gate.sh` で機械的判定
 5. **Phase D**: report.typ 統合生成
-   - 完了時: `bash capcom_schema/scripts/phase_d_gate.sh` で品質判定
+   - 完了時: `bash capcom_schema/scripts/phase_d_gate.sh` で品質判定（Check 1〜37）
+
+---
+
+## 🗣️ 対話型レポート作成モード（KATHERINE・v9.1）
+
+上記の自律生成モードに加え、AI が判断案を「提案・根拠・別の見方・確認したいこと」の4部構成で提示し、分析者が選択・修正・確定しながらレポートを作る**第二の進行様式**に対応しています。
+
+- **起動方法**: 次のいずれかで対話型に入ります（二重ガード）
+  - `voyager/context.json` の `report_mode` が `"interactive"`（CAPCOM ページのモード選択が自動記録される）→ スキルが自動判別
+  - ユーザーがチャットで対話型を明示（例: 「対話型でレポートを作りましょう」）
+- **進行の正本**: `capcom_schema/interactive/SKILL_INTERACTIVE.md`（＋ `capcom_schema/interactive/dialogue_points.md` の対話ポイント CP-1〜8）。品質ゲート・成果物形式・トークン効率制約は自律生成モードと完全に同一
+- **Codex 固有の運用**: [`interactive_codex_addendum.md`](interactive_codex_addendum.md) を参照（`AskUserQuestion` → `ask_user_question` の読替、CP 確定の流儀、Phase A/B を TUI で対話 → CP-7/CP-8 を明示委任 → Phase C/D を `codex exec resume` で無人実行する「対話フロント＋自動バック」運用）
+- ⚠️ **実機検証待ち**: 対話型モードは Claude Code で検証済み。**Codex CLI での通し検証は未了**で、読替によるベストエフォート対応です
 
 ---
 
@@ -68,7 +82,7 @@ $apollo-capcom レポートを書いてください
 session_YYYYMMDD_HHMMSS/
 ├── .codex/
 │   └── skills/apollo-capcom/
-│       ├── SKILL.md                    # Codex版スキル本体（約460行）
+│       ├── SKILL.md                    # Codex版スキル本体（約680行）
 │       └── prompts/
 │           ├── phase_a2_titles.md      # タイトル3案用テンプレ
 │           ├── phase_b_cross.md        # クロス選定用テンプレ
@@ -76,7 +90,8 @@ session_YYYYMMDD_HHMMSS/
 │           ├── phase_c_plan.md         # Deep Dive計画テンプレ
 │           └── phase_d_plan.md         # Report構造テンプレ
 ├── AGENTS.md                           # Codex階層ルール
-└── exec_mode_addendum.md               # codex exec非対話モード注意書き
+├── exec_mode_addendum.md               # codex exec非対話モード注意書き
+└── interactive_codex_addendum.md       # 対話型モード（KATHERINE）のCodex補遺
 ```
 
 **既存の `capcom_schema/` には一切変更を加えません。**
@@ -109,7 +124,7 @@ session_YYYYMMDD_HHMMSS/
 PowerShell で同等の操作：
 
 ```powershell
-$patchDir = "C:\path\to\apollo_v7\capcom_schema_patches\codex"
+$patchDir = "C:\path\to\apollo\capcom_schema_patches\codex"
 $sessionDir = "C:\Users\you\Downloads\session_20260416_143022"
 
 # .codex/ をコピー
@@ -120,6 +135,9 @@ Copy-Item "$patchDir\AGENTS.md" $sessionDir
 
 # exec_mode_addendum.md
 Copy-Item "$patchDir\exec_mode_addendum.md" $sessionDir
+
+# interactive_codex_addendum.md（対話型モード補遺）
+Copy-Item "$patchDir\interactive_codex_addendum.md" $sessionDir
 ```
 
 ---

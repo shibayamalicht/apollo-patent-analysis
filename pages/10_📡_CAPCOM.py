@@ -16,13 +16,32 @@ st.session_state['current_page'] = 'CAPCOM'
 
 import capcom
 
+# CAPCOM モジュール（AIエージェント）選択肢: 表示ラベル → 内部キー
+# ツール選択 UI と context.json 構築の両方で使う単一ソース
+CAPCOM_TOOL_OPTIONS = {
+    "Claude Code（Anthropic）": "claude_code",
+    "Codex CLI（OpenAI）": "codex",
+    "Antigravity IDE（Google）": "antigravity",
+}
+
+# レポート生成の進め方: 表示ラベル → 内部キー
+# （context.json の report_mode・ZIP キャッシュキー・export_session_zip 引数で使う）
+CAPCOM_REPORT_MODES = {
+    "🤖 自律生成モード（従来・4フェーズ自動進行）": "autonomous",
+    "💬 対話型レポート作成モード（KATHERINE）": "interactive",
+}
+
 utils.render_sidebar()
 
 # ==================================================================
 # --- ヘッダー ---
 # ==================================================================
 utils.module_header("capcom", "CAPCOM — Capsule Communicator")
-st.markdown("全モジュールの分析結果をセッションZIPにパッケージングし、Claude Codeによる本格レポート生成に橋渡しします。")
+st.markdown(
+    "全モジュールの分析結果をセッションZIPにパッケージングし、AI エージェント（Claude Code 等）による"
+    "本格レポート生成に橋渡しします。進め方は **自律生成モード（おまかせ）** と "
+    "**対話型レポート作成モード（KATHERINE）** の2つから選べます。"
+)
 
 # ==================================================================
 # --- セッションステータス ---
@@ -212,6 +231,35 @@ padding: 10px 12px; text-align: center;">
                 st.caption(f"・{_s.get('module', '?')}: {_s.get('title', '(無題)')}")
 
     # ==================================================================
+    # --- レポート生成の進め方（自律生成 / 対話型 KATHERINE） ---
+    # 選択は context.json の report_mode と ZIP キャッシュキーに反映される。
+    # ZIP の同梱内容はモードで変わらない（対話型スキーマは常時同梱）。
+    # ==================================================================
+    st.markdown("---")
+    st.markdown("### 🧭 レポート生成の進め方")
+    _mode_labels = list(CAPCOM_REPORT_MODES.keys())
+    _mode_current = st.session_state.get('capcom_report_mode', 'autonomous')
+    selected_mode_label = st.radio(
+        "レポート生成の進め方",
+        options=_mode_labels,
+        index=1 if _mode_current == 'interactive' else 0,
+        key="capcom_report_mode_input",
+        captions=[
+            "AI が4フェーズ（ミッション理解 → クロス分析 → Deep Dive → 統合・品質検証）を自動進行。要所の確認のみ対話。",
+            "AI が案を詳しい根拠・ロジック付きで提示し、分析者が選ぶ・直す・確定しながら作る。品質ゲートは自律生成と同一。",
+        ],
+        label_visibility="collapsed",
+    )
+    report_mode = CAPCOM_REPORT_MODES[selected_mode_label]
+    st.session_state['capcom_report_mode'] = report_mode
+    if report_mode == 'interactive':
+        st.caption(
+            "💬 対話型（KATHERINE）では、母集団タイプの判定・クロス分析の仮説と検証・結論の確定などの"
+            "判断ポイントで AI が「提案・根拠・別の見方」を提示し、分析者が確定しながら進みます。"
+            "各ポイントで「おまかせ」も選べます。所要時間は自律生成より長くなります（複数セッション推奨）。"
+        )
+
+    # ==================================================================
     # --- CAPCOM モジュール選択（複数選択可） ---
     # 選択されたツールに対応する capcom_schema_patches/ 配下の資材が
     # ZIP 出力時に同梱される。
@@ -223,11 +271,6 @@ padding: 10px 12px; text-align: center;">
         "**ZIP に各エージェント用のパッチが自動同梱**され、手動での apply_patch.sh 実行は不要です。"
     )
 
-    CAPCOM_TOOL_OPTIONS = {
-        "Claude Code（Anthropic）": "claude_code",
-        "Codex CLI（OpenAI）": "codex",
-        "Antigravity IDE（Google）": "antigravity",
-    }
     default_tools = st.session_state.get('capcom_tools_selected', ["Claude Code（Anthropic）"])
     selected_tool_labels = st.multiselect(
         "使用する CAPCOM モジュール",
@@ -247,22 +290,43 @@ padding: 10px 12px; text-align: center;">
         # 最低限 Claude Code は動作するので、後段はフォールバック
         selected_tool_keys = ["claude_code"]
 
+    if report_mode == 'interactive' and any(k != 'claude_code' for k in selected_tool_keys):
+        st.info(
+            "ℹ️ 対話型レポート作成モード（KATHERINE）は **Claude Code で検証済み**です。"
+            "Codex CLI / Antigravity IDE 向けの対話型対応（Codex 用補遺・Antigravity 用対話 Artifact 雛形）"
+            "も ZIP に同梱されますが、両ツールでの実機検証は未了です。"
+        )
+
     with st.expander("ℹ️ 選択ツールごとの起動方法"):
         if "claude_code" in selected_tool_keys:
-            st.markdown(
-                "**Claude Code**: ZIPを展開 → `claude` 起動 → "
-                "「`capcom_schema/SKILL.md` を読んでレポートを書いて」"
-            )
+            if report_mode == 'interactive':
+                st.markdown(
+                    "**Claude Code（対話型 KATHERINE）**: ZIPを展開 → `claude` 起動 → "
+                    "「`capcom_schema/interactive/SKILL_INTERACTIVE.md` を読んで対話型でレポートを作りましょう」"
+                )
+            else:
+                st.markdown(
+                    "**Claude Code**: ZIPを展開 → `claude` 起動 → "
+                    "「`capcom_schema/SKILL.md` を読んでレポートを書いて」"
+                )
         if "codex" in selected_tool_keys:
+            _codex_note = (
+                "（対話型: `report_mode` を自動判別。詳細は同梱の `interactive_codex_addendum.md`・"
+                "実機検証待ち）" if report_mode == 'interactive' else ""
+            )
             st.markdown(
                 "**Codex CLI**: ZIPを展開 → `codex` 起動 → "
-                "チャットで `$apollo-capcom` または `/skills` から選択"
+                f"チャットで `$apollo-capcom` または `/skills` から選択{_codex_note}"
             )
         if "antigravity" in selected_tool_keys:
+            _ag_note = (
+                "（対話型: Review Policy=Request Review 必須・対話用 Artifact 雛形同梱・実機検証待ち）"
+                if report_mode == 'interactive' else ""
+            )
             st.markdown(
                 "**Antigravity IDE**: ZIPを展開 → Antigravity IDE でフォルダを開く → "
                 "Review Policy を「Request Review」に設定 → "
-                "チャットで「apollo-capcom スキルでレポート生成」"
+                f"チャットで「apollo-capcom スキルでレポート生成」{_ag_note}"
             )
 
     # ==================================================================
@@ -416,12 +480,15 @@ padding: 10px 12px; text-align: center;">
                 "capcom_tools": {
                     "selected": st.session_state.get('capcom_tools_selected', ["Claude Code（Anthropic）"]),
                     "selected_keys": [
-                        {"Claude Code（Anthropic）": "claude_code",
-                         "Codex CLI（OpenAI）": "codex",
-                         "Antigravity IDE（Google）": "antigravity"}[lbl]
+                        CAPCOM_TOOL_OPTIONS[lbl]
                         for lbl in st.session_state.get('capcom_tools_selected', ["Claude Code（Anthropic）"])
+                        if lbl in CAPCOM_TOOL_OPTIONS
                     ],
                 },
+                # --- レポート生成の進め方（autonomous | interactive） ---
+                # AI セッションはこの値でモードを自動判別する（正本は ZIP 構築時に
+                # capcom.export_session_zip が最新の UI 選択で上書きした値）。
+                "report_mode": st.session_state.get('capcom_report_mode', 'autonomous'),
             }
             capcom.save_voyager_context(context)
 
@@ -439,28 +506,48 @@ padding: 10px 12px; text-align: center;">
     展開して、選択した CAPCOM モジュール（Claude Code / Codex CLI / Antigravity IDE）で開いてください。
     """)
 
-    st.markdown("""
+    _instruction_line = (
+        "4. 「capcom_schema/interactive/SKILL_INTERACTIVE.md を読んで対話型でレポートを作りましょう」と指示"
+        if report_mode == 'interactive'
+        else "4. 「capcom_schema/SKILL.md を読んでレポートを書いて」と指示"
+    )
+    st.markdown(f"""
     ```
     共通手順:
     1. 下のボタンでZIPをダウンロード
     2. ZIPを任意の場所に展開
     3. 選択したツールでそのフォルダを開く
-    4. 「capcom_schema/SKILL.md を読んでレポートを書いて」と指示
+    {_instruction_line}
        （Codex/Antigravity では ZIP 直下の AGENTS.md / GEMINI.md が優先される）
     ```
     """)
 
     # 選択ツール分のパッチ資材を ZIP に同梱する
-    # ZIP をキャッシュ（telemetry＋ツール選択をキーに、ページ再描画のたびのフル構築を回避）
-    # voyager の Export 状態もキャッシュキーに含める。voyager_ev は snapshots に出力しないため、
-    # CAPCOM Export しても get_telemetry（= snapshots/prompts/data の件数）は変わらず、件数だけを
-    # キーにすると Export 後も voyager 無しの古い ZIP が返ってしまうため。
-    # export_session_zip の voyager 書き出し条件（mission / context / evidence）と一致させる。
+    # ZIP をキャッシュ（セッションID＋ストア更新カウンタ＋telemetry＋ツール選択＋レポート生成モードをキー
+    # に、ページ再描画のたびのフル構築を回避）
+    # - revision（capcom.get_store_revision）: save_*/clear_* のたびに +1。件数が同じままの内容更新
+    #   （patents.csv の更新・スナップショット差し替え・Export のやり直し等）でも新 ZIP を構築させる
+    # - session_id: 新セッションが旧セッションと同カウントでも旧 ZIP を返さない
+    # - report_mode / ツール選択: 切替後も旧 context.json・旧パッチ構成の ZIP が返るのを防ぐ
+    # voyager の Export 状態もキャッシュキーに含める（export_session_zip の書き出し条件と一致させる）。
     _voy_store = st.session_state.get('capcom_store', {}).get('voyager', {})
     _voy_gen = (bool(_voy_store.get('mission')), bool(_voy_store.get('context')), len(_voy_store.get('evidence', {})))
-    _zip_cache_key = (str(capcom.get_telemetry()), _voy_gen, tuple(sorted(selected_tool_keys)))
+    _zip_cache_key = (
+        capcom.get_session_id(),
+        capcom.get_store_revision(),
+        str(capcom.get_telemetry()),
+        _voy_gen,
+        tuple(sorted(selected_tool_keys)),
+        report_mode,
+    )
     if st.session_state.get('_capcom_zip_key') != _zip_cache_key:
-        zip_bytes, zip_filename = capcom.export_session_zip(selected_tools=selected_tool_keys)
+        # フォールバック時（ツール未選択）もラベルとキーの対応を保つため、キーから逆引きする
+        _labels_for_zip = [lbl for lbl, k in CAPCOM_TOOL_OPTIONS.items() if k in selected_tool_keys]
+        zip_bytes, zip_filename = capcom.export_session_zip(
+            selected_tools=selected_tool_keys,
+            report_mode=report_mode,
+            selected_tool_labels=_labels_for_zip,
+        )
         st.session_state['_capcom_zip_key'] = _zip_cache_key
         st.session_state['_capcom_zip_cache'] = (zip_bytes, zip_filename)
     else:
@@ -569,6 +656,15 @@ padding: 10px 12px; text-align: center;">
         → 「capcom_schema/SKILL.md を読んでレポートを書いて」
         → 4フェーズで自動進行（Phase A → B → C → D）
         ```
+
+        #### 対話型レポート作成モード（KATHERINE）の場合
+        ```
+        Claude Code でZIP展開フォルダを開く
+        → 「capcom_schema/interactive/SKILL_INTERACTIVE.md を読んで対話型でレポートを作りましょう」
+        → 判断ポイントごとに AI が提案+根拠を提示 → 分析者が確定しながら進行
+        ```
+        対話型は往復が増えるためコンテキスト消費が大きくなります。
+        **1スレッド=1フェーズの分割が標準**です（中断・再開は引き継ぎ日誌で安全に行えます）。
         """)
 
 else:
@@ -609,7 +705,7 @@ Mission Control（Home）で分析エンジンを起動し、CAPCOMセッショ�
     ZIP ダウンロード（選択ツール用パッチが同梱済み）
         ↓ ユーザーが展開
     Claude Code / Codex CLI / Antigravity IDE（レポート執筆）
-        ↓ 4フェーズで自動進行
+        ↓ 自律生成（4フェーズ自動進行）または対話型（KATHERINE）
     PDF 完成 🎉
     ```
 
@@ -617,6 +713,6 @@ Mission Control（Home）で分析エンジンを起動し、CAPCOMセッショ�
     1. **Mission Control** で CAPCOM セッションを開始
     2. 各分析モジュール（ATLAS, Saturn V, MEGA, ...）を実行 → データが自動蓄積
     3. **VOYAGER** で Mission Objective 設定
-    4. **このページ** で母集団メタ情報（任意）+ 使用ツール（複数可）を選択 → CAPCOM Export → ZIP ダウンロード
+    4. **このページ** で母集団メタ情報（任意）+ レポート生成の進め方（自律生成 / 対話型 KATHERINE）+ 使用ツール（複数可）を選択 → CAPCOM Export → ZIP ダウンロード
     5. ZIP を展開して選択ツールで開く → レポート生成
     """)

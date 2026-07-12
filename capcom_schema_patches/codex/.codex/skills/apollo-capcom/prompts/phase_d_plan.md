@@ -35,7 +35,7 @@ report.typ 章構成（標準10章構成）:
   7. MEGA deep_dive（全文コピー）
   8. ATLAS deep_dive（全文コピー）
   9. CORE / CREW deep_dive（全文コピー、省略モジュールあり）
- 10. クロスモジュール統合分析（80行以上、3パターン）
+ 10. クロスモジュール統合分析（120行以上、5パターン）
  11. 結論・推奨アクション
  付録: Evidence 一覧 / 代表特許リスト / Web調査出所一覧
 
@@ -45,13 +45,15 @@ deep_dive コピールール:
   - 各 deep_dive 末尾に `#pagebreak()` を挿入
 
 品質チェック項目（phase_d_gate.sh で自動判定）:
-  Check 1: report.typ 行数 ≥ 800行
-  Check 2: 代表特許引用 ≥ 15件（特開/特許第/WO20/JP20 パターン）
-  Check 3: 4層モデル（解釈/洞察/提言）各5件以上
-  Check 4: クロスモジュール統合分析 ≥ 80行
-  Check 5: snapshot-figure ≥ 8枚
-  Check 6: Web情報使用件数 ≤ 出所記載件数（出所漏れチェック）
-  Check 7: 仮説件数 vs 検証件数のバランス（情報のみ）
+  正本は capcom_schema/scripts/phase_d_gate.sh（Check 1〜37）。
+  数値基準・全項目の内訳は gate スクリプトの実行出力と
+  capcom_schema/analysis/quality_checklist.md を正とする（本テンプレには複製しない）。
+  代表項目のみ例示:
+  - Check 1:  本文の内容量（非空白文字数で判定。行数ではない）
+  - Check 2:  代表特許の引用件数（引用は reports/representative_patents.json の番号のみ = Check 35）
+  - Check 4:  クロスモジュール統合分析の分量（最低5パターン）
+  - Check 19/19a: 水増し・反復・本文のスクリプト機械生成の検出
+  - Check 30/31:  結論の検証（別解釈＋決め手）・前提と見直しのサイン
 
 完了判定:
   bash capcom_schema/scripts/phase_d_gate.sh
@@ -68,11 +70,11 @@ header: "Phase D 計画"
 multiSelect: false
 options:
   - label: "この構成・品質基準で進める"
-    description: "10章構成 + 7 品質チェックで report.typ を生成"
+    description: "10章構成 + phase_d_gate.sh（Check 1〜37）で report.typ を生成"
   - label: "章構成を変更したい"
     description: "Other で変更内容を指定（章の順序/省略/追加）"
   - label: "品質チェックを緩和したい"
-    description: "Other で緩和項目を指定（ただし Check 1-6 は必須、警告付き）"
+    description: "Other で緩和項目を指定（ただし gate の FAIL 項目は緩和不可、警告付き）"
 ```
 
 ---
@@ -83,7 +85,7 @@ options:
 |---|---|
 | 「この構成で進める」 | `report.typ` 生成開始 → `phase_d_gate.sh` 実行 → 結果報告 |
 | 「章構成を変更したい」 | 変更内容を反映（ただし deep_dive コピーと結論章は必須）。変更内容を反映してから再度 `ask_user_question` で確認を取り直す |
-| 「品質チェックを緩和したい」 | Check 1-6 は機械的判定で緩和不可と説明。「判定結果を見た上で修正するか/緩和して提出するかを決める」運用を提案 |
+| 「品質チェックを緩和したい」 | phase_d_gate.sh の FAIL 項目は機械的判定で緩和不可と説明（WARN は判断の余地あり）。「判定結果を見た上で修正するか/緩和して提出するかを決める」運用を提案 |
 
 ---
 
@@ -106,15 +108,16 @@ options:
 typst compile --root ".." reports/report.typ reports/report.pdf
 
 # PPTX生成（python-pptx使用）
-python3 reports/generate_pptx.py  # capcom_schema/templates/apollo_template.pptx を使用
+python3 reports/build_pptx.py  # capcom_schema/templates/apollo_template.pptx を使用
 ```
 
-> 🔑 **ヘルパーは import して使う（コピーしない）**: `generate_pptx.py` の冒頭で `import sys; sys.path.insert(0, "capcom_schema/templates"); from apollo_slides import *` し、`add_title_shape` / `add_kpi_slide` 等のヘルパーを呼ぶ。`slides_spec.md` は設計ガイド（いつ・どのヘルパーを・どんな主張骨格で使うか）として読み、ヘルパー実装を本文へ写経しない。
+> ⚠️ **スクリプト名は `reports/build_pptx.py` とする（`generate_*.py` は使わない）＋ Check 19a 対策**: 本文生成スクリプトの禁止則（SKILL.md §0 第7項）は「`reports/generate_*.py` は Check 19a で自動不合格」と例示しており、`generate_pptx.py` の名前は紛らわしいので避ける。さらに `phase_d_gate.sh` Check 19a の実装は **`reports/` 直下の .py の中身に「.typ」の文字列があるだけで FAIL** にする（.typ を書き出す本文生成スクリプトの検出。読み取りと書き出しは区別されない）。したがって PPTX 生成スクリプトは ① **.typ を書き出すスクリプトは禁止**（本文のテンプレート生成に該当）②スクリプト内から `report.typ` を open() 等で読み込まない＝**「.typ」の文字列をスクリプトに含めない**。レポートを土台にする際は、AI 自身が `reports/report.typ` を読んで各章の主張→根拠→示唆を凝縮し、スライド文言をスクリプトに直接書き込むこと。
+> 🔑 **ヘルパーは import して使う（コピーしない）**: `build_pptx.py` の冒頭で `import sys; sys.path.insert(0, "capcom_schema/templates"); from apollo_slides import *` し、`add_title_shape` / `add_kpi_slide` 等のヘルパーを呼ぶ。`slides_spec.md` は設計ガイド（いつ・どのヘルパーを・どんな主張骨格で使うか）として読み、ヘルパー実装を本文へ写経しない。
 > 🔑 **PPTX はレポート（`reports/report.typ`）を土台に**作る（evidence の寄せ集め禁止）。レポート各章の主張→根拠→示唆を凝縮し章順に沿わせる。出所はモジュール名でなくデータにする。詳細は `capcom_schema/templates/slides_spec.md` §0.9 を熟読。
 
 出力ファイル:
 - `reports/report.pdf` — 本レポート（Typst PDF）
-- `reports/presentation.pptx` — スライド（python-pptx、推奨25-40枚）
+- `reports/presentation.pptx` — スライド（python-pptx、推奨25〜35枚）
 
 ---
 

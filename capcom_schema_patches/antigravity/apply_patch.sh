@@ -2,12 +2,12 @@
 # APOLLO CAPCOM Antigravity パッチ適用スクリプト
 # 使い方:
 #   bash apply_patch.sh <session_dir>
-#   例) bash /path/to/apollo_v7/capcom_schema_patches/antigravity/apply_patch.sh ~/Downloads/session_20260416_143022
+#   例) bash /path/to/apollo/capcom_schema_patches/antigravity/apply_patch.sh ~/Downloads/session_20260416_143022
 #
 # 本スクリプトは以下のファイルを <session_dir> に追加します:
 #   - .agent/skills/apollo-capcom/SKILL.md
-#   - .agent/workflows/*.md (6ファイル)
-#   - artifacts_templates/*.tmpl (3ファイル)
+#   - .agent/workflows/*.md (7ファイル。対話型 KATHERINE 起動点 06_interactive.md 含む)
+#   - artifacts_templates/*.tmpl (4ファイル。対話型用 dialogue_review.md.tmpl 含む)
 #   - GEMINI.md
 #   - AGENTS.md
 #   - review_policy_recommendation.md
@@ -62,14 +62,14 @@ echo ""
 echo "2/5: .agent/workflows/ をコピー..."
 mkdir -p "$SESSION_DIR/.agent/workflows"
 cp "$PATCH_DIR/.agent/workflows/"*.md "$SESSION_DIR/.agent/workflows/"
-echo "   ✅ 6ファイル (00_capcom_master.md, 01-05_phase_*.md)"
+echo "   ✅ 7ファイル (00_capcom_master.md, 01-05_phase_*.md, 06_interactive.md)"
 
 # 3. artifacts_templates/ をコピー
 echo ""
 echo "3/5: artifacts_templates/ をコピー..."
 mkdir -p "$SESSION_DIR/artifacts_templates"
 cp "$PATCH_DIR/artifacts_templates/"*.tmpl "$SESSION_DIR/artifacts_templates/"
-echo "   ✅ 3ファイル (task / implementation_plan / walkthrough の雛形)"
+echo "   ✅ 4ファイル (task / implementation_plan / walkthrough / dialogue_review の雛形)"
 
 # 4. GEMINI.md と AGENTS.md を配置
 echo ""
@@ -112,9 +112,11 @@ added_files=(
   ".agent/workflows/03_phase_b_evidence_cross.md"
   ".agent/workflows/04_phase_c_deep_dive.md"
   ".agent/workflows/05_phase_d_integration.md"
+  ".agent/workflows/06_interactive.md"
   "artifacts_templates/task.md.tmpl"
   "artifacts_templates/implementation_plan.md.tmpl"
   "artifacts_templates/walkthrough.md.tmpl"
+  "artifacts_templates/dialogue_review.md.tmpl"
   "GEMINI.md"
   "AGENTS.md"
   "review_policy_recommendation.md"

@@ -83,6 +83,9 @@ output/session_YYYYMMDD_HHMMSS/
 ### レポート生成モード
 VOYAGER Export 後に利用。`voyager/mission.json` の Mission Objective に基づく正式レポートを作成する。以下の4フェーズで進行する。
 
+### 対話型レポート作成モード（KATHERINE）
+`voyager/context.json` の `report_mode` が `"interactive"` の場合、またはユーザーが対話型での進行を明示した場合に使用。**`capcom_schema/interactive/SKILL_INTERACTIVE.md` を読み、それに従って進行する**（変わるのは進行様式のみ。品質ゲート・成果物形式・本ファイル §0 の絶対遵守ゲートルール・トークン効率制約は上記レポート生成モードと同一に適用される）。`report_mode` が未指定・`"autonomous"` で、ユーザーの明示指示もない場合は、従来どおり上記レポート生成モードで進行する。
+
 ---
 
 ## 環境準備（依存インストール・最初に1回）
@@ -456,8 +459,8 @@ APOLLO では NEBULA モジュール（非特許文献分析: 学術論文・ニ
 🛑 **STOP-GATE 1 (リファレンス読了 + クロスパターン確認)**: 以下を全て実行するまで Phase B 本体に進むな
 - [ ] `analysis/common_framework.md` を読了 → 4層分析モデルと数値根拠の書式を把握
 - [ ] `analysis/data_notes.md` を読了 → 特許/NPL 非対称性と Web 調査ルールを把握
-- [ ] `analysis/cross_module.md` を読了 → 13種のクロスパターンから3つ以上を選定
-- [ ] `AskUserQuestion` ツールで「採用するクロスパターン3つ(例: P1/P4/P13)」をユーザーに提示・確認
+- [ ] `analysis/cross_module.md` を読了 → 13種のクロスパターンから**5つ以上**を選定（Phase B 完了条件・gate Check 4 の最低数と同じ）
+- [ ] `AskUserQuestion` ツールで「採用するクロスパターン5つ以上(例: P1/P4/P7/P9/P13)」をユーザーに提示・確認
 - [ ] ユーザー応答を待つ
 
 🛑 **STOP-GATE 2 (Web調査の意思確認)**: Phase B 本体作業前に必須

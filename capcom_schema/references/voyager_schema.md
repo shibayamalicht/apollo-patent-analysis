@@ -90,6 +90,7 @@ VOYAGER はスナップショット収集とCAPCOM Export を行うモジュー�
 | `population_meta` | object | 母集団メタ（`query_intent` 設計意図 / `query_logic` 論理式 / `coverage_years` 収録年 / `database_name` DB名）。空文字は未指定 |
 | `report_directives` | object | レポート/スライド生成への任意指示。`image_slide_instruction`（どの画像をどこで使うか等のユーザー指示）。空文字は指示なし |
 | `capcom_tools` | object | 選択された CAPCOM ツール（`selected` 表示名 / `selected_keys` = claude_code / codex / antigravity） |
+| `report_mode` | string | レポート生成の進行様式（`"autonomous"` 自律生成 / `"interactive"` 対話型レポート作成モード KATHERINE）。ZIP 構築時の CAPCOM ページの選択が正。`interactive` の場合は `capcom_schema/interactive/SKILL_INTERACTIVE.md` を進行の正本として読む（SKILL.md §2） |
 
 #### dataset オブジェクト
 

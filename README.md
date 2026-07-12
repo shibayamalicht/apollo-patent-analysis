@@ -11,11 +11,11 @@ short_description: Patent analysis → Strategic reports via multi-agent CAPCOM
 license: apache-2.0
 ---
 
-# 🚀 APOLLO v9.0.0
+# 🚀 APOLLO v9.1.0
 
-**特許情報分析 × マルチエージェント CAPCOM — 母集団設計から戦略レポートまで、全部おまかせ。**
+**特許情報分析 × マルチエージェント CAPCOM — 母集団設計から戦略レポートまで、おまかせでも、対話でも。**
 
-**Patent Analysis × Multi-Agent CAPCOM — From population design to strategic reports, fully automated.**
+**Patent Analysis × Multi-Agent CAPCOM — From population design to strategic reports, hands-off or hands-on.**
 
 > "Houston, we have ~~a problem~~ a report — and this time, across three agents with one voice." — APOLLO v9
 
@@ -23,13 +23,13 @@ license: apache-2.0
 
 ## これは何？ / What is this?
 
-**APOLLO v9** は、APOLLO v8 をベースに**マルチエージェント CAPCOM**（Claude Code / Codex CLI / Antigravity IDE）と**母集団設計の文書化機能**を統合した版です。10モジュールで特許データを多角的に分析し、**CAPCOM** が結果を選択した AI エージェントに橋渡しし、**品質ゲート + 用語統一ルール付きの戦略レポート**を執筆します。
+**APOLLO v9** は、APOLLO v8 をベースに**マルチエージェント CAPCOM**（Claude Code / Codex CLI / Antigravity IDE）と**母集団設計の文書化機能**を統合した版です。10モジュールで特許データを多角的に分析し、**CAPCOM** が結果を選択した AI エージェントに橋渡しし、**品質ゲート + 用語統一ルール付きの戦略レポート**を執筆します。v9.1 では、レポート生成の第二の進め方として**対話型レポート作成モード（KATHERINE）**を追加 — AI が判断案を詳しい根拠付きで提示し、分析者が選択・修正・確定しながらレポートを作れます。
 
-**APOLLO v9** is the successor to APOLLO v8, featuring a **multi-agent CAPCOM** (Claude Code / Codex CLI / Antigravity IDE) and **population-design documentation**. It analyzes patent data through 10 specialized modules, **CAPCOM** bridges the results to the user-selected AI agent, and the agent writes **strategic reports with built-in quality gates and unified terminology**.
+**APOLLO v9** is the successor to APOLLO v8, featuring a **multi-agent CAPCOM** (Claude Code / Codex CLI / Antigravity IDE) and **population-design documentation**. It analyzes patent data through 10 specialized modules, **CAPCOM** bridges the results to the user-selected AI agent, and the agent writes **strategic reports with built-in quality gates and unified terminology**. v9.1 adds a second way to generate reports: the **interactive report-building mode (KATHERINE)** — the AI presents each analytical judgment with detailed reasoning, and the analyst selects, adjusts, and confirms along the way.
 
 ```
-CSV/Excel  →  APOLLO v9(分析・可視化)  →  CAPCOM(In-Memory + 母集団メタ情報 + ツール選択)  →  ZIP DL(パッチ同梱済)  →  Claude Code / Codex / Antigravity(レポート執筆)
-              Analysis & Viz              In-Memory + Population Meta + Tool Selection       ZIP (Pre-patched)        Report Writing (Multi-Agent)
+CSV/Excel  →  APOLLO v9(分析・可視化)  →  CAPCOM(In-Memory + 母集団メタ情報 + モード/ツール選択)  →  ZIP DL(パッチ同梱済)  →  Claude Code / Codex / Antigravity(レポート執筆: 自律生成 or 対話型 KATHERINE)
+              Analysis & Viz              In-Memory + Population Meta + Mode/Tool Selection   ZIP (Pre-patched)        Report Writing (Autonomous or Interactive)
                                                                                                                              ↓
                                                                                                                       Typst PDF 完成 🎉
 ```
@@ -190,8 +190,8 @@ v7 から引き継がれる主要機能（継続）:
 2. CSV/Excel の特許データをアップロード
    Upload patent CSV/Excel data
 
-3. 各モジュールで分析 → CAPCOM で母集団メタ情報を入力 + 使用ツールを選択 → ZIP ダウンロード
-   Analyze → input population meta & select agents in CAPCOM → Download ZIP
+3. 各モジュールで分析 → CAPCOM で母集団メタ情報を入力 + レポート生成モード（自律生成 / 対話型 KATHERINE）と使用ツールを選択 → ZIP ダウンロード
+   Analyze → input population meta, choose report mode (autonomous / interactive KATHERINE) & select agents in CAPCOM → Download ZIP
 
 4. ZIP をローカル展開 → 選択したツール(Claude Code / Codex / Antigravity)でレポート生成
    Extract ZIP locally → Generate report in the selected agent
@@ -270,8 +270,8 @@ On HF Spaces, `packages.txt` (CJK fonts + chromium) is auto-installed via apt. F
    Analyze & visualize across 10 modules
 4. 気になるチャートを **VOYAGER** or 各モジュールの **📸 Snapshot** で収集（同じマップから複数カットも保存可。「📸 このマップで N 枚 保存済み」で枚数を確認）
    Collect key charts as snapshots — multiple shots per map are supported (a live "saved N for this map" count is shown)
-5. **CAPCOM** で Mission Objective + 母集団メタ情報(任意4項目) + 使用ツール(複数可)を設定 → **ZIP ダウンロード**
-   Set Mission Objective, population meta (4 optional fields), and agent selection in CAPCOM → Download ZIP
+5. **CAPCOM** で Mission Objective + 母集団メタ情報(任意4項目) + レポート生成モード(自律生成 / 対話型 KATHERINE) + 使用ツール(複数可)を設定 → **ZIP ダウンロード**
+   Set Mission Objective, population meta (4 optional fields), report mode (autonomous / interactive KATHERINE), and agent selection in CAPCOM → Download ZIP
 6. **選択したエージェント** で ZIP を展開 → 4フェーズで戦略レポート生成(品質ゲート + 用語統一検証付き)
    Extract ZIP in the selected agent → Generate reports through 4 phases with auto quality & terminology gates
 
@@ -294,7 +294,7 @@ APOLLO v9 analyzes patent data across 10 specialized modules.
 | 7 | 🦅 EAGLE | 投げ縄ツールで手動クラスタ + クラスタ動態マップ — Lasso-based manual clusters + cluster dynamics |
 | 8 | 📝 VOYAGER | スナップショット収集 + Mission Objective 設定 + Markdown レポート骨格生成 — Snapshot collection + Mission Objective + Markdown skeleton |
 | 9 | 🌌 **NEBULA** | OpenALEX API 統合（API キー対応）+ Hype Cycle + **学術ランドスケープ**（Saturn V デザイン統一 + クラスタラベル CSV DL）+ **論文種別 10 種の複数選択** + **検索結果 CSV ダウンロード** + **年別取得モード / 要約ありフィルタ / 英語のみフィルタ** + **コマンドライン検索式（TI=/AB=/TA= + near/adj + ワイルドカード）** + **大規模ラベル編集対応** — OpenALEX (API-key) + Hype Cycle + academic landscape + 10-type multi-select + CSV + year-by-year mode + abstract-only / English-only filters + command-line query syntax + large-scale label editor |
-| 10 | 📡 CAPCOM | In-Memory セッション管理 + 独立 Mission Objective + 母集団メタ情報 4 項目（任意）+ マルチエージェント選択（Claude Code / Codex / Antigravity）+ パッチ自動同梱 — In-memory session + independent Mission Objective + population meta (4 optional fields) + multi-agent selection + auto-bundled patches |
+| 10 | 📡 CAPCOM | In-Memory セッション管理 + 独立 Mission Objective + 母集団メタ情報 4 項目（任意）+ **レポート生成モード選択（自律生成 / 対話型 KATHERINE）** + マルチエージェント選択（Claude Code / Codex / Antigravity）+ パッチ自動同梱 — In-memory session + independent Mission Objective + population meta (4 optional fields) + **report-mode selection (autonomous / interactive KATHERINE)** + multi-agent selection + auto-bundled patches |
 
 ---
 
@@ -348,11 +348,14 @@ session_YYYYMMDD_HHMMSS_<uuid>/
 ├── voyager/                 # 戦略ストーリー / Strategic narrative
 │   ├── mission.json         # Mission Objective + Evidence 一覧
 │   ├── evidence/            # モジュール横断 Evidence 群
-│   └── context.json         # population_meta（4 項目）+ capcom_tools を含む
+│   └── context.json         # population_meta（4 項目）+ capcom_tools + report_mode（v9.1: autonomous / interactive）を含む
 ├── snapshots/ prompts/ reports/ metadata.json    # スナップショット画像・AI プロンプト・レポート出力先
 │   └── reports/_phase_a_decisions.json  # Phase A の決定を構造化 JSON で永続化（Phase D gate 自動検証の情報源）
 ├── capcom_schema/           # 分析スキーマ・テンプレート・品質ゲート
 │   ├── SKILL.md             # 4 フェーズ手順 + 絶対遵守ゲートルール
+│   ├── interactive/         # 対話型レポート作成モード（KATHERINE・v9.1）
+│   │   ├── SKILL_INTERACTIVE.md   # 対話型の進行手順書（品質ゲート・成果物は自律生成と同一）
+│   │   └── dialogue_points.md     # 対話ポイント CP-1〜8 の提示テンプレート・確定方法
 │   ├── analysis/
 │   │   ├── terminology.md   # 用語統一ルール（最優先・内部識別子の露出禁止・スコープ限定・サブクエスチョン化）
 │   │   ├── query_logic_reading.md     # 7 DB 構文リファレンス + 意図整合性検査
@@ -365,6 +368,7 @@ session_YYYYMMDD_HHMMSS_<uuid>/
 │                            # + select_representatives.py（代表特許の決定的選定 → reports/representative_patents.json）
 ├── .claude/skills/          # Claude Code スキル
 ├── CLAUDE.md                # プロジェクト設計思想
+├── requirements-session.txt # セッション用の最小依存（pandas / python-pptx / Pillow）→ pip install -r で導入
 │
 └── ── 以下は選択ツール分だけ自動同梱 ── Tool-specific assets (auto-bundled) ──
     ├── AGENTS.md            # Codex & Antigravity 共通ルール
@@ -433,6 +437,45 @@ ZIP を展開 → Antigravity IDE でフォルダを開く
 これらの bash スクリプトは 3 エージェント共通で同じ客観判定を提供します。**主観的な「実質 OK」判断で量的基準を上書きできません**。
 
 The bash scripts provide identical objective pass/fail judgments across all 3 agents. **Subjective "good enough" cannot override quantitative criteria.**
+
+### 対話型レポート作成モード（KATHERINE）/ Interactive Report-Building Mode (KATHERINE) — v9.1 新設
+
+**KATHERINE**（Knowledge Agent for Tactical Hypothesis, Expert Reasoning, Insight and Next-gen Evidence）は、レポート生成の第二の進め方です。自律生成の「AI が作り、要所で人が承認する」に対し、KATHERINE では **AI が判断案を詳しい根拠・ロジック付きで提示し、分析者が選択・修正・確定**しながらレポートを作ります。分析過程がブラックボックスにならず、完成レポートを「自分が確定した判断の積み上げ」として受け取れます。
+
+**KATHERINE** is the second way to generate reports: instead of "the AI writes and you approve at checkpoints," the AI presents each analytical judgment **with detailed reasoning**, and the analyst selects, adjusts, and confirms along the way. The analysis stops being a black box — the final report is a stack of decisions you made.
+
+- **提示は常に4部構成 / Every proposal has 4 parts**: 【提案】（2〜3案・推奨付き）→【根拠】（使った数値・適用した判定基準・判断手順）→【別の見方】（検討したが採らなかった解釈とその理由）→【確認したいこと】
+- **8つの対話ポイント / 8 checkpoints (CP-1〜8)**: 検索式の読解 / 母集団タイプの判定 / サブクエスチョン / マップ読解 / クロスパターン選択 / 仮説と検証 / 統合インサイト / 結論の確定 + WARN トリアージ
+- **おまかせ常設 / "Leave it to AI" always available**: どのポイントでも自律生成と同じ判断に委任できます（判断ログに記録）
+- **品質は同一 / Same quality bar**: 品質ゲート（Check 1〜37）・成果物形式は自律生成モードと完全に同一（ゲートスクリプトは無改修）。文字数・引用書式・用語統一など形式層の最終責任は AI が持つため、対話が品質を下げません
+- **使い方 / How to use**: CAPCOM ページで「💬 対話型レポート作成モード（KATHERINE）」を選択して ZIP をダウンロード → 展開 → Claude Code で「`capcom_schema/interactive/SKILL_INTERACTIVE.md` を読んで対話型でレポートを作りましょう」（**Claude Code で検証済み**。Codex / Antigravity 向けの対話型対応も同梱 — Codex 用補遺と Antigravity 用対話 Artifact 雛形。両ツールは実機検証待ち）
+- 対話の深さは **標準**（全8ポイント）/ **ライト**（母集団タイプ・仮説検証・結論確定の3箇所のみ）から開始時に選択できます。往復が増えるため所要時間は自律生成より長くなります（**1スレッド=1フェーズ分割が標準**・複数セッション推奨）
+
+---
+
+## ✨ v9.1.0 の新機能 / What's New in v9.1.0
+
+> v9.0.0 → v9.1.0 はマイナーアップデートです。v9.0.0 の全機能（下記 V1〜V29）はそのまま継承されています。
+> v9.1.0 is a minor update; everything from v9.0.0 (V1–V29 below) carries over unchanged.
+
+### V30. 対話型レポート作成モード（KATHERINE）/ Interactive Report-Building Mode (KATHERINE)
+- **課題**: 自律生成の CAPCOM レポートは高品質だが、分析過程と判断根拠が見えず、分析担当者が結果を検証・説明しにくい「ブラックボックス」だった / High-quality but opaque: analysts couldn't see how conclusions were reached
+- **解決**: 進行を「提示 → 対話 → 確定」に転換。AI は主要判断（母集団タイプ・クロスパターン選択・仮説の支持/棄却・結論・提言）を必ず「提案・根拠・別の見方・確認したいこと」の4部構成で提示し、分析者が確定する。根拠なしの提案は手順書違反 / Every key judgment is presented as proposal + reasoning + alternatives considered + what to confirm; unreasoned proposals violate the procedure
+- **設計**: 素材（データ・スナップショット・AI インサイト）・分析ガイド・品質ゲート（Check 1〜37）・成果物形式は自律生成と完全共有（「素材共通・手順書差し替え」構図）。新設は `capcom_schema/interactive/` の手順書 2 ファイルのみで、既存の自律生成フローへの変更はディスパッチ数行 / Shares all assets, guides, and gates with the autonomous mode; only two new procedure files and a few dispatch lines
+- **記録と再現性**: 各対話ポイントの確定は引き継ぎ日誌の判断ログに `[対話]` タグで記録。生成様式（`report_mode`）は `voyager/context.json` と `metadata.json` に残る / Decisions are logged with a `[対話]` tag; the generation mode is recorded in `context.json` and `metadata.json`
+- **命名**: アポロ計画を支えた NASA の数学者 Katherine Johnson に敬意を表した分析設計アシスタント [KATHERINE](https://github.com/shibayamalicht/KATHERINE)（上流工程: 仮説構築〜分析設計）から。その対話思想を下流（分析実行〜レポート生成）へ拡張 / Named after the analysis-design assistant KATHERINE (honoring Katherine Johnson), extending its dialogue-first philosophy downstream
+
+### V31. PPTX デザインシステム v6 "Mission Deck" / Slide Design System v6
+- **2層サーフェス**: オフホワイト地（#F4F6F9）に白角丸カードが浮かぶモダンな構成へ全面刷新。表紙・裏表紙は濃紺基調で装丁を統一（裏表紙の "Thank You" は廃止） / Off-white surface + white rounded cards; navy cover & closing (no more "Thank You")
+- **カテゴリ4色**（青・teal・紫・琥珀）は**色覚多様性検証済み**（最悪隣接ΔE 73.6）。色はアクセントバー・チップ・淡色帯にのみ載せ、数値・本文はインクで統一 / CVD-validated 4-color accent system; ink-first typography
+- **新ヘルパー**: 結論バンド面 `add_bands_slide`・注意/決め手ボックス `add_callout_box`・注釈カードレール `add_annotation_cards`（「図の見方/読み取り/別の見方/示唆」の4部構成推奨）。テーブルは濃紺ヘッダー＋判定色（✓支持/△部分支持） / New helpers for conclusion bands, callout boxes, and 4-part annotation rails
+- 実装は共有資産（`apollo_slides.py` + `slides_spec.md` v6.0）の刷新のみで、**3 エージェント共通に自動波及**。全28ヘルパーの後方互換を維持し、全ヘルパー網羅の38枚レンダリングテストで検証済み / Shared-asset change propagates to all 3 agents; full backward compatibility, verified by a 38-slide full-coverage render test
+
+### V32. マルチエージェントパッチの v9 追随・対話型対応 / Multi-Agent Patch Catch-up & Interactive Support
+- **Codex CLI**: `report_mode` 自動判別の起動分岐と対話型補遺（`interactive_codex_addendum.md`: §0 項番対応表・`ask_user_question` の選択肢流儀・「対話フロント＋自動バック」運用）を追加 / Codex gains report_mode dispatch + interactive addendum
+- **Antigravity IDE**: 対話用ローリング Artifact 雛形（`dialogue_review.md.tmpl`）・起動ワークフロー（`06_interactive.md`）・REVIEW_REQUIRED / INFO_ONLY の2マーカー規約・対話型での Review Policy "Request Review" 必須化 / Antigravity gains dialogue Artifact templates + workflow with a two-marker protocol
+- **v9 追随の一括修正**: Antigravity パッチに欠落していた**代表特許の決定的選定（Check 35）**・AI インサイト8件基準・走査層（Check 25/26）を移植し、品質チェック表の旧記述（Check 1〜20 世代）・クロスパターン数の不整合（3↔5）を全パッチで是正 / Ports deterministic representative selection & fixes stale gate references across both patches
+- 両ツールの対話型は**実装済み・実機検証待ち**（Claude Code は検証済み） / Interactive mode on Codex/Antigravity: implemented, awaiting on-device verification
 
 ---
 
@@ -922,7 +965,7 @@ Janome を経由するテキスト処理は計 12 箇所（utils.py 経由 8 + �
 ## 📁 プロジェクト構成 / Project Structure
 
 ```
-apollo_v8/
+Apollo_v9.1.0/
 ├── Home.py                  # Mission Control（データ取込・前処理・CAPCOM セッション開始・OpenALEX 統合）
 ├── utils.py                 # 共通ユーティリティ（描画・サイドバー・スナップショット・クラスタ動態・ラベル編集・AI サジェスト）
 ├── utils_ai.py              # AI プロンプト生成 / AI prompt generation
@@ -941,9 +984,12 @@ apollo_v8/
 │   ├── 7_🦅_EAGLE.py         # 投げ縄ツールで手動クラスタ + クラスタ動態マップ
 │   ├── 8_📝_VOYAGER.py      # スナップショット収集 + Mission Objective + Markdown レポート
 │   ├── 9_🌌_NEBULA.py       # OpenALEX + Hype Cycle + 学術ランドスケープ（Saturn V デザイン統一 + CSV DL）
-│   └── 10_📡_CAPCOM.py      # 母集団メタ 4 項目入力 + マルチエージェント複数選択 + ZIP エクスポート
+│   └── 10_📡_CAPCOM.py      # 母集団メタ 4 項目入力 + レポート生成モード選択（自律生成 / 対話型 KATHERINE）+ マルチエージェント複数選択 + ZIP エクスポート
 ├── capcom_schema/           # CAPCOM スキーマ・テンプレート・手順書
 │   ├── SKILL.md             # 4 フェーズ手順（Phase A STOP-GATE + Phase D 品質ゲート Check 1〜37）
+│   ├── interactive/         # 対話型レポート作成モード（KATHERINE・v9.1）手順書
+│   │   ├── SKILL_INTERACTIVE.md   # 対話型の進行手順書（品質ゲート・成果物は自律生成と同一）
+│   │   └── dialogue_points.md     # 対話ポイント CP-1〜8 の提示テンプレート・確定方法
 │   ├── analysis/            # 分析フレームワーク
 │   │   ├── terminology.md              # 用語統一ルール（内部識別子の露出禁止、スコープ限定ルール、サブクエスチョン化）
 │   │   ├── executive_summary_guide.md  # 経営層向け要約版（別冊）執筆ガイド
@@ -979,6 +1025,13 @@ apollo_v8/
 ---
 
 ## 🤔 FAQ
+
+**Q: 対話型レポート作成モード（KATHERINE）とは? 自律生成とどちらを使うべき?**
+**What is the interactive mode (KATHERINE), and which mode should I use?**
+
+A: KATHERINE（v9.1 新設）は、AI が主要判断（母集団タイプ・クロスパターン選択・仮説の支持/棄却・結論・提言）を**詳しい根拠・ロジック付き**で提示し、分析者が選択・修正・確定しながらレポートを作る進め方です。自律生成が「完成品を受け取る」のに対し、KATHERINE は「分析過程が見え、判断に参加できる」のが特徴で、レポートの内容を自分の言葉で説明できるようになります。品質ゲート・成果物は両モードで完全に同一なので、**急ぎ・定型的な案件は自律生成、レポートを深く理解して社内に説明する必要がある案件や判断の分かれる母集団は KATHERINE**、という使い分けが目安です。KATHERINE は往復が増えるぶん所要時間が長く（複数セッション推奨）、どの判断ポイントでも「おまかせ」で自律生成側に委任できます。
+
+A: KATHERINE (new in v9.1) presents every key judgment **with detailed reasoning** — the data used, the criteria applied, and the alternatives considered — and the analyst selects, adjusts, and confirms. Quality gates and deliverables are identical in both modes. Rule of thumb: autonomous for routine or urgent jobs; KATHERINE when you need to deeply understand and defend the report, or when the population involves judgment calls. It takes longer (multiple sessions recommended), and you can delegate any checkpoint back to the AI.
 
 **Q: APOLLO v8 から何が変わった?（v9 の新機能）**
 **What's new in v9 (compared to v8)?**

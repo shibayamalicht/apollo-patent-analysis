@@ -46,3 +46,8 @@ test_data/
 
 # OS固有
 Thumbs.db
+
+# 開発専用（公開リポジトリに含めない）
+design_preview/
+SESSION_HANDOFF.md
+KATHERINE_DESIGN_v9.1.0.md

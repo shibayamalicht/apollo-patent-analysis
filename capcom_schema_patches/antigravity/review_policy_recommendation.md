@@ -6,23 +6,28 @@ APOLLO CAPCOM レポートを Antigravity IDE で生成する際の **Review Pol
 
 ## 🎯 なぜ Review Policy の設定が重要か
 
-APOLLO CAPCOM は品質保証のため **5箇所のユーザー承認ゲート** を持ちます：
+APOLLO CAPCOM は品質保証のため **複数のユーザー承認ゲート** を持ちます（構成・個数の正本はスキル本体 `.agent/skills/apollo-capcom/SKILL.md` の各 Phase 節）：
 
 | Phase | Gate | 承認対象 |
 |---|---|---|
+| A | 別冊確認 / query_logic 読解 / query_intent 3点整理 / サブクエスチョン / 意図↔論理整合 / データ逆読み＋母集団タイプ＋分析の立場 / NEBULA 戦略（全て指定時は**最大 7**） | `implementation_plan.md` § Executive Summary Edition Decision 〜 § NEBULA Strategy |
 | A-2 | タイトル選定 | `implementation_plan.md` § Title Candidates |
 | B-1 | クロスパターン選定 | `implementation_plan.md` § Cross-Module Pattern Selection |
 | B-2 | Web調査可否 | `task.md` § Phase B Gates (Web Research) |
 | C | Deep Dive Plan | `implementation_plan.md` § Deep Dive Plan |
 | D | Report Plan | `implementation_plan.md` § Report Structure & Quality Plan |
 
+つまり **自律生成モードでは「Phase A 最大 7 ＋ A-2 ＋ B×2 ＋ C ＋ D」程度の承認ポイントが正常**です（query_logic / query_intent の指定有無で増減）。**対話型レポート作成モード（KATHERINE、`report_mode=interactive`）ではさらに対話ポイント CP-1〜8 の確定分（Phase 0 深さゲート・マップ読解・仮説と検証・統合インサイト・結論確定・WARN トリアージ等）が加わるのが正常**です。承認回数が多いこと自体は異常ではありません。
+
 Antigravity の Review Policy が **"Always Proceed"** になっていると、Agent が Artifact を更新してもユーザーに承認待ちが表示されず、AI が自動で全フェーズを進めてしまいます。これは SKILL.md §0 絶対遵守ゲートルール第2項（ユーザー応答待ち必須）に違反します。
+
+**対話型（KATHERINE）では "Request Review" が必須**です。対話ポイントの確定（✅ / コメント / 🤖 おまかせ）が Artifact Review 承認で成立する設計のため、"Agent Decides" / "Always Proceed" を検出した場合、Agent は Phase 0 で停止してユーザーに設定変更を依頼します。
 
 ---
 
 ## ✅ 推奨設定
 
-### オプション A: 全 Phase で "Request Review" （最も安全、推奨）
+### オプション A: 全 Phase で "Request Review" （最も安全、推奨。**対話型では必須**）
 
 **設定手順**:
 1. Antigravity IDE の設定パネル → Agent Manager → Review Policy
@@ -30,15 +35,15 @@ Antigravity の Review Policy が **"Always Proceed"** になっていると、A
 3. （推奨）本 skill `apollo-capcom` に対する個別オーバーライドも "Request Review" に設定
 
 **メリット**:
-- 5箇所全ての Artifact Review でユーザー承認待ちが自動発動
+- 全ての Artifact Review ゲート（Phase A 最大 7 ＋ A-2 ＋ B×2 ＋ C ＋ D。対話型では CP-1〜8 も）でユーザー承認待ちが自動発動
 - ユーザーは Google Docs 式コメントで修正指示可能
 - SKILL.md のゲートが確実に機能
 
 **デメリット**:
 - 自動進行しないため、ユーザーが明示的に承認する必要がある
-- 承認作業のコストが発生（ただし5箇所のみ、本来必要な判断）
+- 承認作業のコストが発生（ただしいずれも本来必要な判断）
 
-### オプション B: "Agent Decides" （速度重視、ただし Agent が適切に判断する前提）
+### オプション B: "Agent Decides" （速度重視、ただし Agent が適切に判断する前提。**対話型では不可**）
 
 **設定手順**: Review Policy を **"Agent Decides"** に設定
 
@@ -137,7 +142,8 @@ Agent はユーザー判断項目を自発的にチェックしてはいけま�
 
 ```
 ✅ Review Policy 確認完了: Request Review
-   → 5箇所の Artifact Review GATE でユーザー承認待ちが自動発動します
+   → 全ての Artifact Review GATE（Phase A 最大7 + A-2 + B×2 + C + D。対話型では CP 分も）で
+     ユーザー承認待ちが自動発動します
 ```
 
 もし以下のような警告が出たら、設定変更が必要：
@@ -162,7 +168,7 @@ Agent はユーザー判断項目を自発的にチェックしてはいけま�
 
 ### Q. 承認待ちが出すぎて進まない
 
-**A**. 本スキルの承認ポイントは5箇所のみ（全 Phase で）。それ以上に発動している場合、Agent が余計な Artifact を作っている可能性。チャットで「Phase X の承認だけにして」と指示してください。
+**A**. 本スキルの承認ポイントは、自律生成モードで「Phase A 最大 7（query_logic / query_intent の指定有無で増減）＋ A-2 ＋ B×2 ＋ C ＋ D」程度、対話型（KATHERINE）ではさらに対話ポイント CP-1〜8 の確定分が加わります — **この範囲なら正常**です（構成の正本はスキル本体の各 Phase 節と `capcom_schema/interactive/dialogue_points.md`）。それを明らかに超えて発動している場合、Agent が余計な Artifact を作っている可能性。チャットで「スキル定義のゲート承認だけにして」と指示してください。なお `<!-- ANTIGRAVITY_INFO_ONLY -->` マーカーのブロック（対話型の突合サマリ等）は情報提示のみで承認不要です。
 
 ### Q. 承認した Artifact がAgentに伝わらない
 

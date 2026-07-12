@@ -35,12 +35,25 @@ description: >
 
 3. **🛑 Artifact Review GATE**: ユーザーが Plan に承認コメントを付けるまで待機
 
+### 代表特許の決定的選定（Phase C の最初に1回だけ・v9 必須）
+
+3-2. **選定スクリプトを実行する**（代表特許は「決まった手順」で選ぶ＝**自由選択の禁止**。モデルが自由に選ぶ限り、結論に都合の良い特許を選べてしまう＝つまみ食い）:
+
+   ```bash
+   python3 capcom_schema/scripts/select_representatives.py
+   ```
+
+   `reports/representative_patents.json` が生成される（Saturn V=SBERT重心近傍〔patiroha算出済み〕、MEGA=象限内で出願年昇順→番号昇順、Explorer/CREW=中心性上位ノード対応。全て決定的でタイブレークまで固定）
+
+3-3. **ミクロ分析A で引用する特許番号は、この JSON に載った番号だけ**とする（`phase_d_gate.sh` Check 35 が、ミクロ分析節にリスト外の番号があれば警告する）。JSON の `cite_as` / `title` / `applicant` を使い、技術的意義と戦略的文脈を1-2文添えて引用する。プレースホルダ番号（`特開2023-XXXXXX` 等）・出願年から推測した捏造番号は自動不合格。ミクロ分析A **以外**の箇所（クロスモジュール検証等）で条件検索により特定の特許を根拠として引くことは引き続き可（その場合も実番号ルールは適用）。詳細: `capcom_schema/analysis/deep_dive_guide.md` ミクロ分析A
+
 ### Deep Dive 生成（Step 0 → 6 順序）
 
 各 Step で:
 - 対応する exemplar を読む（例: Step 1 なら `capcom_schema/exemplars/saturnv_exemplar.typ`）
 - `reports/<module>_deep_dive.typ` を生成
-- 必須: ミクロ分析A（代表特許15件以上）、B（出願人5社以上、各5行以上）、`#snapshot-figure()` 1枚以上
+- 必須: ミクロ分析A（代表特許15件以上・**引用は `reports/representative_patents.json` の番号のみ**）、B（出願人5社以上、各5行以上）、`#snapshot-figure()` 1枚以上
+- **走査層（v9）**: 各番号セクション冒頭に `#point-lead[...]` を1個、各章末に `#chapter-summary[...]` を置く（散文の代替にしない。gate Check 25/26）
 - 🔄 **モジュール完了ごとにセッション・チェックポイント**: deep_dive を1本生成したら、`reports/_carryover.md` を更新（完了モジュール・次モジュール・直近の固有事実）したうえで、ユーザーに「**新タスクに切り替えますか？**（続行／切替／`/compact`）」と提案して一旦停止する。Phase C は最も枯渇しやすいので**1モジュール=1タスク**を基本とし、切替時は新タスクが `_carryover.md`＋`ls reports/` で次モジュールから自動再開。詳細はスキル本体 `### 🔄 セッション・チェックポイント`
 
 4. **Step 0 NEBULA**: `reports/nebula_deep_dive.typ` 生成（120行以上 / 8セクション）
@@ -90,6 +103,7 @@ description: >
 ## 完了条件
 
 - [ ] § Deep Dive Plan にユーザー承認済み
+- [ ] `reports/representative_patents.json` 生成済み（決定的選定・Phase C 冒頭に1回）
 - [ ] 7モジュール分の `reports/*_deep_dive.typ` 生成済み
 - [ ] `phase_c_gate.sh` exit 0
 - [ ] `walkthrough.md` § Phase C Gate Result に全文転記済み

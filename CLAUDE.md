@@ -1,4 +1,4 @@
-# APOLLO v9.0.0 — 特許分析プラットフォーム
+# APOLLO v9.1.0 — 特許分析プラットフォーム
 
 ## 言語設定
 - 常に日本語で会話する
@@ -7,10 +7,11 @@
 - ドキュメントも日本語で生成する
 
 ## プロジェクト概要
-APOLLO v9.0.0 は、Streamlitベースの特許分析プラットフォーム。
+APOLLO v9.1.0 は、Streamlitベースの特許分析プラットフォーム。
 patirohaライブラリをコアエンジンとし、SBERT・UMAP・HDBSCANによる分析、
 Gemini APIによるアプリ内レポート生成（VOYAGER）、
 Claude Code / Codex CLI / Antigravity IDE による Deep Diveレポート生成（CAPCOM・マルチツール対応）を統合した次世代版。
+v9.1 で CAPCOM に第二の進行様式「対話型レポート作成モード（KATHERINE）」を追加。
 
 ## 主な機能
 1. **母集団設計の文書化**: CAPCOM ページで以下4項目を任意入力可能にし、分析レポートに反映
@@ -26,8 +27,9 @@ Claude Code / Codex CLI / Antigravity IDE による Deep Diveレポート生成�
 7. **代表特許の決定的選定（v9）**: Phase C 冒頭で `capcom_schema/scripts/select_representatives.py` を 1 回実行し、ミクロ分析 A は `reports/representative_patents.json` の番号のみ引用（つまみ食い防止・Check 35）
 8. **品質ゲート Check 1〜37（v9）**: `capcom_schema/scripts/phase_d_gate.sh` 1 本で内容量・引用・用語・スコープ・母集団タイプ・立場・水増し・マップ掲載・構造化分析・裏付けを統合判定
 9. **分析の立場（narrative_stance）の確定**: Phase A STOP-GATE C で self / competitor / buyer / supplier / neutral の 5 分類をユーザー確認し、呼称・分析の力点・提言の型を全編で一貫させる（Check 11s）
+10. **対話型レポート作成モード（KATHERINE）（v9.1）**: CAPCOM の第二の進行様式。AI が判断案を「提案・根拠・別の見方・確認したいこと」の4部構成で提示し、分析者が選択・修正・確定しながらレポートを作る（正本: `capcom_schema/interactive/SKILL_INTERACTIVE.md` + `interactive/dialogue_points.md`）。品質ゲート・成果物形式・トークン効率制約は自律生成モードと完全に同一。CAPCOM ページのモード選択が `voyager/context.json` の `report_mode` に記録される
 
-> 📌 **CAPCOM セッション（ZIP 展開後のレポート生成）でこのファイルを読んでいる場合**: 「起動方法」「ファイル構成」「コアライブラリ」「技術スタック」「開発上の注意点」の各節は APOLLO 本体の開発者向け情報であり、レポート生成では参照不要。レポート生成の指示は「レポート生成」「CAPCOM 〜」各節と `capcom_schema/` を正とし、本ファイルと `capcom_schema/` が食い違う場合は `capcom_schema/SKILL.md §0` と各 analysis/ 正本が優先する。
+> 📌 **CAPCOM セッション（ZIP 展開後のレポート生成）でこのファイルを読んでいる場合**: 「起動方法」「ファイル構成」「コアライブラリ」「技術スタック」「開発上の注意点」の各節は APOLLO 本体の開発者向け情報であり、レポート生成では参照不要。レポート生成の指示は「レポート生成」「CAPCOM 〜」各節と `capcom_schema/` を正とし、本ファイルと `capcom_schema/` が食い違う場合は `capcom_schema/SKILL.md §0` と各 analysis/ 正本が優先する。`voyager/context.json` の `report_mode` が `interactive` の場合（またはユーザーが対話型を明示した場合）は、`capcom_schema/interactive/SKILL_INTERACTIVE.md` を進行の正本として読む。
 
 ## 起動方法
 ```bash
@@ -120,6 +122,7 @@ summary = patiroha.generate_spatial_summary(df, "cluster", "umap_x", "umap_y")
 - 双方向通信: **In-Memoryセッション → ZIPダウンロード → ローカル展開 → 選択した AI ツール → Typst/PDF**
 - 4フェーズ（ツァーリ・ボンバ対策版）: ミッション+データ → エビデンス+クロス → Deep Dive → 統合+品質検証
 - レポート深度: 本格レポート（残り90%）
+- **進行様式は2つ（v9.1）**: **自律生成モード**（従来・4フェーズ自動進行）と**対話型レポート作成モード（KATHERINE）**（AI が根拠付きで案を提示し、分析者が確定しながら進行。正本: `capcom_schema/interactive/SKILL_INTERACTIVE.md`）。どちらも品質ゲート・成果物形式・トークン効率制約・Web調査ルール・絶対ルールは同一（下記「CAPCOM 〜」各節はモード共通で適用）
 - **重要**: Web版(HF Spaces / Streamlit Cloud)対応のため、データは `st.session_state['capcom_store']` に保持されブラウザを閉じると消失する。ユーザーは必ず CAPCOM ページから ZIP をダウンロードし、ローカルで選択した AI ツール（Claude Code 等）を起動して使用する
 
 ## CAPCOM トークン効率の制約（ツァーリ・ボンバ対策）
@@ -134,6 +137,7 @@ summary = patiroha.generate_spatial_summary(df, "cluster", "umap_x", "umap_y")
 **重要**: 上記の効率制約は **品質ゲートを犠牲にする理由にはならない**。`capcom_schema/SKILL.md ## 0. 絶対遵守ゲートルール` が最上位。トークンが足りなければ `/compact` を実行するか、分割実施を提案する(効率のためゲート省略は禁止)。
 
 ## CAPCOM Web調査（積極推奨）
+（本節は自律生成モード・対話型（KATHERINE）の両進行様式に共通で適用される）
 - 特許データだけでは得られない外部情報（市場動向・企業戦略・政策・学術トレンド等）をWeb調査で積極的に収集する
 - NEBULAデータの有無にかかわらず、主要出願人の事業戦略・市場規模・政策動向・萌芽技術の実用化動向を調べる
 - Phase B 本体作業前に STOP-GATE でテーマ一覧を提示して確認する。NEBULA 未実行時は Phase A で Web補完/省略をユーザー選択し、Web補完モードでは4カテゴリ（市場規模・政策規制・学術動向・主要企業動向）が必須でスキップ不可（Check 13）
@@ -169,7 +173,8 @@ CAPCOMセッションデータ(ZIP展開後の `session_xxx/` フォルダ)を�
 **環境準備**: 最初に依存を確認 — `python3 -c "import pandas, pptx, PIL"` → 無ければ `pip install -r requirements-session.txt`
 
 ### 最初に読むファイル
-`capcom_schema/SKILL.md`（コア手順書）→ 4フェーズの流れ・絶対遵守ゲートルール（§0）・完了条件
+- **自律生成モード（既定）**: `capcom_schema/SKILL.md`（コア手順書）→ 4フェーズの流れ・絶対遵守ゲートルール（§0）・完了条件
+- **対話型モード（KATHERINE）**: `capcom_schema/interactive/SKILL_INTERACTIVE.md`（対話型の進行手順書）→ その指示に従い SKILL.md（フェーズ・ゲートの正本）と `interactive/dialogue_points.md`（対話ポイント定義）を併読。発動条件は `voyager/context.json` の `report_mode=interactive` またはユーザーの明示指示
 
 ### 各フェーズで追加で読むリファレンスファイル（省略禁止）
 | Phase | 読むファイル | 内容 |
@@ -188,10 +193,11 @@ CAPCOMセッションデータ(ZIP展開後の `session_xxx/` フォルダ)を�
 | Phase D | `analysis/patent_citation.md` | 代表特許の引用書式（セクション2-3のみ） |
 | Phase D | `analysis/quality_checklist.md` | 品質チェック（gate スクリプト Check 1〜37 + 人間確認項目） |
 | Phase D | `analysis/executive_summary_guide.md` | 経営層向け要約版（別冊）執筆ガイド（別冊生成フラグが ON の場合のみ） |
+| 全 Phase（対話型時のみ） | `interactive/dialogue_points.md` | 対話ポイント CP-1〜8 の提示テンプレート・確定方法（KATHERINE モード） |
 
 **各フェーズにゲートあり**: リファレンス読了内容（セクション数・パターン番号等）の報告に加え、STOP-GATE では `AskUserQuestion` でユーザー応答を得るまで次フェーズへ進まない（テキスト報告のみは不可）。Phase C/D 完了時は `capcom_schema/scripts/phase_c_gate.sh` / `phase_d_gate.sh` の実行・合格が必須（「実質的にOK」等の質的判断での上書き禁止。内容量は行数でなく非空白文字数で判定）
 
-### 絶対ルール（省略すると品質不合格）
+### 絶対ルール（省略すると品質不合格・両進行様式共通）
 - **`data/patents.csv`**: 必ず読む。出願人上位・クラスタ別件数・年別件数は Phase A のワンショット統計スクリプトで1回だけ算出（リスト文字列カラムは explode 必須・再読み込み禁止）
 - **`prompts/` AIインサイト**: **主要モジュール各1件以上かつ全体で最低8件**読了（件数が多ければ可能な限り全件）。読まずにdeep_diveを書くと表面的になる
 - **ミクロ分析**: Phase C 冒頭に `capcom_schema/scripts/select_representatives.py` を1回実行し、代表特許（計15件以上・公開番号/タイトル/出願人＋技術的意義1-2文）は `reports/representative_patents.json` の番号のみ引用（自由選択・プレースホルダ番号・捏造番号は不合格）。出願人5社以上（各5行以上）

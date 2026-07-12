@@ -695,7 +695,7 @@ def render_sidebar():
 Advanced Patent & Overall Landscape-analytics
 Logic Orbiter
 
-**v9.0.0**
+**v9.1.0**
 """)
         st.markdown("---")
         st.subheader("Home"); st.page_link("Home.py", label="Mission Control", icon="🛰️")

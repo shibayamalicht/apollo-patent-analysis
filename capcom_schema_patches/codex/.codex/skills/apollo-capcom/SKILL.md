@@ -140,6 +140,11 @@ session_YYYYMMDD_HHMMSS/
 ### レポート生成モード
 VOYAGER Export 後に利用。`voyager/mission.json` の Mission Objective に基づく正式レポートを作成する。以下の4フェーズで進行する。
 
+### 対話型レポート作成モード（KATHERINE）
+`voyager/context.json` の `report_mode` が `"interactive"` の場合、またはユーザーが対話型での進行を明示した場合に使用。**`capcom_schema/interactive/SKILL_INTERACTIVE.md` を読み、それに従って進行する**（変わるのは進行様式のみ。品質ゲート・成果物形式・本ファイル §0 の絶対遵守ゲートルール・トークン効率制約は上記レポート生成モードと同一に適用される）。`report_mode` が未指定・`"autonomous"` で、ユーザーの明示指示もない場合は、従来どおり上記レポート生成モードで進行する。
+
+**Codex での読替**: SKILL_INTERACTIVE.md 中の `AskUserQuestion` は `ask_user_question`（TUI・対話モード必須）に読み替える（読替の正本: SKILL_INTERACTIVE.md §2 対話ツール読替表）。Codex 固有の運用（§0 の項番対応・CP 確定の流儀・`codex exec resume` との組み合わせ）は、`exec_mode_addendum.md` と同格の補遺 **`interactive_codex_addendum.md`** を参照すること（対話型モードの Codex 実機での検証は未了・ベストエフォート対応）。
+
 ---
 
 ## 環境準備（依存インストール・最初に1回・Codex で頻発）
@@ -207,7 +212,7 @@ voyager/mission.json を読み、data/以下のJSONとpatents.csvを把握する
 - [ ] Critical 検出でも進行可能（ユーザー判断尊重）
 
 1. `voyager/mission.json` を読む（Mission Objective + Evidence 一覧）
-2. `voyager/context.json` でデータセットのメタ情報と population_meta / capcom_tools / report_directives（`image_slide_instruction`＝画像・スライドのユーザー指示）を確認する
+2. `voyager/context.json` でデータセットのメタ情報と **report_mode（進行様式の判別。`"interactive"` なら §2「対話型レポート作成モード（KATHERINE）」に従い `capcom_schema/interactive/SKILL_INTERACTIVE.md` を進行の正本として読む）** / population_meta / capcom_tools / report_directives（`image_slide_instruction`＝画像・スライドのユーザー指示）を確認する
 3. `evidence_list` の全件を走査し、各 Evidence の `module`・`title`・`images` を一覧表で整理する
 4. `snapshots/` のファイル一覧を取得する
 5. **`data/patents.csv` を読む**: `head -5` でカラム構成 → `wc -l` で件数 → pandas で出願人上位 10 社・クラスタ別件数・年別件数を把握
@@ -319,8 +324,8 @@ print("\n[クラスタ別件数]\n", df.groupby(['cluster','cluster_label']).siz
 🛑 **STOP-GATE 1 (リファレンス読了 + クロスパターン確認)**: 以下を全て実行するまで Phase B 本体に進むな
 - [ ] `capcom_schema/analysis/common_framework.md` を読了 → 4層分析モデルと数値根拠の書式を把握
 - [ ] `capcom_schema/analysis/data_notes.md` を読了 → 特許/NPL 非対称性と Web 調査ルールを把握
-- [ ] `capcom_schema/analysis/cross_module.md` を読了 → 13種のクロスパターンから3つ以上を選定
-- [ ] `ask_user_question` ツールで「採用するクロスパターン3つ(例: P1/P4/P13)」をユーザーに提示・確認（テンプレ: `prompts/phase_b_cross.md`）
+- [ ] `capcom_schema/analysis/cross_module.md` を読了 → 13種のクロスパターンから**5つ以上**を選定（Phase B 完了条件・gate Check 4 の最低数と同じ）
+- [ ] `ask_user_question` ツールで「採用するクロスパターン5つ以上(例: P1/P4/P7/P9/P13)」をユーザーに提示・確認（テンプレ: `prompts/phase_b_cross.md`）
 - [ ] ユーザー応答を待つ
 
 🛑 **STOP-GATE 2 (Web調査の意思確認)**: Phase B 本体作業前に必須
@@ -357,10 +362,10 @@ print("\n[クラスタ別件数]\n", df.groupby(['cluster','cluster_label']).siz
 3. 優先度の高い5-8件を1件ずつ順次読む
 4. 各Evidenceを読む際に: AIインサイトとの照合 / `capcom_schema/analysis/map_reading.md` の該当セクション読解 / 代表特許の抽出 / スナップショット画像パス記録
 5. **代表特許の具体的確認**: `data/patents.csv` をpandasで条件検索し、代表特許のタイトル・出願人・公開番号を**最低15件**取得する
-6. `capcom_schema/analysis/cross_module.md` の基本原則を読み、最低3パターン（P1-P13から）を選択・実行する
+6. `capcom_schema/analysis/cross_module.md` の基本原則を読み、最低5パターン（P1-P13から）を選択・実行する
 7. クロス分析で得られた洞察を記録する
 
-→ **完了条件**: Evidence 5件以上精読済み / AIインサイト照合メモ作成済み / 代表特許15件以上取得済み / クロス分析3パターン以上の仮説→検証→結論を完了済み
+→ **完了条件**: Evidence 5件以上精読済み / AIインサイト照合メモ作成済み / 代表特許15件以上取得済み / クロス分析5パターン以上の仮説→検証→結論を完了済み
 → **データ特性の注意**: `capcom_schema/analysis/data_notes.md`（特許とNPLの非対称性、ギャップ分析の注意）
 → **Web調査ルール**: `capcom_schema/analysis/data_notes.md` セクション3
 
@@ -481,7 +486,7 @@ target = df[df['cluster'] == 3][['title', 'applicant_main', 'year']].head(20)  #
 
 1. **数値根拠**: 全ての主張に具体的な数値を含める（件数、割合、CAGR、HHI等）
 2. **特許引用**: 代表特許を具体的に引用する（番号、タイトル、出願人）
-3. **クロス検証**: 複数モジュールのデータを組み合わせて結論を補強する。最低3パターン実施（→ `capcom_schema/analysis/cross_module.md`）
+3. **クロス検証**: 複数モジュールのデータを組み合わせて結論を補強する。最低5パターン実施（→ `capcom_schema/analysis/cross_module.md`）
 4. **事実と推論の分離**: 4層分析モデルを適用（→ `capcom_schema/analysis/common_framework.md`）
 5. **可視化参照（全章必須）**: 全ての章に最低1つの `#snapshot-figure()` を含める
 6. **AIインサイト活用**: `prompts/` のAIインサイトを必ず参照し、深い読み取りをレポートに反映する

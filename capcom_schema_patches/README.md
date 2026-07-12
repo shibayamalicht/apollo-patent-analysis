@@ -15,6 +15,8 @@ APOLLO の `capcom_schema/SKILL.md` は Claude Code 固有のツール（`AskUse
 | **Antigravity IDE**（Google） | [`antigravity/`](antigravity/) | ✅ 利用可能 |
 | Cursor / Gemini CLI / Windsurf 等 | *(将来追加予定)* | ⏳ 計画中 |
 
+> 📌 **対話型レポート作成モード（KATHERINE・v9.1）について**: 対話型の進行の正本は `capcom_schema/interactive/SKILL_INTERACTIVE.md` **1 本で全ツール共通**（ファイル冒頭の対話ツール読替表で `AskUserQuestion` / `ask_user_question` / Artifact レビューを読み替える）。加えて各パッチに対話型対応の資材を同梱: Codex は補遺 `codex/interactive_codex_addendum.md`（§0 項番対応表・ask_user_question 流儀・対話フロント＋自動バック運用）、Antigravity は対話用 Artifact 雛形 `antigravity/artifacts_templates/dialogue_review.md.tmpl` と起動ワークフロー `06_interactive.md`（REVIEW_REQUIRED / INFO_ONLY の2マーカー規約・Request Review 必須）。**Claude Code で検証済み**、Codex / Antigravity は**対応実装済み・実機検証待ち**。
+
 3ツールは 2026年初頭から **Open Agent Skills Standard (OAS)** を共有しており、SKILL.md フォーマット自体は互換です。本パッチは差分のみを実装します。
 
 ---
@@ -25,6 +27,7 @@ APOLLO の `capcom_schema/SKILL.md` は Claude Code 固有のツール（`AskUse
 session_YYYYMMDD_HHMMSS/          # CAPCOM ZIP 展開後のワーキングフォルダ
 ├── capcom_schema/                # 🔒 既存、不変（Claude Code用の完全版）
 │   ├── SKILL.md
+│   ├── interactive/              # 対話型レポート作成モード（KATHERINE・v9.1）手順書・全ツール共通
 │   ├── analysis/
 │   ├── references/
 │   ├── exemplars/
@@ -66,7 +69,7 @@ cd session_YYYYMMDD_HHMMSS/
 # リポジトリから patches を取得（初回のみ）
 git clone https://github.com/<owner>/apollo.git /tmp/apollo
 # パッチ適用
-bash /tmp/apollo/apollo_v7/capcom_schema_patches/codex/apply_patch.sh .
+bash /tmp/apollo/capcom_schema_patches/codex/apply_patch.sh .
 # Codex起動
 codex
 # チャットで: $apollo-capcom  または  /skills から apollo-capcom を選択
@@ -75,7 +78,7 @@ codex
 **Antigravity IDE 利用者**
 ```bash
 git clone https://github.com/<owner>/apollo.git /tmp/apollo
-bash /tmp/apollo/apollo_v7/capcom_schema_patches/antigravity/apply_patch.sh .
+bash /tmp/apollo/capcom_schema_patches/antigravity/apply_patch.sh .
 # Antigravity IDE で session_YYYYMMDD_HHMMSS/ フォルダを開く
 # Review Policy を "Request Review" に設定（初回のみ、review_policy_recommendation.md 参照）
 # チャットで「apollo-capcom スキルでレポート生成」と依頼
@@ -86,13 +89,13 @@ bash /tmp/apollo/apollo_v7/capcom_schema_patches/antigravity/apply_patch.sh .
 PowerShell で同等の操作：
 ```powershell
 # Codex
-Copy-Item -Recurse /path/to/apollo/apollo_v7/capcom_schema_patches/codex/.codex .
-Copy-Item /path/to/apollo/apollo_v7/capcom_schema_patches/codex/AGENTS.md .
+Copy-Item -Recurse /path/to/apollo/capcom_schema_patches/codex/.codex .
+Copy-Item /path/to/apollo/capcom_schema_patches/codex/AGENTS.md .
 
 # Antigravity
-Copy-Item -Recurse /path/to/apollo/apollo_v7/capcom_schema_patches/antigravity/.agent .
-Copy-Item /path/to/apollo/apollo_v7/capcom_schema_patches/antigravity/GEMINI.md .
-Copy-Item /path/to/apollo/apollo_v7/capcom_schema_patches/antigravity/AGENTS.md .
+Copy-Item -Recurse /path/to/apollo/capcom_schema_patches/antigravity/.agent .
+Copy-Item /path/to/apollo/capcom_schema_patches/antigravity/GEMINI.md .
+Copy-Item /path/to/apollo/capcom_schema_patches/antigravity/AGENTS.md .
 ```
 
 ### 同時適用（Codex と Antigravity を併用）
@@ -121,7 +124,7 @@ Copy-Item /path/to/apollo/apollo_v7/capcom_schema_patches/antigravity/AGENTS.md 
 ## 📁 本ディレクトリの構造
 
 ```
-apollo_v7/capcom_schema_patches/
+capcom_schema_patches/
 ├── README.md                         # ← 本ファイル
 │
 ├── codex/                            # Codex CLI 用パッチ
@@ -151,9 +154,9 @@ apollo_v7/capcom_schema_patches/
 ## 🔒 既存ファイルの不変性保証
 
 このパッチを適用しても、以下のファイルは **一切変更されません**：
-- `apollo_v7/capcom_schema/` 配下の全ファイル
-- `apollo_v7/capcom.py`（Streamlit ZIP export 処理）
-- `apollo_v7/pages/10_📡_CAPCOM.py`（CAPCOM UI）
+- `capcom_schema/` 配下の全ファイル
+- `capcom.py`（Streamlit ZIP export 処理）
+- `pages/10_📡_CAPCOM.py`（CAPCOM UI）
 - CAPCOM ZIP の内容自体
 
 つまり、**Claude Code 利用者に対する影響はゼロ** です。
@@ -164,11 +167,11 @@ apollo_v7/capcom_schema_patches/
 
 Cursor / Gemini CLI 等への対応を追加したい場合：
 
-1. `apollo_v7/capcom_schema_patches/<tool_name>/` ディレクトリを作成
+1. `capcom_schema_patches/<tool_name>/` ディレクトリを作成
 2. そのツールの Skill 配置規約に合わせて `.<tool>/skills/apollo-capcom/SKILL.md` を配置
 3. 既存の Codex 版または Antigravity 版の SKILL.md を雛形にし、ツール固有の差分（ユーザー確認ツール名、配置パス等）を書き換え
 4. `apply_patch.sh` と `README.md` を追加
-5. 本ファイル（`apollo_v7/capcom_schema_patches/README.md`）の対応ツール表を更新
+5. 本ファイル（`capcom_schema_patches/README.md`）の対応ツール表を更新
 
 OAS（Open Agent Skills Standard）準拠のツールであれば、SKILL.md 本体は 95% 流用できるはずです。
 
