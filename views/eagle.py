@@ -19,7 +19,6 @@ from collections import Counter
 from itertools import combinations
 import networkx as nx
 from scipy.ndimage import label as nd_label
-from scipy.spatial import ConvexHull
 from sklearn.feature_extraction.text import TfidfVectorizer
 import io
 import capcom
@@ -37,6 +36,15 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 
 warnings.filterwarnings('ignore')
+
+# 俯瞰図ファミリー共通スタイル（utils.py 0c）を EAGLE に当てるうえでの意図的な差分。
+# EAGLE の未割り当て点（eagle_cluster == -1）は「まだクラスタに入れていない作業対象」で、
+# 俯瞰図分析のノイズ（HDBSCAN の外れ値＝背景に沈めるもの）とは意味が違う。
+# utils.LANDSCAPE_NOISE_STYLE をそのまま当てると投げ縄で掴む対象が見えなくなるため、
+# EAGLE だけは未割り当て点に視認できる濃さを残す。
+# 濃さは実描画で決めた（淡いスレート #AEB6C4 / 不透明度 0.5 では地形も点も読めなかった）。
+EAGLE_TERRAIN_COLOR = "#8C93A6"                                      # 未割り当て点の地形（密度）
+EAGLE_UNASSIGNED_STYLE = dict(color="#7C8798", size=5, opacity=0.7)  # 未割り当て点
 
 # フォント設定
 FONT_PATH = utils.get_japanese_font_path()
@@ -314,6 +322,29 @@ def render():
             or '特徴語' not in st.session_state.df_eagle['hover_text'].iloc[0]):
         st.session_state.df_eagle['hover_text'] = update_hover_text_eagle(st.session_state.df_eagle, col_map)
 
+    # ヘルパー: 投げ縄/クリックの選択結果 → 特許のインデックス列
+    def selected_patent_indices(selection):
+        """選択イベントから特許の行インデックスだけを取り出す。
+
+        勢力圏（fill='toself' の線トレース）や地形（等高線）には customdata が無いため、
+        選択に混じると .loc が None を引いて KeyError になる。customdata を持つ点のみ拾う。
+        """
+        out = []
+        try:
+            points = (selection or {}).get("selection", {}).get("points") or []
+        except Exception:
+            return out
+        for _p in points:
+            _cd = _p.get("customdata")
+            if isinstance(_cd, (list, tuple)):
+                if not _cd:
+                    continue
+                _cd = _cd[0]
+            if _cd is None:
+                continue
+            out.append(_cd)
+        return out
+
     # ヘルパー: ラベル生成（単一クラスタ用、投げ縄選択時に使用）
     def generate_label_for_cluster(df_sub, tfidf_mat, feat_names, top_n=3):
         """単一クラスタのラベルを生成する。patiroha.auto_labelのc-TF-IDFと同等。"""
@@ -337,24 +368,6 @@ def render():
             fig.update_layout(showlegend=False) # Hide legend box if not requested
         return fig
 
-    # ヘルパー: 密度トレース取得
-    def get_density_trace(x, y, mesh_size):
-        custom_density_colorscale = [
-            [0.0, "rgba(255, 255, 255, 0)"], 
-            [0.1, "rgba(225, 245, 254, 0.3)"],
-            [0.4, "rgba(129, 212, 250, 0.6)"],
-            [1.0, "rgba(2, 119, 189, 0.9)"]
-        ]
-        return go.Histogram2dContour(
-            x=x, y=y, 
-            colorscale=custom_density_colorscale, 
-            showscale=False, 
-            nbinsx=mesh_size, nbinsy=mesh_size,
-            contours=dict(coloring='fill', showlines=True),
-            line=dict(width=0.5, color='rgba(0, 0, 0, 0.2)'),
-            hoverinfo='skip'
-        )
-
     # --- 共通設定 ---
     col_common, _ = st.columns([1, 2])
     with col_common:
@@ -368,12 +381,21 @@ def render():
     # 1. Universe (全体)
     df_universe = st.session_state.df_eagle.copy()
 
-    # 絶対密度スケール用の全体ZMax計算
-    # ユニバース上のメッシュ密度を計算し、全体最大密度を取得
+    # 密度メッシュは全体集合 df_universe の範囲で1度だけ決める（フィルタでは変えない）。
+    # 期間や出願人で絞っても格子と濃さの基準が動かないので、絞り込みどうしを比べられる。
+    # メッシュ範囲に余白ビンを持たせるのは、データ範囲ちょうどで切ると端の等高線が
+    # 四角く途切れて見えるため（utils.landscape_density_bins）。
+    # 絶対密度スケール用の全体ZMax は、描画と同じメッシュで数えた最大ビン件数にする。
+    # 失敗時はメッシュ未指定（自動ビン）に落とし、密度自体は描けるようにする。
     try:
-        _H, _x, _y = np.histogram2d(df_universe['umap_x'], df_universe['umap_y'], bins=resolution)
+        _eagle_bx, _eagle_by = utils.landscape_density_bins(
+            df_universe['umap_x'], df_universe['umap_y'], resolution)
+        _H, _, _ = np.histogram2d(df_universe['umap_x'], df_universe['umap_y'],
+                                  bins=[utils.landscape_bin_edges(_eagle_bx),
+                                        utils.landscape_bin_edges(_eagle_by)])
         eagle_global_zmax = _H.max()
-    except:
+    except Exception:
+        _eagle_bx = _eagle_by = None
         eagle_global_zmax = None
 
     # フィルタUI
@@ -479,71 +501,87 @@ def render():
     else:
         fig_lasso = go.Figure()
 
-        # 1. 密度背景 (トレンドに基づく)
-        # fix_density_chkがONの場合、絶対スケール比較にglobal zmaxを利用
+        # クラスタ→固定色の対応（地形・勢力圏・点・ラベルで共通）。フィルタに依らず
+        # 全体集合 df_universe 基準で割り当てるので、期間や出願人で絞っても色が変わらない。
+        _land_cmap = utils.landscape_color_map(df_universe['eagle_cluster'])
+
+        # 1. 地形（密度背景）— どこが混んでいるかを見て投げ縄を掛けるための下地。
+        #    クラスタに入れた点はそのクラスタ色、未割り当ての点は中立のスレートで描く。
+        #    俯瞰図分析（Saturn V）はクラスタ別着色だけだが、EAGLE は最初クラスタが1つも
+        #    無いため、未割り当て分を地形に残さないと背景が真っ白になり掛ける場所が見えない。
         if not df_trend.empty:
-            density_trace = get_density_trace(df_trend['umap_x'], df_trend['umap_y'], resolution)
-            if fix_density_chk and eagle_global_zmax is not None:
-                density_trace.update(zauto=False, zmin=0, zmax=eagle_global_zmax)
-            fig_lasso.add_trace(density_trace)
+            _zmax = eagle_global_zmax if fix_density_chk else None
+            for _cid, _grp in df_trend.groupby('eagle_cluster'):
+                utils.add_landscape_density(
+                    fig_lasso, _grp['umap_x'], _grp['umap_y'],
+                    EAGLE_TERRAIN_COLOR if _cid == -1 else _land_cmap.get(_cid, '#8C93A6'),
+                    zmax=_zmax, xbins=_eagle_bx, ybins=_eagle_by)
 
         # 2. ゴーストポイント (除外データ)
         if not df_ghost.empty:
             fig_lasso.add_trace(go.Scatter(
                 x=df_ghost['umap_x'], y=df_ghost['umap_y'], mode='markers',
-                marker=dict(color='#dddddd', size=3, opacity=0.3),
+                marker=dict(color='#dddddd', size=3, opacity=0.4, line=dict(width=0)),
                 name='その他 (Ghost)',
                 hoverinfo='skip'
             ))
 
-        # 3. フォーカスポイント (クラスタリング対象)
+        # 3. クラスタ領域（平滑化した勢力圏・点とラベルと同じ固定色）。
+        #    df_universe 基準で描き、期間フィルタで勢力圏が伸縮しないようにする。
+        for _cid, _grp in df_universe[df_universe['eagle_cluster'] != -1].groupby('eagle_cluster'):
+            utils.add_landscape_region(
+                fig_lasso, _grp[['umap_x', 'umap_y']].values, _land_cmap.get(_cid, '#8C93A6'))
+
+        # 4. フォーカスポイント (クラスタリング対象)
         uniq = sorted(df_focus['eagle_cluster'].unique())
-        color_seq = utils.APOLLO_COLORS
 
         is_applicant_filtered = "ALL" not in selected_apps
 
-        # 編集モード用マーカー枠線
-        marker_border = dict(width=1, color='#333333') if is_editing else dict(width=0)
+        # 編集中は点に濃い枠を付けて「掴める」ことを示す。閲覧中(FIX)は俯瞰図ファミリー標準の
+        # 白フチにする（点が重なっても粒が読める）。
+        marker_border = dict(width=1, color='#333333') if is_editing else dict(width=0.8, color='white')
 
         if is_applicant_filtered:
-            # 出願人着色モード (Saturn Vスタイル)
-            palette = px.colors.qualitative.Bold
-    
+            # 出願人着色モード（企業識別色も俯瞰図パレットで統一）
             for i, app_name in enumerate(selected_apps):
                 # この出願人でフィルタ
                 mask = df_focus[col_map['applicant']].fillna('').str.contains(re.escape(app_name))
                 d_app = df_focus[mask]
-        
+
                 if not d_app.empty:
-                        # 動的ホバーテキスト構築
-                        # 内部クラスタIDをラベルにマッピング
-                        current_labels = d_app['eagle_cluster'].map(lambda x: st.session_state.eagle_labels_map.get(x, str(x)) if x != -1 else "")
-                        dynamic_hover = d_app['hover_text'] + d_app['eagle_cluster'].apply(lambda x: f"<b>クラスタ:</b> {st.session_state.eagle_labels_map.get(x, str(x))}" if x != -1 else "")
-                
-                        fig_lasso.add_trace(go.Scatter(
-                            x=d_app['umap_x'], y=d_app['umap_y'], mode='markers',
-                            marker=dict(color=palette[i % len(palette)], size=6, opacity=0.9, line=marker_border),
-                            name=app_name,
-                            customdata=d_app.index,
-                            hoverinfo='text',
-                            hovertext=dynamic_hover,
-                            showlegend=True
-                        ))
+                    # 動的ホバーテキスト構築（内部クラスタIDをラベルにマッピング）
+                    dynamic_hover = d_app['hover_text'] + d_app['eagle_cluster'].apply(
+                        lambda x: f"<b>クラスタ:</b> {st.session_state.eagle_labels_map.get(x, str(x))}" if x != -1 else "")
+
+                    fig_lasso.add_trace(go.Scatter(
+                        x=d_app['umap_x'], y=d_app['umap_y'], mode='markers',
+                        marker=dict(color=utils.landscape_color(i), size=max(utils.LANDSCAPE_POINT_SIZE, 6),
+                                    opacity=0.9, line=marker_border),
+                        name=app_name,
+                        customdata=d_app.index,
+                        hoverinfo='text',
+                        hovertext=dynamic_hover,
+                        showlegend=True
+                    ))
         else:
-            # クラスタ着色モード (オリジナル)
-            for i, c in enumerate(uniq):
+            # クラスタ着色モード
+            for c in uniq:
                 d = df_focus[df_focus['eagle_cluster'] == c]
                 if d.empty: continue
                 name = st.session_state.eagle_labels_map.get(c, str(c))
-                color = '#dddddd' if c == -1 else color_seq[i % len(color_seq)]
-                opacity = 0.3 if c == -1 else 0.8
-        
+                if c == -1:
+                    # 未割り当ては投げ縄で掴む対象。Saturn V のノイズのようには沈めない（冒頭の定数参照）
+                    marker = dict(line=dict(width=0), **EAGLE_UNASSIGNED_STYLE)
+                else:
+                    marker = dict(color=_land_cmap.get(c, '#8C93A6'), size=utils.LANDSCAPE_POINT_SIZE,
+                                  opacity=utils.LANDSCAPE_POINT_OPACITY, line=marker_border)
+
                 # クラスタモードの場合、d内の全点はクラスタc(name)に属する
                 dynamic_hover_c = d['hover_text'] + (f"<b>クラスタ:</b> {name}" if c != -1 else "")
 
                 fig_lasso.add_trace(go.Scatter(
                     x=d['umap_x'], y=d['umap_y'], mode='markers',
-                    marker=dict(color=color, size=5, opacity=opacity, line=marker_border),
+                    marker=marker,
                     name=name,
                     customdata=d.index,
                     hoverinfo='text',
@@ -551,34 +589,22 @@ def render():
                     showlegend=False
                 ))
 
-        # 3. アノテーション
-        annotations_main = []
+        # 5. ラベル（ピル型・地形と勢力圏と点と同色のドット付き・件数上位クラスタは強調）
         if show_labels_chk:
-            for c in uniq:
-                if c == -1: continue
-                d = df_focus[df_focus['eagle_cluster'] == c]
-                if d.empty: continue
-        
-                mean_x = d['umap_x'].mean()
-                mean_y = d['umap_y'].mean()
-                label_text = st.session_state.eagle_labels_map.get(c, str(c))
-        
-                try:
-                    c_idx_strict = uniq.index(c)
-                    border_color = color_seq[c_idx_strict % len(color_seq)]
-                except: 
-                    border_color = "#333333"
+            _valid_lab = df_focus[df_focus['eagle_cluster'] != -1]
+            if not _valid_lab.empty:
+                _top_cids = utils.landscape_top_clusters(
+                    _valid_lab['eagle_cluster'].value_counts().to_dict())
+                # 端のクラスタのラベルが図の外に見切れないよう、範囲を渡してアンカーを内側に倒す
+                _lab_xr = (float(_valid_lab['umap_x'].min()), float(_valid_lab['umap_x'].max()))
+                _lab_yr = (float(_valid_lab['umap_y'].min()), float(_valid_lab['umap_y'].max()))
+                for _cid, _grp in _valid_lab.groupby('eagle_cluster'):
+                    utils.add_landscape_label(
+                        fig_lasso, _grp['umap_x'].mean(), _grp['umap_y'].mean(),
+                        st.session_state.eagle_labels_map.get(_cid, str(_cid)),
+                        _land_cmap.get(_cid, '#8C93A6'), emphasized=(_cid in _top_cids),
+                        x_range=_lab_xr, y_range=_lab_yr)
 
-                annotations_main.append(go.layout.Annotation(
-                    x=mean_x, y=mean_y, text=label_text, showarrow=False, 
-                    font=dict(size=11, color='black', family="Helvetica"), 
-                    bgcolor='rgba(255,255,255,0.7)',
-                    bordercolor=border_color,
-                    borderwidth=1,
-                    borderpad=3
-                ))
-
-        fig_lasso.update_layout(annotations=annotations_main)
         update_fig_eagle(fig_lasso, "Current Clusters", show_legend=False)
 
         # 表示範囲を明示固定し、かつフィルタやクラスタ構成に依存せず一定にする。
@@ -656,13 +682,7 @@ def render():
         })
 
         # 選択をチャートの戻り値から取得
-        selected_indices = []
-        try:
-            if selection and selection.get("selection") and selection["selection"].get("points"):
-                selected_indices = [(p["customdata"][0] if isinstance(p.get("customdata"), (list, tuple)) else p.get("customdata"))
-                                    for p in selection["selection"]["points"]]
-        except Exception:
-            selected_indices = []
+        selected_indices = selected_patent_indices(selection)
 
         # 上のプレースホルダに操作UIを描画
         with top_ui:
@@ -1184,88 +1204,71 @@ def render():
                     df_drill_plot = df_drill
 
                 fig_drill = go.Figure()
-            
-                custom_density_colorscale_d = [
-                    [0.0, "rgba(255, 255, 255, 0)"], 
-                    [0.1, "rgba(225, 245, 254, 0.3)"],
-                    [0.4, "rgba(129, 212, 250, 0.6)"],
-                    [1.0, "rgba(2, 119, 189, 0.9)"]
-                ]
 
-                if drill_map_mode == "密度マップ (Density)":
-                    contour_d = dict(
-                        x=df_drill_plot['drill_x'], y=df_drill_plot['drill_y'], 
-                        colorscale=custom_density_colorscale_d, 
-                        reversescale=False, xaxis='x', yaxis='y', showscale=False, name="密度", 
-                        nbinsx=drill_mesh_size, nbinsy=drill_mesh_size, 
-                        contours=dict(coloring='fill', showlines=True),
-                        line=dict(width=0.5, color='rgba(0, 0, 0, 0.2)')
-                    )
-                    fig_drill.add_trace(go.Histogram2dContour(**contour_d))
-                
+                # サブクラスタ→固定色（地形・勢力圏・点・ラベルで共通）
+                _land_cmap_d = utils.landscape_color_map(df_drill_plot['drill_cluster'])
+                _is_density_d = (drill_map_mode == "密度マップ (Density)")
+
+                if _is_density_d and not df_drill_plot.empty:
+                    # サブクラスタごとの地形（端の見切れ防止に共通メッシュ + 余白ビン）。
+                    # 手動モードでは全点が未割り当てなので、そのぶんを中立のスレートで描いて
+                    # 背景が空にならないようにする。
+                    _dbx, _dby = utils.landscape_density_bins(
+                        df_drill_plot['drill_x'], df_drill_plot['drill_y'], drill_mesh_size)
+                    for _cid, _grp in df_drill_plot.groupby('drill_cluster'):
+                        utils.add_landscape_density(
+                            fig_drill, _grp['drill_x'], _grp['drill_y'],
+                            EAGLE_TERRAIN_COLOR if _cid == -1 else _land_cmap_d.get(_cid, '#8C93A6'),
+                            xbins=_dbx, ybins=_dby)
+
                 if drill_map_mode == "クラスタ領域 (Clusters)":
-                    color_sequence = utils.APOLLO_COLORS
-                    unique_clusters_d = sorted(df_drill_plot['drill_cluster'].unique())
-                    for i, cid in enumerate(unique_clusters_d):
-                        if cid == -1: continue
-                        points = df_drill_plot[df_drill_plot['drill_cluster'] == cid][['drill_x', 'drill_y']].values
-                        if len(points) >= 3:
-                            try:
-                                hull = ConvexHull(points)
-                                hull_points = points[hull.vertices]
-                                hull_points = np.append(hull_points, [hull_points[0]], axis=0)
-                                c_color = color_sequence[i % len(color_sequence)]
-                                fig_drill.add_trace(go.Scatter(
-                                    x=hull_points[:, 0], y=hull_points[:, 1], mode='lines', fill='toself',
-                                    fillcolor=c_color, opacity=0.1, line=dict(color=c_color, width=2),
-                                    hoverinfo='skip', showlegend=False
-                                ))
-                            except: pass
+                    # 平滑化した勢力圏（生の凸包から差し替え・点とラベルと同じ固定色）
+                    for _cid, _grp in df_drill_plot[df_drill_plot['drill_cluster'] != -1].groupby('drill_cluster'):
+                        utils.add_landscape_region(
+                            fig_drill, _grp[['drill_x', 'drill_y']].values,
+                            _land_cmap_d.get(_cid, '#8C93A6'))
 
-                marker_line_d = dict(width=1, color='white') if drill_map_mode == "密度マップ (Density)" else dict(width=0)
-            
+                # 点は常時白フチ（重なっても粒が読める）。密度モードは地形が主役なので小さく薄く。
+                marker_line_d = dict(width=0.6 if _is_density_d else 0.8, color='white')
+                _pt_size_d = 4 if _is_density_d else utils.LANDSCAPE_POINT_SIZE
+                _pt_opacity_d = 0.65 if _is_density_d else utils.LANDSCAPE_POINT_OPACITY
+
                 # --- Drill-down Scatter with Manual Selection Support ---
-                # Group by cluster to have separate traces for coloring, BUT for lasso we ideally want one trace or careful handling.
-                # However, to color by cluster, we need separate traces or a color array. 
-                # Lasso in Plotly returns selected points indices. 
-            
-                uniq_d = sorted(df_drill_plot['drill_cluster'].unique())
-                color_sequence = utils.APOLLO_COLORS
-            
-                for i, cid in enumerate(uniq_d):
-                     d_sub = df_drill_plot[df_drill_plot['drill_cluster'] == cid]
-                     if d_sub.empty: continue
-                 
-                     c_color = '#dddddd' if cid == -1 else color_sequence[i % len(color_sequence)]
-                     c_name = drill_labels_map.get(cid, str(cid))
-                 
-                     # 凸包（go.Scatter=SVG）と座標系を揃えるため Scatter を使う（Scattergl=WebGL だと
-                     # 凸包領域とプロット点がズレる）。サブクラスタは点数が少なく lasso/性能とも問題なし。
-                     fig_drill.add_trace(go.Scatter(
+                # 勢力圏（go.Scatter=SVG）と座標系を揃えるため点も Scatter を使う（Scattergl=WebGL
+                # だと領域とプロット点がズレる）。サブクラスタは点数が少なく lasso/性能とも問題なし。
+                for cid in sorted(df_drill_plot['drill_cluster'].unique()):
+                    d_sub = df_drill_plot[df_drill_plot['drill_cluster'] == cid]
+                    if d_sub.empty: continue
+
+                    if cid == -1:
+                        # 未割り当ては投げ縄で掴む対象なので沈めない（冒頭の定数参照）
+                        marker_d = dict(line=dict(width=0), **EAGLE_UNASSIGNED_STYLE)
+                    else:
+                        marker_d = dict(color=_land_cmap_d.get(cid, '#8C93A6'), size=_pt_size_d,
+                                        opacity=_pt_opacity_d, line=marker_line_d)
+
+                    fig_drill.add_trace(go.Scatter(
                         x=d_sub['drill_x'], y=d_sub['drill_y'], mode='markers',
-                        marker=dict(color=c_color, size=5, opacity=0.8, line=marker_line_d),
-                        hoverinfo='text', hovertext=d_sub['drill_hover_text'], name=c_name,
+                        marker=marker_d,
+                        hoverinfo='text', hovertext=d_sub['drill_hover_text'],
+                        name=drill_labels_map.get(cid, str(cid)),
                         customdata=d_sub.index
                     ))
 
-                annotations_drill = []
+                # ラベル（ピル型・点と勢力圏と同色のドット付き・件数上位サブクラスタは強調）
                 if drill_show_labels_chk:
-                    color_sequence = utils.APOLLO_COLORS
-                    sorted_unique_cids_d = sorted(df_drill_plot['drill_cluster'].unique())
-                
-                    for cid, grp in df_drill_plot[df_drill_plot['drill_cluster'] != -1].groupby('drill_cluster'):
-                        mean_pos = grp[['drill_x', 'drill_y']].mean()
-                        try:
-                            color_idx = sorted_unique_cids_d.index(cid)
-                            border_color = color_sequence[color_idx % len(color_sequence)]
-                        except: border_color = "#333333"
-
-                        annotations_drill.append(go.layout.Annotation(
-                            x=mean_pos['drill_x'], y=mean_pos['drill_y'], text=drill_labels_map.get(cid, ""), showarrow=False, 
-                            font=dict(size=10, color='black', family="Helvetica"), 
-                            bgcolor='rgba(255,255,255,0.8)', bordercolor=border_color, borderwidth=2, borderpad=4
-                        ))
-                fig_drill.update_layout(annotations=annotations_drill)
+                    _dvalid = df_drill_plot[df_drill_plot['drill_cluster'] != -1]
+                    if not _dvalid.empty:
+                        _dtop = utils.landscape_top_clusters(
+                            _dvalid['drill_cluster'].value_counts().to_dict())
+                        _dxr = (float(_dvalid['drill_x'].min()), float(_dvalid['drill_x'].max()))
+                        _dyr = (float(_dvalid['drill_y'].min()), float(_dvalid['drill_y'].max()))
+                        for cid, grp in _dvalid.groupby('drill_cluster'):
+                            utils.add_landscape_label(
+                                fig_drill, grp['drill_x'].mean(), grp['drill_y'].mean(),
+                                drill_labels_map.get(cid, str(cid)),
+                                _land_cmap_d.get(cid, '#8C93A6'), emphasized=(cid in _dtop),
+                                x_range=_dxr, y_range=_dyr)
                 utils.update_fig_layout(fig_drill, f'EAGLE 詳細: {st.session_state.eagle_drill_base_label}', height=1000)
                 fig_drill.update_layout(dragmode='lasso', clickmode='event+select', showlegend=False) # Enable Lasso
             
@@ -1350,10 +1353,7 @@ def render():
 
 
                 # --- Manual Lasso Logic for Drill-down ---
-                s_indices_d = []
-                if selection_drill and "selection" in selection_drill:
-                    s_indices_d = [(p["customdata"][0] if isinstance(p.get("customdata"), (list, tuple)) else p.get("customdata"))
-                                   for p in selection_drill["selection"]["points"]]
+                s_indices_d = selected_patent_indices(selection_drill)
             
                 if s_indices_d:
                     st.write(f"サブクラスタ選択中: {len(s_indices_d)} 件")
