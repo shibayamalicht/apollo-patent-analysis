@@ -247,7 +247,6 @@ def render_growth_ranking(df_target, title_suffix, key_suffix, keywords_col='exp
         return None, None
 
     # キーワードカウント
-    from collections import Counter
     c_recent = Counter([w for sublist in df_recent[keywords_col] if isinstance(sublist, list) for w in sublist])
     c_past = Counter([w for sublist in df_past[keywords_col] if isinstance(sublist, list) for w in sublist])
 
@@ -317,7 +316,6 @@ def extract_reps_generic(df_source, stats_growth, stats_net, col_map, domain_lab
         if not target_keywords and 'explorer_keywords_fixed' in df_source.columns:
             # DF自体から上位ワードを取得
             all_kws = [w for sublist in df_source['explorer_keywords_fixed'].dropna() for w in sublist]
-            from collections import Counter
             target_keywords.update([w for w, c in Counter(all_kws).most_common(10)])
 
         target_kws_list = list(target_keywords)

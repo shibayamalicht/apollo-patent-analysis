@@ -695,7 +695,6 @@ def render():
                     })
 
                 # コミュニティ構造化（dict[str,int]から再構築）
-                from collections import defaultdict
                 _trend_groups = defaultdict(list)
                 for node, cid in trend_community_map.items():
                     _trend_groups[cid].append(node)
