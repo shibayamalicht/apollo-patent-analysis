@@ -26,14 +26,14 @@ bash capcom_schema/scripts/phase_d_gate.sh
 - [ ] **STOP-GATE A**（query_logic 構造化読解）: 4ステップ読解＋`AskUserQuestion` 確認を実施した（→ `query_logic_reading.md` §1）
 - [ ] **STOP-GATE B**（意図↔論理の整合）: 乖離を Critical/Warning/Info に分類し改善提案付きでユーザー選択を得た。「範囲と限界に明記」選択時は該当章に記載済み（→ 同 §4）
 - [ ] **STOP-GATE C**（データ逆読み＋タイプ判定）: Level 2 項目・偏り警告・タイプ A/A'/B/C/D 判定をユーザー確認し `reports/_phase_a_decisions.json` に保存した（→ 同 §5、`population_type_metrics.md` §4-2）
-- [ ] **STOP-GATE D**（NEBULA 戦略）: execute / web_compensation / omit をユーザー選択で確定した（gate Check 13 がモード別検証）
+- [ ] **STOP-GATE D**（環境分析 戦略）: execute / web_compensation / omit をユーザー選択で確定した（gate Check 13 がモード別検証）
 - [ ] **サブクエスチョン化**: `sub_questions` を保存し、本文は問い/答え形式でなく宣言調（gate Check 12。→ `terminology.md` §5-A）
 - [ ] **追加的事項章**（条件付き必須）: 乖離・偏り・想定外観察があれば「分析過程で確認された追加的事項」章を設置。無ければ `user_notes` に「追加的事項なし」と記録（→ `report_structure.md`）
 - [ ] **タイプ別運用**: タイプ C は出願人 HHI を算出しない等、`population_type_metrics.md` §2 の指標制約を執筆時に適用した（gate Check 11）
 
 ### 2.1 構造・完成度
 
-- [ ] deep_dive 4ファイル以上（Saturn V/Explorer/MEGA/ATLAS）が存在し、`phase_c_gate.sh` 合格（不足なら Phase C に戻る）
+- [ ] deep_dive 4ファイル以上（俯瞰図分析/キーワード分析/動態分析/基本統計）が存在し、`phase_c_gate.sh` 合格（不足なら Phase C に戻る）
 - [ ] **情報ロス**: report.typ 各章 ≥ 対応 deep_dive の行数の90%（全文コピー原則 → `report_structure.md` §2）
 - [ ] `_carryover.md` は参照専用で本文に転記していない（Web出所台帳は全行 footnote 化済み）
 - [ ] **走査層**: 各番号セクション冒頭に `#point-lead`（散文の代替にしない）。章末 `#chapter-summary` は本文完成後に最後へ1個（位置は gate Check 25/26。→ `deep_dive_guide.md`「読みやすさ（走査層）」）
@@ -61,7 +61,7 @@ bash capcom_schema/scripts/phase_d_gate.sh
 ### 2.5 環境分析・AIインサイト
 
 - [ ] `prompts/` の AI インサイト（主要モジュール各1件以上・全体8件以上）が Evidence 分析に反映されている
-- [ ] `nebula_strategy` のモード別要件を満たす（execute=NEBULA 章＋各章から仮説参照／web_compensation=外部環境分析章＋4カテゴリ＋footnote／omit=範囲と限界に注記。gate Check 13）
+- [ ] `nebula_strategy` のモード別要件を満たす（execute=環境分析 章＋各章から仮説参照／web_compensation=外部環境分析章＋4カテゴリ＋footnote／omit=範囲と限界に注記。gate Check 13）
 - [ ] ノイズ分析4セクション・クラスタ動態4象限・多様性3指標（HHI/Entropy/Gini）・学術-特許クロス（execute 時）を含む（→ `deep_dive_guide.md` 新規分析要件）
 
 ### 2.6 スコープ・立場（正本: `terminology.md` §6）
@@ -75,6 +75,7 @@ bash capcom_schema/scripts/phase_d_gate.sh
 - [ ] 主要結論1〜3個に「結論の前提と見直しのサイン」— 前提が本当に結論の要か**目視**（gate Check 31/31b）
 - [ ] 仮説検証サマリー冒頭に比較検証表1枚＋直後に採用結論の明示（環1）。提言が採用結論を名指し（環2・3。gate Check 33/34）
 - [ ] 読者向け用語（別解釈/決め手/見直しのサイン）。技法名の露出なし（gate Check 8f。→ `terminology.md` §2-F）
+- [ ] 旧モジュールコードネーム（Saturn V/ATLAS/MEGA 等）の本文露出なし。機能名（俯瞰図分析・動態分析 等）で書く（gate Check 8g。→ `terminology.md` §2-B / §2-C）
 
 ### 2.8 結論・付録・別冊
 

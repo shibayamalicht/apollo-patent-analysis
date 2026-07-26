@@ -186,6 +186,22 @@ else
   echo "✅ Check 8f OK:  技法用語の本文露出なし"
 fi
 
+# Check 8g: モジュールコードネームの本文露出（WARN・terminology.md §2-C）
+#   ブランド名 APOLLO は表紙・付録で名乗るため検出対象から外す。
+#   Saturn V / ATLAS / MEGA 等は画面上のモジュール名であり、レポート本文では
+#   機能名（俯瞰図分析・基本統計・動態分析 等）に読み替える。WARN で導入（旧レポート互換）。
+codename_leak=$(count_matches "Saturn V|\bATLAS\b|\bMEGA\b|\bCREW\b|\bNEBULA\b|\bEAGLE\b|\bExplorer\b|\bTELESCOPE\b|\bPROBE\b|\bPULSE\b|\bCAPCOM\b" "$REPORT")
+if [ -f reports/report_executive.typ ]; then
+  codename_leak=$((codename_leak + $(count_matches "Saturn V|\bATLAS\b|\bMEGA\b|\bCREW\b|\bNEBULA\b|\bEAGLE\b|\bExplorer\b|\bTELESCOPE\b|\bPROBE\b|\bPULSE\b|\bCAPCOM\b" "reports/report_executive.typ")))
+fi
+if [ "$codename_leak" -gt 0 ]; then
+  echo "⚠️  Check 8g WARN: モジュールコードネーム（Saturn V/ATLAS/MEGA/CREW/NEBULA/Explorer/EAGLE/TELESCOPE/PROBE/PULSE/CAPCOM）が本文に ${codename_leak}行"
+  grep -nE "Saturn V|\bATLAS\b|\bMEGA\b|\bCREW\b|\bNEBULA\b|\bEAGLE\b|\bExplorer\b|\bTELESCOPE\b|\bPROBE\b|\bPULSE\b|\bCAPCOM\b" "$REPORT" 2>/dev/null | head -5 | sed 's/^/   該当: /'
+  echo "   → terminology.md §2-B / §2-C の機能名（俯瞰図分析・基本統計・動態分析・キーワード分析・出願人・発明者ネットワーク・環境分析・ルール分類・探索的クラスタリング）へ置換する"
+else
+  echo "✅ Check 8g OK:  旧コードネームの本文露出なし"
+fi
+
 # Check 9: J-PlatPat 等の具体DB名がユーザー未指定にも関わらず補われていないか
 # population_meta.database_name が未指定なら、執筆者は具体名を勝手に補えない
 jplat_leak=$(count_matches "J-PlatPat|JPlatPat" "$REPORT")

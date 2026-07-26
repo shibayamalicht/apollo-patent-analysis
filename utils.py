@@ -25,6 +25,8 @@ try:
 except Exception:
     pass
 import plotly.express as px
+import plotly.graph_objects as go
+from scipy.spatial import ConvexHull
 
 # ==================================================================
 # --- 端末ログのノイズ抑止（Streamlit の Arrow 変換 INFO ログ） ---
@@ -50,13 +52,13 @@ _logging.getLogger("streamlit.dataframe_util").setLevel(_logging.WARNING)
 SBERT_MODELS = {
     "fast": {
         "name": "paraphrase-multilingual-MiniLM-L12-v2",
-        "label": "⚡ 高速（MiniLM・384次元・軽量／前バージョン）",
+        "label": "高速（MiniLM・384次元・軽量／前バージョン）",
         "prefix": None,
         "dim": 384,
     },
     "quality": {
         "name": "intfloat/multilingual-e5-base",
-        "label": "🎯 高精度（multilingual-e5-base・768次元・低速／初回DLあり）",
+        "label": "高精度（multilingual-e5-base・768次元・低速／初回DLあり）",
         "prefix": "passage: ",
         "dim": 768,
     },
@@ -335,7 +337,7 @@ def render_dbcv_help(key=None):
     expander の入れ子禁止に抵触しないよう、collapsible には popover を使う。
     """
     try:
-        with st.popover("❓ 品質DBCVの見方（クラスタ品質指標とは）"):
+        with st.popover("品質DBCVの見方（クラスタ品質指標とは）"):
             st.markdown(DBCV_HELP_MD)
     except Exception:
         # popover 非対応環境などのフォールバック
@@ -360,6 +362,7 @@ APOLLO_STATUS_PASTEL = {
     'pending':   "#F2D7A6",  # 出願中
     'examining': "#EAC58D",  # 審査中
     'rejected':  "#EFB7B5",  # 拒絶
+    'appeal':    "#CFC0E4",  # 審判・異議係属中
     'withdrawn': "#D6DCE8",  # 取下げ
     'expired':   "#C8CED8",  # 失効/消滅/放棄
 }
@@ -370,14 +373,193 @@ APOLLO_STATUS_FALLBACK_PASTEL = [
 ]
 
 # ==================================================================
-# --- 0c. モジュール アイコン (NASA等の実写ベース 円形アイコン) ---
+# --- 0c. 俯瞰図（ランドスケープ）共通スタイル ---
+# ==================================================================
+# 俯瞰図ファミリー（俯瞰図分析のメイン/ドリルダウン・環境分析の学術ランドスケープ）の
+# 見た目をここで一元定義する。点・勢力圏・ラベルは必ず同じ色を使う（離散固定色）。
+#
+# 12色の並び順は、色覚多様性シミュレーション（Machado 2009）+ OKLab 色差の
+# maximin 探索で決定（隣接する連番同士の見分けやすさを最大化・赤と緑は非隣接）。
+# 13〜24番目のクラスタは同じ色相の暗色版（OKLab で明度を下げた2周目）、以降は循環。
+LANDSCAPE_COLORS = [
+    "#4E79A7", "#59A14F", "#B07AA1", "#F28E2B", "#499894", "#B6992D",
+    "#5B8DB8", "#E15759", "#76B7B2", "#9C755F", "#EDC948", "#D37295",
+]
+LANDSCAPE_COLORS_2ND = [
+    "#2D537B", "#37782E", "#855678", "#C16900", "#26706D", "#8C7200",
+    "#3A668C", "#AE3339", "#538E89", "#72513E", "#C0A025", "#A44F6E",
+]
+LANDSCAPE_NOISE_STYLE = dict(color="#E2E3E8", size=3, opacity=0.55)  # ノイズ点（背景に沈める）
+LANDSCAPE_POINT_SIZE = 6
+LANDSCAPE_POINT_OPACITY = 0.88
+LANDSCAPE_LABEL_TOP_N = 5  # ラベルを強調（拡大）する件数上位クラスタの数
+
+
+def landscape_color(seq_idx):
+    """クラスタの連番（0始まり・ノイズ除く）→ 固定色。12超は暗色2周目、24超は循環。"""
+    block = (int(seq_idx) // 12) % 2
+    palette = LANDSCAPE_COLORS if block == 0 else LANDSCAPE_COLORS_2ND
+    return palette[int(seq_idx) % 12]
+
+
+def landscape_color_map(cluster_ids):
+    """クラスタID列 → {cid: HEX色}。ノイズ(-1)は除外し、ID昇順に連番で割り当てる。"""
+    ids = sorted({int(c) for c in cluster_ids} - {-1})
+    return {cid: landscape_color(i) for i, cid in enumerate(ids)}
+
+
+def hex_to_rgba(hex_color, alpha):
+    """'#RRGGBB' → 'rgba(r,g,b,a)'。既に rgba/rgb 形式ならそのまま返す。"""
+    if not str(hex_color).startswith("#"):
+        return hex_color
+    h = hex_color.lstrip("#")
+    return f"rgba({int(h[0:2], 16)},{int(h[2:4], 16)},{int(h[4:6], 16)},{alpha})"
+
+
+def smooth_hull(points, expand=1.13, iterations=3):
+    """点群(N,2)の凸包を、重心から expand 倍に膨らませて角を丸めた閉曲線にする。
+
+    クラスタ領域を「ギザギザの多角形」ではなく有機的な「勢力圏」として描くための
+    形状。膨張と平滑化のぶん実際の境界より広い「目安」である点に注意。
+
+    Returns:
+        (M, 2) ndarray（閉曲線・末尾に先頭点を複製済み）| None（3点未満・失敗時）
+    """
+    try:
+        arr = np.asarray(points, dtype=float)
+        arr = arr[~np.isnan(arr).any(axis=1)]
+        if len(arr) < 3:
+            return None
+        poly = arr[ConvexHull(arr).vertices]
+    except Exception:
+        return None
+    center = poly.mean(axis=0)
+    poly = center + (poly - center) * expand
+    for _ in range(int(iterations)):  # Chaikin corner cutting（角の丸め）
+        n = len(poly)
+        nxt = []
+        for i in range(n):
+            a, b = poly[i], poly[(i + 1) % n]
+            nxt.append(0.75 * a + 0.25 * b)
+            nxt.append(0.25 * a + 0.75 * b)
+        poly = np.asarray(nxt)
+    return np.vstack([poly, poly[:1]])
+
+
+def add_landscape_region(fig, points, color):
+    """平滑化した勢力圏（塗り7%・輪郭線35%/1px）を1クラスタ分追加する。"""
+    poly = smooth_hull(points)
+    if poly is None:
+        return
+    fig.add_trace(go.Scatter(
+        x=poly[:, 0], y=poly[:, 1], mode="lines", fill="toself",
+        fillcolor=hex_to_rgba(color, 0.07),
+        line=dict(color=hex_to_rgba(color, 0.35), width=1),
+        hoverinfo="skip", showlegend=False,
+    ))
+
+
+def add_landscape_label(fig, x, y, text, color, emphasized=False, x_range=None, y_range=None):
+    """ピル型クラスタラベル（●色ドット+文字・白地・薄枠）を追加する。
+
+    emphasized=True（件数上位クラスタ）は文字を一段大きくし、地図の
+    都市名のような大小の階層を作る。ドラッグ移動（editable）は従来どおり可能。
+    x_range / y_range（(min, max)）を渡すと、端に近いクラスタのラベルの
+    アンカーを内側に倒し、プロット外への見切れを抑える。
+    """
+    xanchor, yanchor = "center", "middle"
+    try:
+        if x_range and x_range[1] > x_range[0]:
+            _tx = (float(x) - x_range[0]) / (x_range[1] - x_range[0])
+            if _tx < 0.10:
+                xanchor = "left"
+            elif _tx > 0.90:
+                xanchor = "right"
+        if y_range and y_range[1] > y_range[0]:
+            _ty = (float(y) - y_range[0]) / (y_range[1] - y_range[0])
+            if _ty < 0.08:
+                yanchor = "bottom"
+            elif _ty > 0.92:
+                yanchor = "top"
+    except Exception:
+        pass
+    fig.add_annotation(
+        x=x, y=y,
+        text=f"<span style='color:{color}'>●</span> {text}",
+        showarrow=False, xanchor=xanchor, yanchor=yanchor,
+        font=dict(size=14 if emphasized else 11.5, color="#1F2430"),
+        bgcolor="rgba(255,255,255,0.92)",
+        bordercolor="rgba(31,36,48,0.12)", borderwidth=1, borderpad=5,
+    )
+
+
+def landscape_top_clusters(size_by_cid, top_n=None):
+    """件数上位 top_n クラスタのID集合（ラベル強調用）。"""
+    n = LANDSCAPE_LABEL_TOP_N if top_n is None else int(top_n)
+    return set(sorted(size_by_cid, key=size_by_cid.get, reverse=True)[:n])
+
+
+def landscape_density_bins(x_values, y_values, mesh_n, pad_bins=2):
+    """全クラスタ共通の密度メッシュ (xbins, ybins) を返す。
+
+    メッシュ範囲をデータの min/max ちょうどにすると、端にあるクラスタの
+    等高線がメッシュ境界でスパッと切れて見える。pad_bins ビン分だけ外側に
+    余白を持たせ、すそ野が自然に減衰して描かれるようにする。
+
+    Returns:
+        (xbins dict, ybins dict) — go.Histogram2dContour の xbins/ybins に渡す形式
+    """
+    x0, x1 = float(np.nanmin(x_values)), float(np.nanmax(x_values))
+    y0, y1 = float(np.nanmin(y_values)), float(np.nanmax(y_values))
+    n = max(int(mesh_n), 1)
+    sx = max((x1 - x0) / n, 1e-6)
+    sy = max((y1 - y0) / n, 1e-6)
+    p = max(int(pad_bins), 0)
+    xbins = dict(start=x0 - p * sx, end=x1 + p * sx, size=sx)
+    ybins = dict(start=y0 - p * sy, end=y1 + p * sy, size=sy)
+    return xbins, ybins
+
+
+def landscape_bin_edges(bins):
+    """landscape_density_bins が返す bins dict → np.histogram2d 用のビン境界配列。
+
+    絶対スケール（共通 zmax）の最大ビン件数を、描画と同じメッシュで数えるために使う。
+    """
+    return np.arange(bins['start'], bins['end'] + bins['size'] * 0.5, bins['size'])
+
+
+def add_landscape_density(fig, x_values, y_values, color, zmax=None, xbins=None, ybins=None):
+    """クラスタ1つ分のソフト密度（等高線風5段・地形図スタイル）を追加する。
+
+    zmax を指定すると絶対スケール（全クラスタ/全表示で共通の濃さ基準）になり、
+    未指定なら各クラスタ独立の自動スケールになる。
+    xbins/ybins（dict(start, end, size)）を指定すると全クラスタ共通のメッシュで
+    集計する（未指定は各クラスタのデータ範囲による自動ビン）。
+    """
+    params = dict(
+        x=x_values, y=y_values, ncontours=5,
+        colorscale=[[0, "rgba(255,255,255,0)"], [1, hex_to_rgba(color, 0.38)]],
+        showscale=False, line=dict(width=0), hoverinfo="skip",
+        contours=dict(coloring="fill"), showlegend=False,
+    )
+    if zmax:
+        params.update(dict(zauto=False, zmin=0, zmax=zmax))
+    if xbins:
+        params["xbins"] = xbins
+    if ybins:
+        params["ybins"] = ybins
+    fig.add_trace(go.Histogram2dContour(**params))
+
+
+# ==================================================================
+# --- 0d. モジュール アイコン (NASA等の実写ベース 円形アイコン) ---
 # ==================================================================
 # 各モジュールの絵文字を assets/icons/<key>_icon.png に写実化したもの。
 # 画像が見つからない場合は絵文字へフォールバックする。
 _MODULE_EMOJI = {
-    "home": "🛰️", "earth": "🌍", "core": "💡", "saturnv": "🚀",
-    "mega": "📈", "explorer": "🧭", "crew": "🔗", "eagle": "🦅",
-    "record": "📝", "nebula": "🌌", "capcom": "📡",
+    "home": "", "earth": "", "core": "", "saturnv": "",
+    "mega": "", "explorer": "", "crew": "", "eagle": "",
+    "record": "", "nebula": "", "capcom": "",
 }
 
 
@@ -391,7 +573,7 @@ def module_icon(key):
     """st.set_page_config(page_icon=...) 用。実写アイコンのパスを返し、
     無ければ絵文字へフォールバックする。"""
     p = _icon_path(key)
-    return p if os.path.exists(p) else _MODULE_EMOJI.get(key, "🛰️")
+    return p if os.path.exists(p) else _MODULE_EMOJI.get(key, "")
 
 
 def module_header(key, title, subtitle=None):
@@ -429,6 +611,7 @@ APOLLO_STATUS_VIVID = {
     'pending':   "#F39C12",  # 出願中 — オレンジ
     'examining': "#E67E22",  # 審査中 — 濃いオレンジ
     'rejected':  "#E74C3C",  # 拒絶 — 赤
+    'appeal':    "#8E44AD",  # 審判・異議係属中 — 濃い紫
     'withdrawn': "#9B59B6",  # 取下げ — 紫
     'expired':   "#7F8C8D",  # 失効/消滅/放棄 — グレー
 }
@@ -449,6 +632,10 @@ def classify_status(s):
     if any(k in s_lower for k in ['granted', 'registered', 'active', 'allowed', 'allowance',
                                   '登録', '有効', '権利存続', '存続', '権利継続', '特許査定']):
         return 'granted'
+    # 審判・異議系（J-PlatPatの「査定不服」「異議申立中・無効審判中」等）。
+    # 「拒絶査定不服審判」を rejected に誤分類しないよう rejected より先に判定する。
+    if any(k in s_lower for k in ['appeal', 'opposition', 'invalidation', '審判', '査定不服', '異議']):
+        return 'appeal'
     if any(k in s_lower for k in ['rejected', 'refused', 'denied', '拒絶', '却下']):
         return 'rejected'
     if any(k in s_lower for k in ['withdrawn', 'withdraw', '取下', '取り下げ']):
@@ -479,6 +666,12 @@ def status_color_for(value, fallback_idx=0, vivid=False):
     return APOLLO_STATUS_FALLBACK_PASTEL[fallback_idx % len(APOLLO_STATUS_FALLBACK_PASTEL)]
 
 
+# ステータス列が NaN の行を集計・表示に含めるための共通ラベル。
+# J-PlatPat は 1997 年（平成9年）より前の案件にステージ情報を付与しない等、欠損は正常に起こる。
+# groupby は NaN をそのまま落とすため、内訳系の集計では本ラベルで埋めてから集計する。
+STATUS_UNKNOWN_LABEL = "(ステータス不明)"
+
+
 def build_status_color_map(statuses):
     """ステータス値のリスト（ソート済み推奨）→ {status: パステル色} の配色マップ。
 
@@ -488,6 +681,11 @@ def build_status_color_map(statuses):
     color_map = {}
     fallback_idx = 0
     for s in statuses:
+        # ステータス不明ラベルは中立グレー固定（フォールバック1色目が「登録」と同色のため、
+        # 循環色に任せると不明が登録済みに見えてしまう）
+        if s == STATUS_UNKNOWN_LABEL:
+            color_map[s] = "#C4C4C4"
+            continue
         category = classify_status(s)
         if category and category in APOLLO_STATUS_PASTEL:
             color_map[s] = APOLLO_STATUS_PASTEL[category]
@@ -504,6 +702,9 @@ def compute_grant_rate_stats(df, group_col, status_col, denom="all", min_count=1
     - expired_as_granted=True（既定）: 失効（満了・放棄・消滅）も「一度は登録された＝権利化成功」として
       登録側に算入する。失効はマイナス要素にしない（＝過去に権利化に成功した事実を評価）。
     - expired_as_granted=False: 現在有効（権利継続・登録・有効・存続）のみを権利化成功とみなす（現存権利率）。
+    - 審判・異議系（appeal）のうち登録後の争い（異議申立・無効審判）は「現在も登録が生きている」ため
+      権利化成功・処分確定の両方に常に算入する。登録前の争い（拒絶査定不服審判等）は審査中と同じ
+      未確定扱い（denom="all" のときのみ分母に入る）。区別は生のステータス文字列で行う。
 
     権利化率の定義は denom で切り替える（分子=権利化成功 success）:
     - denom="all":     権利化率 = success / 全件（係属・審査・公開も分母。母集団全体の権利化度）
@@ -512,7 +713,7 @@ def compute_grant_rate_stats(df, group_col, status_col, denom="all", min_count=1
     group_col の各セルがリスト（applicant_main / ipc_normalized 等）の場合は自動で explode する。
     min_count 未満のグループは除外。戻り値は total 降順の DataFrame。
     列: group, total, granted, granted_eff(権利化成功数), rejected, examining, pending, published,
-        withdrawn, expired, other, decided, grant_rate(%)。
+        withdrawn, expired, appeal(審判・異議係属中), other, decided, grant_rate(%)。
     """
     if (df is None or df.empty or not group_col or group_col not in df.columns
             or not status_col or status_col not in df.columns):
@@ -528,7 +729,11 @@ def compute_grant_rate_stats(df, group_col, status_col, denom="all", min_count=1
         return pd.DataFrame()
 
     work["_cat"] = work[status_col].map(classify_status)
-    cats = ["granted", "rejected", "examining", "pending", "published", "withdrawn", "expired"]
+    cats = ["granted", "rejected", "examining", "pending", "published", "withdrawn", "expired", "appeal"]
+    # 登録後の審判・異議（異議申立・無効審判）は「現在も登録されている」ため権利化成功に数える。
+    # 登録前の審判（拒絶査定不服等）は未確定のまま。両者は生のステータス文字列で区別する
+    work["_appeal_post"] = (work["_cat"] == "appeal") & work[status_col].astype(str).str.contains(
+        "異議|無効|opposition|invalidation", case=False, na=False)
 
     rows = []
     for g, sub in work.groupby(group_col):
@@ -536,11 +741,14 @@ def compute_grant_rate_stats(df, group_col, status_col, denom="all", min_count=1
         if total < min_count:
             continue
         counts = {c: int((sub["_cat"] == c).sum()) for c in cats}
+        appeal_post = int(sub["_appeal_post"].sum())
         other = total - sum(counts.values())
-        # 処分確定 = 登録 + 失効 + 拒絶 + 取下（失効は「登録後に失効」なので確定済み）
-        decided = counts["granted"] + counts["expired"] + counts["rejected"] + counts["withdrawn"]
-        # 権利化成功（分子）。失効を「一度登録された＝成功」に含めるかを切替
-        success = counts["granted"] + (counts["expired"] if expired_as_granted else 0)
+        # 処分確定 = 登録 + 失効 + 拒絶 + 取下 + 登録後審判（登録済みの権利への争いなので確定側）
+        decided = (counts["granted"] + counts["expired"] + counts["rejected"]
+                   + counts["withdrawn"] + appeal_post)
+        # 権利化成功（分子）。失効を「一度登録された＝成功」に含めるかを切替。
+        # 登録後審判は現在も登録が生きているため expired_as_granted の設定によらず成功側
+        success = counts["granted"] + appeal_post + (counts["expired"] if expired_as_granted else 0)
         if denom == "decided":
             rate = (success / decided * 100.0) if decided > 0 else None
         else:
@@ -550,6 +758,7 @@ def compute_grant_rate_stats(df, group_col, status_col, denom="all", min_count=1
             "rejected": counts["rejected"], "examining": counts["examining"],
             "pending": counts["pending"], "published": counts["published"],
             "withdrawn": counts["withdrawn"], "expired": counts["expired"],
+            "appeal": counts["appeal"],
             "other": int(other), "decided": int(decided),
             "grant_rate": round(rate, 1) if rate is not None else None,
         })
@@ -558,6 +767,202 @@ def compute_grant_rate_stats(df, group_col, status_col, denom="all", min_count=1
     if res.empty:
         return res
     return res.sort_values("total", ascending=False).reset_index(drop=True)
+
+
+# ==================================================================
+# --- 0e. J-PlatPat CSV 取込サポート ---
+# ==================================================================
+# J-PlatPat（特許情報プラットフォーム）の検索結果CSVを、カラム紐付けの手作業
+# なしでそのまま読み込むための検出・正規化・結合ヘルパー。
+# いずれも Streamlit 非依存の純関数（ヘッドレスで単体テスト可能）。
+
+# J-PlatPat CSV を見分ける特徴カラム（4つすべて揃えば J-PlatPat 形式とみなす）
+JPLAT_SIGNATURE_COLUMNS = {"文献番号", "出願人/権利者", "FI", "ステージ"}
+
+# J-PlatPat カラム → 分析フィールドの対応（「要約」列は要約なしDLだと存在しない。
+# IPC列は無くFIのみのため、分類コードは fi スロットに割り当てる）
+JPLAT_COL_MAP = {
+    'title': '発明の名称', 'abstract': '要約', 'claim': None,
+    'app_num': '出願番号', 'date': '出願日', 'applicant': '出願人/権利者',
+    'ipc': None, 'fi': 'FI', 'pub_number': '公開番号', 'status': 'ステージ',
+    'inventor': None, 'fterm': None, 'doc_url': '文献URL',
+}
+# J-PlatPat 用の区切り文字（FI は prepare_jplat_df で ';' 区切りに正規化して合わせる）
+JPLAT_DELIMITERS = {'applicant': ',', 'inventor': ';', 'ipc': ';', 'fterm': ';'}
+
+_FI_HEAD_RE = re.compile(r'^[A-H]\d')  # FI記号の先頭（セクション記号+類番号）
+
+
+def clean_header_columns(columns):
+    """カラム名から BOM・前後空白を除去したリストを返す（UTF-8 BOM 付きCSV対策）。"""
+    return [str(c).replace('\ufeff', '').strip() for c in columns]
+
+
+def is_jplatpat_columns(columns):
+    """カラム名の並びが J-PlatPat CSV のシグネチャを満たすか。"""
+    return JPLAT_SIGNATURE_COLUMNS.issubset(set(clean_header_columns(columns)))
+
+
+def strip_gaiji_marks(value):
+    """J-PlatPat の外字代替表記の記号 ▲▼ を除去する（中の文字は残す）。
+
+    例: '深▲セン▼市華宝新能源' → '深セン市華宝新能源'
+    """
+    if not isinstance(value, str):
+        return value
+    return value.replace('▲', '').replace('▼', '')
+
+
+def normalize_jplat_fi_cell(value):
+    """J-PlatPat の FI セルを ';' 区切りに正規化する。
+
+    FI は記号の内部にもカンマを含む（例: 'H02J3/00,170' で1つのFI）ため、
+    単純なカンマ分割では展開記号が独立した断片になってしまう。
+    先頭が英字+数字のトークンを新しいFIの開始とみなし、それ以外
+    （展開記号など）は直前のFIに連結し直す。
+
+    例: 'H02J3/00,170,H02J3/32' → 'H02J3/00,170;H02J3/32'
+    """
+    if not isinstance(value, str) or not value.strip():
+        return ''
+    codes = []
+    for token in value.split(','):
+        token = token.strip()
+        if not token:
+            continue
+        if _FI_HEAD_RE.match(token) or not codes:
+            codes.append(token)
+        else:
+            codes[-1] = codes[-1] + ',' + token
+    return ';'.join(codes)
+
+
+def clean_jplat_abstract(value):
+    """J-PlatPat の要約セルから定型部分を除去する。
+
+    - 先頭の「(57)【要約】」ヘッダ
+    - 「【選択図】…」（選択図の図番号の指示。テキスト分析には不要）
+    【課題】【解決手段】は内容の区切りとして意味を持つため残す。
+    """
+    if not isinstance(value, str):
+        return value
+    v = re.sub(r'^\s*[（(]\s*57\s*[）)]\s*【\s*要約\s*】\s*', '', value)
+    v = re.sub(r'【\s*選択図\s*】.*', '', v, flags=re.S)
+    return v.strip()
+
+
+def prepare_jplat_df(df):
+    """J-PlatPat CSV の DataFrame を分析用に正規化した複製を返す。
+
+    - カラム名の BOM・前後空白を除去
+    - 全文字列セルから外字記号 ▲▼ を除去
+    - FI 列を ';' 区切りに正規化（JPLAT_DELIMITERS['ipc'] と対応）
+    - 要約列の定型部分（「(57)【要約】」ヘッダ・「【選択図】…」）を除去
+    """
+    df = df.copy()
+    df.columns = clean_header_columns(df.columns)
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].map(strip_gaiji_marks)
+    if 'FI' in df.columns:
+        df['FI'] = df['FI'].map(normalize_jplat_fi_cell)
+    if '要約' in df.columns:
+        df['要約'] = df['要約'].map(clean_jplat_abstract)
+    return df
+
+
+def merge_patent_files(dfs, names, dedupe_col='文献番号'):
+    """同じ形式の特許リスト（分割ダウンロード）を1つの DataFrame に結合する。
+
+    カラム構成が一致するファイル同士のみ結合を許す（要約あり・なしの混在は
+    列数が違うためここで検出されエラーになる）。重複は dedupe_col（既定は
+    J-PlatPat の文献番号）があればその値で、なければ全列一致で除去する。
+
+    Args:
+        dfs: DataFrame のリスト
+        names: 各 DataFrame の表示名（ファイル名）のリスト
+    Returns:
+        (結合後DataFrame | None, info dict)
+        info = {'n_files', 'per_file': [(name, 行数)], 'n_rows_total',
+                'n_dup_removed', 'n_rows_final', 'error': None | メッセージ}
+    """
+    info = {'n_files': len(dfs), 'per_file': [(n, len(d)) for n, d in zip(names, dfs)],
+            'n_rows_total': 0, 'n_dup_removed': 0, 'n_rows_final': 0, 'error': None}
+    if not dfs:
+        info['error'] = "ファイルがありません。"
+        return None, info
+    base_cols = clean_header_columns(dfs[0].columns)
+    for name, d in zip(names[1:], dfs[1:]):
+        cols = clean_header_columns(d.columns)
+        if cols != base_cols:
+            only_base = [c for c in base_cols if c not in cols]
+            only_this = [c for c in cols if c not in base_cols]
+            detail = []
+            if only_base:
+                detail.append(f"「{names[0]}」だけにある列: {'・'.join(only_base[:5])}")
+            if only_this:
+                detail.append(f"「{name}」だけにある列: {'・'.join(only_this[:5])}")
+            info['error'] = (
+                f"「{names[0]}」と「{name}」のカラム構成が一致しません（同じ条件でダウンロードした"
+                f"ファイル同士を選んでください。要約あり・なしの混在は結合できません）。"
+                + ("　" + " / ".join(detail) if detail else ""))
+            return None, info
+    merged = pd.concat(dfs, ignore_index=True)
+    merged.columns = clean_header_columns(merged.columns)
+    info['n_rows_total'] = len(merged)
+    if dedupe_col and dedupe_col in merged.columns:
+        merged = merged.drop_duplicates(subset=[dedupe_col], keep='first').reset_index(drop=True)
+    else:
+        merged = merged.drop_duplicates(keep='first').reset_index(drop=True)
+    info['n_dup_removed'] = info['n_rows_total'] - len(merged)
+    info['n_rows_final'] = len(merged)
+    return merged, info
+
+
+def classification_code_column(col_map=None):
+    """分析に使う分類コードの実カラム名を返す（IPC/FI 選択を反映）。
+
+    col_map['ipc']=IPC列・col_map['fi']=FI列の2スロット制。両方割り当て時は
+    「分析に使う分類コード」の選択（session_state['code_pref']）に従い、
+    片方だけならその列を返す。どちらも無ければ None。
+    """
+    cm = col_map if col_map is not None else st.session_state.get('col_map', {})
+    ipc_col, fi_col = cm.get('ipc'), cm.get('fi')
+    if ipc_col and fi_col:
+        return fi_col if st.session_state.get('code_pref') == 'FI' else ipc_col
+    return fi_col or ipc_col
+
+
+def classification_code_label(col_map=None):
+    """画面表示用の分類コードの呼び名（'IPC' または 'FI'）を返す。
+
+    分析に使っている実効列（classification_code_column）が FI 側なら 'FI'。
+    旧セッション（'fi' スロットなしで ipc スロットに FI 列を割り当てたもの）は
+    列名が 'FI' かどうかで判定する。表示ラベル専用で、内部キー名 'ipc' は変えない。
+    """
+    cm = col_map if col_map is not None else st.session_state.get('col_map', {})
+    col = classification_code_column(cm)
+    if not col:
+        return 'IPC'
+    if cm.get('fi') and col == cm.get('fi'):
+        return 'FI'
+    return 'FI' if str(col).strip().upper() == 'FI' else 'IPC'
+
+
+def combine_text_columns(df, col_map, keys=('title', 'abstract', 'claim')):
+    """col_map の割り当て済みテキスト列だけを空白区切りで結合した Series を返す。
+
+    要約・請求項がないデータ（J-PlatPat 等）では割り当てのある列のみ使う。
+    1列も割り当てがない場合は空文字の Series を返す。
+    """
+    parts = [df[col_map[k]].fillna('').astype(str)
+             for k in keys if col_map.get(k) and col_map[k] in df.columns]
+    if not parts:
+        return pd.Series([''] * len(df), index=df.index)
+    combined = parts[0]
+    for s in parts[1:]:
+        combined = combined + ' ' + s
+    return combined
 
 
 # ==================================================================
@@ -647,121 +1052,7 @@ def get_npl_stopwords():
     return patiroha.get_stopwords("npl")
 
 # ==================================================================
-# --- 3. サイドバー設定 (共通) ---
-# ==================================================================
-def render_sidebar():
-    """共通サイドバーを描画する"""
-
-    
-    # 共通CSSの適用（背景・サイドバー bg を含む）
-    st.markdown("""
-    <style>
-        html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #ffffff; color: #333333; }
-        [data-testid="stSidebar"] { background-color: #f8f9fa; }
-        [data-testid="stHeader"] { background-color: #ffffff; }
-        
-        /* H1 Title Spacing */
-        [data-testid="stSidebar"] h1 { 
-            color: #003366; 
-            font-weight: 900 !important; 
-            font-size: 2.5rem !important; 
-            margin-top: 0 !important; 
-            padding-top: 0 !important; 
-            margin-bottom: 0 !important;
-        }
-        h1 { color: #003366; font-weight: 700; }
-        h2, h3 { color: #333333; font-weight: 500; border-bottom: 2px solid #f0f0f0; padding-bottom: 5px; }
-        
-        /* Hide default nav */
-        [data-testid="stSidebarNav"] { display: none !important; }
-        
-        /* Remove Top Whitespace (Robust Selectors) */
-        section[data-testid="stSidebar"] > div:first-child { padding-top: 0rem; }
-        [data-testid="stSidebarUserContent"] { padding-top: 0rem; }
-        [data-testid="stSidebar"] .block-container { padding-top: 0rem; padding-bottom: 1rem; }
-        
-        .block-container { padding-top: 2rem; padding-bottom: 2rem; }
-        .stButton>button { font-weight: 600; }
-        .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-        .stTabs [data-baseweb="tab"] { background-color: #f0f2f6; border-radius: 8px 8px 0 0; padding: 10px 15px; }
-        .stTabs [aria-selected="true"] { background-color: #ffffff; border-bottom: 2px solid #003366; }
-        [data-testid="stSidebar"] h3 { border-bottom: none !important; padding-bottom: 10px !important; }
-    </style>
-    """, unsafe_allow_html=True)
-
-    with st.sidebar:
-        st.title("APOLLO")
-        st.markdown("""
-Advanced Patent & Overall Landscape-analytics
-Logic Orbiter
-
-**v9.1.0**
-""")
-        st.markdown("---")
-        st.subheader("Home"); st.page_link("Home.py", label="Mission Control", icon="🛰️")
-        st.subheader("Modules")
-        st.page_link("pages/1_🌍_ATLAS.py", label="ATLAS", icon="🌍")
-        st.page_link("pages/2_💡_CORE.py", label="CORE", icon="💡")
-        st.page_link("pages/3_🚀_Saturn_V.py", label="Saturn V", icon="🚀")
-        st.page_link("pages/7_🦅_EAGLE.py", label="EAGLE", icon="🦅")
-        st.page_link("pages/4_📈_MEGA.py", label="MEGA", icon="📈")
-        st.page_link("pages/5_🧭_Explorer.py", label="Explorer", icon="🧭")
-        st.page_link("pages/6_🔗_CREW.py", label="CREW", icon="🔗")
-        st.page_link("pages/9_🌌_NEBULA.py", label="NEBULA", icon="🌌")
-        st.page_link("pages/8_📝_VOYAGER.py", label="VOYAGER", icon="📝")
-        st.page_link("pages/10_📡_CAPCOM.py", label="CAPCOM", icon="📡")
-        st.markdown("---")
-
-        # --- CAPCOM ステータスインジケーター ---
-        try:
-            import capcom
-            if capcom.is_active():
-                _sid = st.session_state.get('capcom_session_id', '')
-                # session_stateベースのテレメトリ（ファイルI/Oなし）
-                _tel = capcom.get_telemetry()
-                _sc, _pc, _dc = _tel['snapshots'], _tel['prompts'], _tel['data']
-                st.markdown(f"""
-                <div style="background: linear-gradient(135deg, #f0f4f8 0%, #e8eef5 100%);
-                            border-radius: 10px; padding: 12px 14px; margin-bottom: 10px;
-                            border: 1px solid #003366;">
-                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-                        <span style="display: inline-block; width: 8px; height: 8px;
-                                     background: #00C853; border-radius: 50%;
-                                     box-shadow: 0 0 4px #00C853; animation: capcom-pulse 2s ease-in-out infinite;"></span>
-                        <span style="color: #003366; font-size: 14px; font-weight: 700;
-                                     letter-spacing: 2px;">CAPCOM ONLINE</span>
-                    </div>
-                    <div style="color: #263238; font-size: 13px; font-family: 'SF Mono', 'Consolas', monospace;">
-                        {_sid}<br/>
-                        📸 {_sc} &nbsp; 📄 {_pc} &nbsp; 📊 {_dc}
-                    </div>
-                </div>
-                <style>@keyframes capcom-pulse {{
-                    0%, 100% {{ opacity: 1; }}
-                    50% {{ opacity: 0.4; }}
-                }}</style>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown("""
-                <div style="background: #f5f5f5; border-radius: 10px; padding: 10px 14px;
-                            margin-bottom: 10px; border: 1px solid #ddd;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="display: inline-block; width: 8px; height: 8px;
-                                     background: #bbb; border-radius: 50%;"></span>
-                        <span style="color: #777; font-size: 14px; font-weight: 700;
-                                     letter-spacing: 2px;">CAPCOM STANDBY</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-        except Exception:
-            pass
-
-        st.caption("ナビゲーション:\n1. Mission Control でデータをアップロードし、前処理を実行します。\n2. 上のリストから分析モジュールを選択します。")
-        st.markdown("---")
-        st.caption("© 2025-2026 しばやま")
-
-# ==================================================================
-# --- 5. Snapshot (VOYAGER連携) ---
+# --- 3. 統計指標 (patiroha委譲) ---
 # ==================================================================
 def calculate_hhi(counts):
     """ヘルフィンダール・ハーシュマン指数 (HHI) を計算し、公取委基準で判定する (patiroha委譲)"""
@@ -842,14 +1133,15 @@ def generate_rich_summary(df_target, title_col='title', abstract_col='abstract',
                 # Column mapping for enhanced info
                 col_map = st.session_state.get('col_map', {})
                 app_col = col_map.get('applicant', 'applicant')
-                ipc_col = col_map.get('ipc', None)
+                ipc_col = classification_code_column(col_map)
                 # 番号は best_patent_ref(row, col_map) で公開番号→出願番号の順に取得
 
                 for idx in top_global_indices:
                     try:
                         row = st.session_state.df_main.loc[idx]
                         t_val = str(row.get(title_col, ''))
-                        a_val = str(row.get(abstract_col, ''))
+                        # 要約列がないデータ（abstract_col=None）は要約なしで代表特許を出す
+                        a_val = str(row.get(abstract_col, '')) if abstract_col else ''
 
                         # Enhanced Info
                         y_val = str(row.get('year', 'N/A'))
@@ -908,7 +1200,7 @@ def get_cluster_representatives(df_subset, cluster_col='cluster', n_reps=3):
     title_col = col_map.get('title', 'title')
     abs_col = col_map.get('abstract', 'abstract')
     app_col = col_map.get('applicant', 'applicant')
-    ipc_col = col_map.get('ipc', None)
+    ipc_col = classification_code_column(col_map)
     # 番号は best_patent_ref(row, col_map) で公開番号→出願番号の順に取得
 
     for cid in unique_clusters:
@@ -994,7 +1286,7 @@ def get_keyword_centric_representatives(df_target, top_keywords, n_reps=10):
         t_col = col_map.get('title', 'title')
         a_col = col_map.get('abstract', 'abstract')
         app_col = col_map.get('applicant', 'applicant')
-        ipc_col = col_map.get('ipc', None)
+        ipc_col = classification_code_column(col_map)
         # 番号は best_patent_ref(row, col_map) で公開番号→出願番号の順に取得
         y_col = 'year'
 
@@ -1086,7 +1378,7 @@ def render_snapshot_button(title, description, key, fig=None, data_summary=None,
     _map_count = sum(1 for s in st.session_state['snapshots']
                      if str(s.get('id', '')).startswith(group_prefix))
 
-    btn_label = "📸 Snapshot Saved" if is_saved else "📸 Save Snapshot"
+    btn_label = "保存済み" if is_saved else "レポート用に保存"
     btn_type = "secondary" if is_saved else "primary"
 
     # ボタン直下にこのマップの保存枚数を表示する（st.columns を使わない＝列ネスト制限を避ける）
@@ -1099,10 +1391,10 @@ def render_snapshot_button(title, description, key, fig=None, data_summary=None,
     _add_clicked = False
     if is_saved:
         _add_clicked = st.button(
-            "➕ 現在の表示を別カットとして追加", key=f"snap_add_{key}", type="secondary",
+            "現在の表示を別カットとして追加", key=f"snap_add_{key}", type="secondary",
             help="表示オプション（上位N・配色・軸など）を変えた別バージョンを、もう1枚スナップショットとして追加します。")
     if _map_count > 0:
-        st.caption(f"📸 このマップで {_map_count} 枚 保存済み")
+        st.caption(f"このマップで {_map_count} 枚 保存済み")
 
     if _snap_clicked or _add_clicked:
         if _add_clicked:
@@ -1240,7 +1532,7 @@ def render_snapshot_button(title, description, key, fig=None, data_summary=None,
 
         st.rerun()
 
-    #     状態はボタンラベル「📸 Snapshot Saved」＋横の枚数表示で示す。
+    #     状態はボタンラベル「Snapshot Saved」＋横の枚数表示で示す。
     #     別ビュー（別クラスタ等）を撮りたい場合は、呼び出し側がビュー別の key を渡すことで
     #     「Save Snapshot」が再度有効になる（ドリルダウンはクラスタ別 key）。
 
@@ -1265,11 +1557,11 @@ def render_snapshot_button(title, description, key, fig=None, data_summary=None,
         except Exception:
             _fig_title = ''
         if _multi and _fig_title:
-            _lbl = f"🎨 「{_fig_title}」をスライド/レポート用PNGに書き出す"
+            _lbl = f"「{_fig_title}」をスライド/レポート用PNGに書き出す"
         elif _multi:
-            _lbl = f"🎨 図{_i + 1}/{len(_plotly_figs)} をスライド/レポート用PNGに書き出す"
+            _lbl = f"図{_i + 1}/{len(_plotly_figs)} をスライド/レポート用PNGに書き出す"
         else:
-            _lbl = "🎨 このグラフをスライド/レポート用PNGに書き出す"
+            _lbl = "このグラフをスライド/レポート用PNGに書き出す"
         try:
             render_report_png_button(
                 _pf, key=f"{key}_rep{_i}",
@@ -1491,39 +1783,45 @@ def render_ai_label_assistant(df_source, cluster_col, label_map_key, col_map, tf
     取り込み結果は session_state に保存され、下段の data_editor の「AI 提案」列に
     そのまま表示されます。
     """
-    with st.expander("🤖 AIによるラベルサジェスト (オプション)"):
-        st.markdown(
-            "LLM (ChatGPT等) にプロンプトを投げ、**TSV（タブ区切り）で応答を受け取り**、"
-            "そのまま貼り付けて取り込みます。JSON / Markdown 表 / 平文 も自動判別します。"
+    with st.expander("ラベルをAIにきれいにしてもらう（チャットAI用キット・任意）"):
+        st.caption(
+            "自動ラベルは特徴語の羅列なので、普段お使いのチャットAI（ChatGPT / Claude / Gemini 等）に"
+            "読みやすい名前を付けてもらえます。手順は3つだけ。APIキーは不要です。"
         )
 
+        st.markdown("**1 命名依頼プロンプトを作ってコピー**")
         col_s1, col_s2 = st.columns([1, 2])
         with col_s1:
-            n_samples_ai = st.number_input("1クラスタあたりのサンプル数", min_value=1, value=5, key=f"ai_n_samples_{label_map_key}")
+            n_samples_ai = st.number_input(
+                "1クラスタあたりの例示件数", min_value=1, value=5,
+                key=f"ai_n_samples_{label_map_key}",
+                help="プロンプトに含める代表特許の件数です。通常は変更不要。")
 
-        if st.button("📝 プロンプトを生成", key=f"ai_gen_btn_{label_map_key}"):
+        if st.button("プロンプトを作る", key=f"ai_gen_btn_{label_map_key}"):
             target_cols = [col_map.get('title'), col_map.get('abstract')]
             prompt = generate_ai_cluster_prompt(df_source, cluster_col, target_cols, tfidf_matrix, feature_names, n_samples=n_samples_ai, domain=domain)
             st.session_state[f"ai_prompt_{label_map_key}"] = prompt
 
         if f"ai_prompt_{label_map_key}" in st.session_state:
             st.code(st.session_state[f"ai_prompt_{label_map_key}"], language="markdown")
-            st.info("👆 右上のコピーボタンでコピーし、LLMに入力してください。")
+            st.caption("枠の右上のコピーボタンで丸ごとコピーできます。")
 
-        st.markdown("---")
-        st.markdown("**結果の取り込み（TSV / JSON / Markdown 表 / 平文 に自動対応）**")
+        st.markdown("**2 チャットAIに貼り付けて送信**")
+        st.caption("AIが各クラスタの名前を提案してくれます（形式はタブ区切り・JSON・表・平文のどれでもOK）。")
+
+        st.markdown("**3 AIの回答をここに貼り戻して適用**")
         st.caption(
-            "💡 **部分応答もそのまま貼付可能**（例: クラスタ 5, 12, 47 だけ再提案させた結果を貼付 → 既存ラベルに追記マージ）。"
-            "クラスタ ID が重複した場合は新しいラベルで上書きされます。"
+            "一部のクラスタだけ貼っても大丈夫（既存のラベルに追記されます）。"
+            "同じクラスタ番号は新しい名前で上書きされます。"
         )
         tsv_input = st.text_area(
-            "LLM の出力を貼付:",
+            "AIの回答を貼り付け:",
             height=150,
             key=f"ai_json_input_{label_map_key}",
             placeholder="例:\n0\t全固体電池の固体電解質\n1\t画像認識による異常検知\n...",
         )
 
-        if st.button("✅ サジェストを適用（追記マージ）", key=f"ai_apply_btn_{label_map_key}"):
+        if st.button("貼り付けた名前を適用する", key=f"ai_apply_btn_{label_map_key}", type="primary"):
             try:
                 parsed = parse_label_response(tsv_input)
                 if not parsed:
@@ -1581,7 +1879,7 @@ def render_ai_label_assistant(df_source, cluster_col, label_map_key, col_map, tf
                     st.session_state.sbert_sub_cluster_map_auto = current_map
 
                 st.success(
-                    f"✅ 取り込み完了: 新規 **{count_added}** 件 / 上書き **{count_updated}** 件 "
+                    f"取り込み完了: 新規 **{count_added}** 件 / 上書き **{count_updated}** 件 "
                     f"(合計 {count_added + count_updated} 件、未対応 {len(parsed) - count_added - count_updated} 件)"
                 )
                 st.rerun()
@@ -1605,6 +1903,10 @@ def create_label_editor_ui(original_map, current_map, key_prefix, max_individual
     Returns:
         dict: {cluster_id: new_label} 編集後のラベル辞書
     """
+    st.caption(
+        "ラベルは下の欄で**そのまま書き換えられます**（書き換えると図に反映されます）。"
+        "AIにまとめて名付けてほしいときは、上の「ラベルをAIにきれいにしてもらう」をどうぞ。"
+    )
     widgets_dict = {}
     sorted_ids = sorted([cid for cid in original_map.keys() if cid != -1])
     # "(該当なし)" を除いた有効クラスタ数
@@ -1628,12 +1930,12 @@ def create_label_editor_ui(original_map, current_map, key_prefix, max_individual
                 break
 
         st.caption(
-            f"ℹ️ クラスタ数が {len(valid_ids)} 個と多いため、テーブル形式で編集します"
+            f"クラスタ数が {len(valid_ids)} 個と多いため、テーブル形式で編集します"
             f"（text_input を大量生成すると Streamlit のメッセージ制限を超えるため）。"
             f"『編集後ラベル』列のセルをクリックして編集してください。"
         )
         st.caption(
-            "💡 **操作のコツ**: セルをダブルクリック or クリック後 **Enter** で編集 → **Tab** で次セルへ。"
+            "**操作のコツ**: セルをダブルクリック or クリック後 **Enter** で編集 → **Tab** で次セルへ。"
             " Excel からの **コピー&ペースト** も可能（複数セル同時貼付対応）。"
         )
 
@@ -1667,29 +1969,29 @@ def create_label_editor_ui(original_map, current_map, key_prefix, max_individual
         # 同一ページ上の重いランドスケープ/クラスタ動態マップを再送しない。これにより 91 クラスタ等で
         # 起きていた "Bad message format / Tried to use SessionInfo before it was initialized" を防ぐ。
         # 一括操作ボタン（明示操作）は st.rerun() で全再描画する。
-        st.caption("💡 ラベル編集中はマップを再描画しません（軽量化）。編集後、スライダー操作やページ更新でマップに反映されます。")
+        st.caption("ラベル編集中はマップを再描画しません（軽量化）。編集後、スライダー操作やページ更新でマップに反映されます。")
 
         @st.fragment
         def _label_table_fragment():
             # 一括操作ボタン
             btn_col1, btn_col2, btn_col3 = st.columns([2, 2, 3])
             with btn_col1:
-                if st.button("📥 AI 提案 → 編集後ラベルへ一括コピー", key=f"{key_prefix}_bulk_copy_ai", use_container_width=True):
+                if st.button("AI 提案 → 編集後ラベルへ一括コピー", key=f"{key_prefix}_bulk_copy_ai", use_container_width=True):
                     _df = st.session_state[table_key].copy()
                     mask = _df['AI 提案'].astype(str).str.strip().astype(bool)
                     _df.loc[mask, '編集後ラベル'] = _df.loc[mask, 'AI 提案']
                     st.session_state[table_key] = _df
-                    st.toast(f"✅ {mask.sum()} 件の AI 提案を編集後ラベルへコピーしました", icon="📥")
+                    st.toast(f"{mask.sum()} 件の AI 提案を編集後ラベルへコピーしました", icon=":material/download:")
                     st.rerun()
             with btn_col2:
-                if st.button("↩️ 編集後ラベルを元ラベルへリセット", key=f"{key_prefix}_bulk_reset", use_container_width=True):
+                if st.button("↩ 編集後ラベルを元ラベルへリセット", key=f"{key_prefix}_bulk_reset", use_container_width=True):
                     _df = st.session_state[table_key].copy()
                     _df['編集後ラベル'] = _df['元ラベル']
                     st.session_state[table_key] = _df
-                    st.toast("↩️ 元ラベルに戻しました", icon="↩️")
+                    st.toast("↩ 元ラベルに戻しました", icon="↩")
                     st.rerun()
             with btn_col3:
-                st.caption("🔍 テーブル右上の虫眼鏡アイコンで絞り込み検索、列ヘッダークリックでソート可")
+                st.caption("テーブル右上の虫眼鏡アイコンで絞り込み検索、列ヘッダークリックでソート可")
 
             edited = st.data_editor(
                 st.session_state[table_key],
@@ -1761,9 +2063,6 @@ def render_cluster_dynamics_map(
     Returns:
         tuple: (plotly Figure, dynamics_data dict for CAPCOM export)
     """
-    import plotly.graph_objects as go
-    import patiroha
-
     # Filter out noise (cluster == -1)
     df_valid = df[df[cluster_col] != -1].copy() if -1 in df[cluster_col].values else df.copy()
 
@@ -2421,7 +2720,7 @@ def save_curated_to_capcom(fig, snap_id, cache_token="", width=1600, height=900)
 
 def render_report_png_button(fig, key, default_title="", default_subtitle="",
                              default_caption="", source=None, width=1600, height=900,
-                             label="🎨 スライド/レポート用に書き出す（高解像度PNG）"):
+                             label="スライド/レポート用に書き出す（高解像度PNG）"):
     """マップを「スライド用クリーン高解像度PNG」として書き出す UI（ダウンロード専用）。
 
     方針: APOLLO 本体では要点・見出し・出典を画像に焼き込まない（クリーン版のみ）。
@@ -2464,7 +2763,7 @@ def render_report_png_button(fig, key, default_title="", default_subtitle="",
         if st.session_state.get(gen_key):
             st.image(st.session_state[gen_key], caption="プレビュー（クリーン版）", use_container_width=True)
             st.download_button(
-                "📥 PNG をダウンロード", st.session_state[gen_key],
+                "PNG をダウンロード", st.session_state[gen_key],
                 file_name=f"APOLLO_{key}.png", mime="image/png", key=f"rep_dl_{key}")
 
 
@@ -2498,8 +2797,6 @@ def _hex_to_rgba(color, alpha=0.2):
 def _convex_hull_xy(pts):
     """点群(N,2)の凸包を閉じたポリゴン(xs, ys)で返す。3点未満や失敗時は None。"""
     try:
-        import numpy as np
-        from scipy.spatial import ConvexHull
         arr = np.asarray(pts, dtype=float)
         arr = arr[~np.isnan(arr).any(axis=1)]
         if len(arr) < 3:
@@ -2948,14 +3245,19 @@ def _render_patent_card(row, col_map):
     title = _extract_field_value(row, col_map.get('title'), max_len=120) if col_map.get('title') else ""
     date = _extract_field_value(row, col_map.get('date'), max_len=40) if col_map.get('date') else "-"
     app = _extract_field_value(row, col_map.get('applicant'), max_len=80) if col_map.get('applicant') else "-"
-    ipc = _extract_field_value(row, col_map.get('ipc'), max_len=60) if col_map.get('ipc') else ""
+    _code_col = classification_code_column(col_map)
+    ipc = _extract_field_value(row, _code_col, max_len=60) if _code_col else ""
     status = _extract_field_value(row, col_map.get('status'), max_len=40) if col_map.get('status') else ""
     abst = _extract_field_value(row, col_map.get('abstract'), max_len=300) if col_map.get('abstract') else "-"
+    # 原文リンク（文献URL列の割り当てがある場合。URLは切り詰めずそのまま使う）
+    url = str(row.get(col_map.get('doc_url'), '') or '').strip() if col_map.get('doc_url') else ""
     header = f"**{no}**" + (f"　｜　{title}" if title and title not in ('N/A', '') else "")
+    if url.startswith('http'):
+        header += f"　[ 原文を開く]({url})"
     st.markdown(header)
-    meta = f"📅 {date}　・　🏢 {app}"
+    meta = f"{date}　・　 {app}"
     if ipc and ipc != "N/A":
-        meta += f"　・　IPC: {ipc}"
+        meta += f"　・　{classification_code_label(col_map)}: {ipc}"
     if status and status != "N/A":
         meta += f"　・　{status}"
     st.caption(meta)
@@ -2977,7 +3279,7 @@ def show_patent_detail_dialog(indices, title="特許詳細", per_page=3, df=None
     col_map = st.session_state.get('col_map', {})
     renderer = card_renderer or _render_patent_card
 
-    @st.dialog("📄 " + str(title), width="large")
+    @st.dialog("" + str(title), width="large")
     def _dlg():
         # ページネーションは @st.fragment で局所再実行（ページ送りでページ全体を再実行しないので高速）
         @st.fragment
@@ -3052,9 +3354,9 @@ def render_paper_card(row, col_map=None):
     st.markdown(f"**{title}**")
     meta = []
     if src and src != 'nan':
-        meta.append(f"📚 {src}")
+        meta.append(f"{src}")
     if yr and yr != 'nan':
-        meta.append(f"📅 {yr}")
+        meta.append(f"{yr}")
     if lbl and lbl != 'nan':
         meta.append(f"クラスタ: {lbl}")
     if meta:

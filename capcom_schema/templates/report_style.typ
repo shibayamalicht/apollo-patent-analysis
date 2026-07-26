@@ -1,5 +1,5 @@
 // ==================================================================
-// report_style.typ — APOLLO v9.0.0 レポート共通スタイル
+// report_style.typ — APOLLO v10.0.0 レポート共通スタイル
 // コンサルレポート風デザイン（McKinsey/BCG調）
 // ==================================================================
 
@@ -168,8 +168,11 @@
           #v(0.15cm)
           #block(width: 100%, breakable: false)[
             #align(center)[
+              // APOLLO の正式名称。長いため意味の切れ目（カンマ）で3行に分ける
               #text(size: 8pt, fill: rgb("#7788AA"), tracking: 0.3pt)[
-                Advanced Patent & Overall Landscape-analytics Logic Orbiter
+                Mapping Engine for Research, \
+                Clustering and Analytics of Technology, \
+                from Overview to Report
               ]
             ]
           ]

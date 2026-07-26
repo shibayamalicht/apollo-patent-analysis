@@ -353,7 +353,8 @@ def save_patents_csv():
     col_map = st.session_state.get('col_map', {})
 
     # 基本カラム (col_map の value=実カラム名を使用)
-    base_keys = ['title', 'abstract', 'app_num', 'pub_number']
+    # doc_url は原文リンク（J-PlatPat の文献URL 等）。割り当てがあるデータのみ列が付く
+    base_keys = ['title', 'abstract', 'app_num', 'pub_number', 'doc_url']
     derived_cols = ['applicant_main', 'inventor_main', 'year', 'ipc_main_group']
     cluster_cols = ['cluster', 'cluster_label', 'umap_x', 'umap_y']
 
@@ -584,6 +585,18 @@ def export_session_zip(selected_tools=None, report_mode="autonomous", selected_t
             json.dumps(export_metadata, ensure_ascii=False, indent=2, default=str)
         )
 
+        # 5b. flight_recorder.json（分析条件の記録）
+        #     層1=母集団の来歴は本文で使用可、層2=判断パラメータは条件文へ変換、
+        #     層3=再現パラメータは付録専用。取り扱いルールは JSON 内の layer_policy に同梱する。
+        try:
+            import flight_recorder as _fr
+            zf.writestr(
+                f'{sid}/flight_recorder.json',
+                json.dumps(_fr.to_json(), ensure_ascii=False, indent=2, default=str)
+            )
+        except Exception:
+            pass  # 記録の付与に失敗しても ZIP 出力は継続
+
         # 6. リポジトリの不変アセット（Claude Code 用の基本資材）
         _add_repo_assets_to_zip(zf, sid, project_root)
 
@@ -652,7 +665,7 @@ def _mirror_skill_path(rel):
     ツール固有のスキル/ワークフロー配置を、現行ツールのスキル自動探索パス
     `.agents/`(複数形) にも複製するためのミラー相対パスを返す。該当しなければ None。
 
-    背景（2026-06 Web調査）: Codex CLI / Antigravity IDE の現行スキル自動探索対象は
+    背景: Codex CLI / Antigravity IDE の現行スキル自動探索対象は
     プロジェクト直下の `.agents/skills`(複数形) であり、従来 APOLLO が同梱してきた
     `.codex/skills` / `.agent/skills`(単数) は自動探索対象に含まれない公算が高い。
     リポジトリ構造は従来のまま維持しつつ、ZIP には正規パスにも複製しておくことで、

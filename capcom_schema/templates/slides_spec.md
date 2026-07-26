@@ -47,16 +47,16 @@ python-pptx + Pillow で産業調査レポート品質のスライドを生成�
 | **`reports/report.typ`（最優先・必読）** | **デッキの論証・要点・物語アーク・結論の一次ソース。各章の主張→根拠→示唆の連鎖をスライドへ凝縮する（§0.9）。`reports/report_executive.typ` があれば要約版の骨子としても活用** |
 | `voyager/mission.json` | Mission Objective を表紙・サマリーに反映 |
 | `data/patents.csv` | 出願人上位・クラスタ別件数・年別件数の把握 |
-| `data/atlas_statistics.json` | ATLAS スライド（出願トレンド・多様性指標 HHI/Entropy/Gini） |
-| `data/saturnv_clusters.json` | Saturn V スライド（クラスタ・ノイズ分析・クラスタ動態マップ） |
-| `data/mega_momentum_<軸>.json`（applicant/ipc/fterm） | MEGA スライド（PULSE 4象限・軸別。各軸を個別に） |
-| `data/explorer_*.json` | Explorer スライド（共起ネットワーク・急上昇キーワード） |
-| `data/nebula_hype_cycle.json` | NEBULA スライド（ハイプサイクル） |
-| `data/nebula_academic_clusters.json` | NEBULA スライド（学術ランドスケープ・学術クラスタ動態） |
+| `data/atlas_statistics.json` | 基本統計スライド（出願トレンド・多様性指標 HHI/Entropy/Gini） |
+| `data/saturnv_clusters.json` | 俯瞰図分析スライド（クラスタ・ノイズ分析・クラスタ動態マップ） |
+| `data/mega_momentum_<軸>.json`（applicant/ipc/fterm） | 動態分析スライド（4象限・軸別。各軸を個別に） |
+| `data/explorer_*.json` | キーワード分析スライド（共起ネットワーク・急上昇キーワード） |
+| `data/nebula_hype_cycle.json` | 環境分析スライド（ハイプサイクル） |
+| `data/nebula_academic_clusters.json` | 環境分析スライド（学術ランドスケープ・学術クラスタ動態） |
 | `snapshots/*.png` | チャート + 注釈スライドに優先掲載 |
 | `prompts/` 配下の AI インサイト | 注釈・リード文生成の根拠（最低3件読了推奨） |
 
-データが欠落しているモジュールはスキップしてよい。最低限必須: タイトル + KPI + ATLAS(1枚) + Saturn V(2枚) + MEGA(1枚) + 仮説検証 + クロージング ≒ 12枚（Section 5参照）。
+データが欠落しているモジュールはスキップしてよい。最低限必須: タイトル + KPI + 基本統計(1枚) + 俯瞰図分析(2枚) + 動態分析(1枚) + 仮説検証 + クロージング ≒ 12枚（Section 5参照）。
 
 ### 0.4 実装手順
 1. **本仕様書（slides_spec.md）を Section 1〜6 まで通読する** — 設計原則・デザイントークン・コアユーティリティ・スライドタイプ・推奨シーケンスを把握
@@ -159,7 +159,7 @@ add_sub_message(slide, "...", y=0.90)
 
 優れたコンサル/エディトリアル・デッキは、5語の断片を箇条で並べず、**1スライド＝1つの主張を完結した文で論証**する。各コンテンツ面は必ず次の**5層の骨格**で構成する（v6 でも骨格は不変。変わったのはリード文の体裁のみ）:
 
-1. **アイブロウ**（モジュール/章名・小さく）— 例「NEBULA / 環境分析」「ATLAS / 基本統計」。`add_title_shape(slide, title, eyebrow="NEBULA / 環境分析")` の `eyebrow` 引数で添える（ゴシック・10pt・字間広め・ミュート色。明朝/等幅は使わない）。
+1. **アイブロウ**（モジュール/章名・小さく）— 例「環境分析」「基本統計」。`add_title_shape(slide, title, eyebrow="環境分析")` の `eyebrow` 引数で添える（ゴシック・10pt・字間広め・ミュート色。明朝/等幅は使わない）。
 2. **主張見出し**（そのスライドで言いたい結論を**言い切る文**で・**原則4に従う。見出し規定は原則4が唯一の正**）— 例「俯瞰図: 知財は『本体・製造・制御』の三本柱に集約」「出願の厚みは2015年以降に形成 — 直近の減少は見かけ」。ラベル（"出願トレンド"）や短い名詞句（"競争構造の評価"）は不可。
 3. **リード文**（核心の主張を1つの完全な文で・40〜90字）— タイトル直下の **ACCENT 短下線に続くプレーン文**として置き（`add_sub_message`。■・背景箱は使わない）、**数値を織り込んだ完結文**にする。体言止め・単語列は不可。
    - 例「出願の単調増加と高いノイズ率（34.2%）は、本母集団が黎明期を脱し、用途多様化を伴う成長加速期にあることを示す。」
@@ -198,7 +198,7 @@ add_sub_message(slide, "...", y=0.90)
 - とくに **クロスモジュール統合・仮説検証・結論/提言は、複数モジュールを束ねた「束ねスライド」** にする（1モジュール1枚の機械的割付では、レポートの最も価値ある統合的洞察が落ちる）。
 
 #### D. 出所（出典）の書き方 — 自社モジュールを"出所"にしない
-- ❌ `（出所）NEBULA ハイプサイクル分析` のように **分析モジュール名を出所として掲げない**（情報の出どころは分析機能ではなくデータ）。モジュール/ブランド機能名（Saturn V TELESCOPE・MEGA PULSE 等）は **本文・リード文側**で「〜分析によれば」と使う（terminology.md §2-B/2-C で本文使用可）。
+- ❌ `（出所）NEBULA ハイプサイクル分析` のように **分析モジュール名を出所として掲げない**（情報の出どころは分析機能ではなくデータ）。モジュールの機能名（俯瞰図分析・動態分析 等）は **本文・リード文側**で「〜分析によれば」と使う（旧コードネーム Saturn V・MEGA PULSE 等は本文にも書かない。terminology.md §2-B/§2-C）。
 - ✅ 特許データ由来の発見 → **`（出所）本分析の特許データセット（日本語公報 N件・期間）`**（必要なら「を基にAPOLLO作成」を付す）。学術/ニュース由来 → `（出所）学術論文データ` / `ニュースデータ`。
 - ✅ Web調査由来の事実 → **実際の出所**（サイト名・URL・取得日。`reports/report.typ` の脚注／付録C「Web調査出所一覧」から転記）。
 - 同じ出所文言を全スライドに機械的に貼らない。その面の根拠データに対応させる。
@@ -403,7 +403,7 @@ prs.save("reports/apollo_report_YYYYMMDD.pptx")
 - **`add_rich_runs(paragraph, text, base_size=Pt(14), base_color=SUB, bold_color=None, force_bold=False, line_spacing=1.4, weight=None)`** — `**太字**` マーカーを解析しつつデュアルフォント＋禁則＋行間＋ウェイトを適用。注釈・本文の整形に使う。
 - **`set_text(p, text, size, color, bold=False, line_spacing=None, weight=None)`** — 単純テキスト1本を整形（デュアルフォント＋禁則＋ウェイト）。ラベル・見出し・1行テキストに。
 - **`add_title_shape(slide, text, x=0.5, y=0.15, w=12.3, eyebrow=None)`** → リード文開始 y を返す。スライドタイトル（**22pt Bold INK ＋ ACCENT 短下線 0.55in×2.25pt**。全幅下線は廃止）。タイトル長でフォントサイズと高さを自動調整。
-  - 主張骨格メモ（§0.9-A0）: `text` = **主張見出し**（**原則4に従い結論を言い切る文**。ラベル・短い名詞句にしない・数値を含める・「～」は使わず必要なら「—」/句点で2文）。`eyebrow` = **アイブロウ**（章/モジュール名。例 `"NEBULA / 環境分析"`。10pt Medium・字間広め・ミュート色・ゴシック統一）。
+  - 主張骨格メモ（§0.9-A0）: `text` = **主張見出し**（**原則4に従い結論を言い切る文**。ラベル・短い名詞句にしない・数値を含める・「～」は使わず必要なら「—」/句点で2文）。`eyebrow` = **アイブロウ**（章/モジュール名。例 `"環境分析"`。10pt Medium・字間広め・ミュート色・ゴシック統一）。
 - **`add_sub_message(slide, message, x=0.5, y=None, w=12.3)`** → コンテンツ開始 y を返す。**リード文をプレーン文（12.5pt Medium SUB）で描画**する。v5 の KEY_MSG_BG 背景箱・左バー・■は**廃止**。`y` は `add_title_shape` の戻り値を渡す。
   - 主張骨格メモ: `message` = **リード文**（核心主張の完結した一文・数値込み・40〜90字・2行以内）。⚠️ `message` に■を含めない（v6 は■を描画しない。含まれていても除去される）。
 
@@ -563,23 +563,23 @@ prs.save("reports/apollo_report_YYYYMMDD.pptx")
  5. 重心移動（PAST→PRESENT）                          add_shift_slide
     └ 主役交代・重心移動が結論なら add_narrative_slide の代わりに使う
 
-# --- NEBULA 環境分析 ---
- 6. セクション: NEBULA環境分析                       add_section_slide(2, ...)
+# --- 環境分析 ---
+ 6. セクション: 環境分析                       add_section_slide(2, ...)
  7. マクロ環境チャート + 注釈                         add_chart_text_slide
  8. 政策タイムライン                                  add_timeline_slide
 
-# --- ATLAS 基本統計 ---
- 9. セクション: ATLAS基本統計                        add_section_slide(3, ...)
+# --- 基本統計 ---
+ 9. セクション: 基本統計                        add_section_slide(3, ...)
 10. 出願推移チャート + 注釈                           add_chart_text_slide
     └ 公開遅延の注意は add_callout_box で明示
 11. 出願人ランキング（テーブル or デュアルパネル）     add_table_slide / add_dual_panel_slide
 
-# --- CORE 分類分析 ---
-12. セクション: CORE分類分析                         add_section_slide(4, ...)
+# --- ルール分類分析 ---
+12. セクション: ルール分類分析                         add_section_slide(4, ...)
 13. 分類結果チャート + 注釈                           add_chart_text_slide
 
-# --- Saturn V クラスタ分析 ---
-14. セクション: Saturn Vクラスタ分析                  add_section_slide(5, ...)
+# --- 俯瞰図分析 ---
+14. セクション: 俯瞰図分析                  add_section_slide(5, ...)
 15. ランドスケープ全体図                              add_chart_text_slide
     └ 右レールは「図の見方/読み取り/別の見方/示唆」の4部構成（add_annotation_cards）
 16. クラスタ動態マップ                                add_chart_text_slide
@@ -587,17 +587,17 @@ prs.save("reports/apollo_report_YYYYMMDD.pptx")
 18. クラスタ詳細（カード or テーブル）                 add_cards_slide / add_table_slide
 19. ミクロ分析（代表特許テーブル）                     add_table_slide
 
-# --- MEGA 動態分析 ---
-20. セクション: MEGA動態分析                         add_section_slide(6, ...)
-21. MEGA 4象限マトリクス                              add_matrix_slide
+# --- 動態分析 ---
+20. セクション: 動態分析                         add_section_slide(6, ...)
+21. 動態分析4象限マトリクス                              add_matrix_slide
 22. 成長率プログレスバー                              add_progress_bar_slide
 
-# --- Explorer/CREW ネットワーク ---
-23. セクション: Explorer/CREWネットワーク            add_section_slide(7, ...)
+# --- キーワード分析・出願人ネットワーク ---
+23. セクション: キーワード・出願人ネットワーク            add_section_slide(7, ...)
 24. キーワード共起ネットワーク                        add_chart_text_slide
-25. 出願人ネットワーク（CREW）                       add_chart_text_slide
+25. 出願人・発明者ネットワーク                       add_chart_text_slide
 
-# --- NEBULA 学術分析（データがある場合）---
+# --- 学術分析（データがある場合）---
 26. セクション: 学術分析                              add_section_slide(8, ...)
 27. 学術ランドスケープ + 比較                         add_compare_slide
 
@@ -624,9 +624,9 @@ prs.save("reports/apollo_report_YYYYMMDD.pptx")
 ### シーケンス適用ガイドライン
 
 - 上記は最大構成。分析データが不足するセクションはスキップしてよい
-- NEBULA学術分析はOpenALEXデータがある場合のみ
-- CORE分類分析はルール設定済みの場合のみ
-- 最低限必須: タイトル + KPI + ATLAS(1枚) + Saturn V(2枚) + MEGA(1枚) + 仮説検証 + クロージング = 約12枚
+- 学術分析はOpenALEXデータがある場合のみ
+- ルール分類分析はルール設定済みの場合のみ
+- 最低限必須: タイトル + KPI + 基本統計(1枚) + 俯瞰図分析(2枚) + 動態分析(1枚) + 仮説検証 + クロージング = 約12枚
 - 推奨: 25枚前後。データが豊富な場合は30-35枚
 
 ---

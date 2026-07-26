@@ -12,4 +12,3 @@ kaleido
 python-pptx
 Pillow
 requests
-google-generativeai

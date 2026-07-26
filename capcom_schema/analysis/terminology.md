@@ -8,7 +8,7 @@
 
 ## 0. 最重要原則
 
-**レポート受容者（人間の読者）は APOLLO の内部構造を知りません。** 読者にとって `spatial_context`, `cluster_dynamics`, `saturnv_clusters.json`, `data_notes.md`, `quadrant_summary` といった内部識別子は意味不明な英単語に過ぎず、レポートの可読性と信頼性を毀損します。
+**レポート受容者（人間の読者）は APOLLO（分析プラットフォーム）の内部構造を知りません。** 読者にとって `spatial_context`, `cluster_dynamics`, `saturnv_clusters.json`, `data_notes.md`, `quadrant_summary` といった内部識別子は意味不明な英単語に過ぎず、レポートの可読性と信頼性を毀損します。旧 APOLLO 時代のモジュールコードネーム（Saturn V・ATLAS・MEGA 等）も同様に内部識別子であり、本文では §2-B / §2-C の機能名に読み替えます。
 
 **この用語表は、内部識別子が外部向けレポートに漏出することを防ぎ、どのツール（Claude Code / Codex / Antigravity）でレポートを生成しても同じ呼称が使われることを保証するために存在します。**
 
@@ -37,17 +37,17 @@ JSON スキーマ内のフィールド名はレポート本文に **書いては
 
 ### 1-4. 内部プロセス用語の直書き禁止と置換
 
-以下は APOLLO の **内部プロセス名・フェーズ名・執筆者メモ用の言い回し** であり、レポート本文に書いてはいけません。右列の置換・扱いに従うこと（旧 §2-D／§2-E をここに統合）：
+以下は分析プラットフォームの **内部プロセス名・フェーズ名・執筆者メモ用の言い回し** であり、レポート本文に書いてはいけません。右列の置換・扱いに従うこと（旧 §2-D／§2-E をここに統合）：
 
 | 禁止（書いてはいけない） | レポートでの扱い・置換 |
 |---|---|
-| `deep_dive` / `deep-dive` / `deep dive` / `*_deep_dive.typ` / `deep_dive 章`（「Saturn V deep_dive の結果」等） | 「モジュール別分析章」「Saturn V 分析章」「Saturn V TELESCOPE 分析」等、文脈に応じて |
+| `deep_dive` / `deep-dive` / `deep dive` / `*_deep_dive.typ` / `deep_dive 章`（「Saturn V deep_dive の結果」等） | 「モジュール別分析章」「俯瞰図分析の章」「俯瞰図分析」等、文脈に応じて |
 | 「各モジュールの deep_dive」 | 「各モジュールの詳細分析章」「各モジュールの分析結果を横断的に統合」 |
 | `Phase A`〜`Phase D` / `Phase 5a` 等のフェーズ名 | 書かない（プロセス段階は読者に無関係） |
 | `CAPCOM Export` / `CAPCOM セッション` / `ZIP 展開後` | 書かない（執筆プロセス用語） |
 | `Evidence #N` / `evidence-box` の本文化（本文「Evidence #1 によれば」は NG。`#evidence-box(...)` 関数呼び出しは可） | 「本分析の〇〇モジュールで得られた結果によれば」（具体的なモジュール名を使う） |
 | 「`data_notes.md` 参照の通り〜」「`cross_module.md` のパターン P1 によれば〜」「`deep_dive_guide.md` Step 3 で指示された通り〜」「`references/xxx_schema.md` に記載の〜」等のガイド参照 | 参照表現を削除し、注意事項・分析結果・スキーマ情報の中身のみを自然な日本語で書く |
-| **工程ナレーション**: `後続分析` / `後続章` / `後続の分析` / `次章への申し送り` / `今後の分析の方向` | 分析の実施順という内部工程の語りで読者には無関係。「後続分析への接続」のようなメタ節を作る／「Explorer分析では〜を確認する」と他章のToDoを並べるのは禁止。各章は自章の結論で閉じ、章間連携は『クロスモジュール統合分析』章で行う。他章参照は「〜で確認された〈事実〉」の過去形・根拠引用に限る（`phase_d_gate.sh` Check 8e で自動検出 FAIL） |
+| **工程ナレーション**: `後続分析` / `後続章` / `後続の分析` / `次章への申し送り` / `今後の分析の方向` | 分析の実施順という内部工程の語りで読者には無関係。「後続分析への接続」のようなメタ節を作る／「キーワード分析の章では〜を確認する」と他章のToDoを並べるのは禁止。各章は自章の結論で閉じ、章間連携は『クロスモジュール統合分析』章で行う。他章参照は「〜で確認された〈事実〉」の過去形・根拠引用に限る（`phase_d_gate.sh` Check 8e で自動検出 FAIL） |
 
 ---
 
@@ -70,38 +70,47 @@ JSON スキーマ内のフィールド名はレポート本文に **書いては
 
 | 内部ファイル・フィールド | レポート本文での正式呼称 |
 |---|---|
-| `saturnv_clusters.json` 全般 | 「Saturn V TELESCOPE 分析」または「俯瞰図分析」（旧称「AI ランドスケープ分析」は使わない） |
-| `saturnv_drilldown_<クラスタ>.json` | 「Saturn V PROBE 分析」または「サブクラスタ・ドリルダウン分析」 |
+| `saturnv_clusters.json` 全般 | 「俯瞰図分析」（旧称「Saturn V TELESCOPE 分析」「AI ランドスケープ分析」は使わない） |
+| `saturnv_drilldown_<クラスタ>.json` | 「サブクラスタ・ドリルダウン分析」または「俯瞰図のドリルダウン分析」 |
 | `saturnv_clusters.json` の `spatial_context` | 「UMAP 空間上の近接関係」または「空間配置分析」 |
 | `saturnv_clusters.json` の `cluster_dynamics` | 「クラスタ動態マップ」 |
 | `saturnv_clusters.json` の `noise_analysis` | 「ノイズ分析（萌芽技術候補）」 |
-| `mega_momentum_<軸>.json`（applicant/ipc/fterm。旧: `mega_momentum.json`） | 「MEGA PULSE 分析」または「出願人動態／IPC 動態／F タームテーマ動態 4 象限分析」（軸に応じて） |
+| `mega_momentum_<軸>.json`（applicant/ipc/fterm。旧: `mega_momentum.json`） | 「動態分析（4 象限）」。軸に応じて「出願人動態 4 象限分析」／「分類コード動態 4 象限分析」／「F タームテーマ動態 4 象限分析」。**分類コード軸の表記（IPC か FI か）は `voyager/context.json` の `classification_code_label` と JSON 内 `metadata.axis` に従う**（FI のデータで「IPC 動態」と書くのは品質不合格。ファイル名の `_ipc` は内部名なので表記の根拠にしない） |
 | `mega_momentum_*.json` の `quadrant_summary` | 「4 象限サマリ（リーダー／成長／成熟／衰退）」 |
-| `mega_drilldown_<対象>.json` | 「MEGA TELESCOPE ドリルダウン」 |
-| `atlas_statistics.json` | 「ATLAS 基本統計分析」 |
-| `atlas_grant_rate.json` | 「ATLAS 権利化率分析」（出願数×権利化率の象限分析） |
-| `atlas_statistics.json` の `time_series` | 「ATLAS 時系列分析」または「出願件数時系列」 |
+| `mega_drilldown_<対象>.json` | 「動態分析ドリルダウン」 |
+| `atlas_statistics.json` | 「基本統計分析」 |
+| `atlas_grant_rate.json` | 「権利化率分析」（出願数×権利化率の象限分析） |
+| `atlas_statistics.json` の `time_series` | 「出願件数時系列」または「時系列分析」 |
 | `atlas_statistics.json` の `lifecycle` | 「ライフサイクル分析」 |
-| `explorer_global_network.json` | 「Explorer グローバル共起ネットワーク分析」 |
-| `explorer_trend.json` | 「Explorer トレンドネットワーク分析」 |
-| `explorer_dominance.json` | 「Explorer ドミナンスネットワーク分析」 |
-| `eagle_clusters.json` | 「EAGLE 探索的クラスタリング」 |
-| `eagle_cluster_dynamics.json` | 「EAGLE クラスタ動態マップ」 |
-| `nebula_hype_cycle.json` | 「NEBULA ハイプサイクル分析」 |
-| `nebula_macro_events.json` | 「NEBULA マクロイベント分析」または「環境・政策イベント分析」 |
-| `nebula_academic_clusters.json` | 「NEBULA 学術ランドスケープ分析」 |
-| `core_classification.json` | 「CORE 分類分析」 |
-| `crew_network.json` | 「CREW ネットワーク分析（媒介中心性）」 |
+| `explorer_global_network.json` | 「キーワード共起ネットワーク分析」 |
+| `explorer_trend.json` | 「キーワードトレンドネットワーク分析」 |
+| `explorer_dominance.json` | 「キーワードドミナンスネットワーク分析」 |
+| `eagle_clusters.json` | 「探索的クラスタリング分析」（旧版セッションの互換用・通常は登場しない） |
+| `eagle_cluster_dynamics.json` | 「探索的クラスタリングのクラスタ動態マップ」（同上） |
+| `nebula_hype_cycle.json` | 「ハイプサイクル分析」 |
+| `nebula_macro_events.json` | 「マクロイベント分析」または「環境・政策イベント分析」 |
+| `nebula_academic_clusters.json` | 「学術ランドスケープ分析」 |
+| `core_classification.json` | 「ルール分類分析」 |
+| `crew_network.json` | 「出願人・発明者ネットワーク分析（媒介中心性）」。モードに応じて「発明者ネットワーク分析」「企業アライアンス分析」 |
 
-### 2-C. 機能モード名（APOLLO 独自ブランド名、そのまま使用可）
+### 2-C. モジュール名の読み替え（コードネームは本文に書かない）
 
-以下は APOLLO のブランド機能名であり、**初出時に 1 回だけ簡潔な補足** を添えた上で、以降はそのまま使って構いません。
+旧 APOLLO のモジュールコードネーム（**Saturn V / ATLAS / MEGA / CREW / NEBULA / CORE / Explorer / EAGLE / VOYAGER / TELESCOPE / PROBE / PULSE / APOLLO**）は内部識別子であり、レポート本文・別冊・スライドには**書かない**（`phase_d_gate.sh` Check 8g が露出を警告）。ZIP 内部データ（`modules_used`・スナップショットの `module` 値・`data/` のファイル名・`prompts/` のファイル名）にはこれらの旧名がそのまま入っているが、本文では下表の機能名に読み替える:
 
-| ブランド名 | 初出時の補足例 |
+| 内部モジュール名（データに現れる値） | レポート本文での機能名 |
 |---|---|
-| TELESCOPE | 「Saturn V TELESCOPE（全体俯瞰モード）」 |
-| PROBE | 「Saturn V PROBE（サブクラスタ精査モード）」 |
-| PULSE | 「MEGA PULSE（4 象限動態分析）」 |
+| `Mission Control` | 「データ準備」（本文で言及する必要はほぼ無い） |
+| `ATLAS` | 「基本統計」（分析章は「基本統計分析」） |
+| `CORE` | 「ルール分類」（分析章は「ルール分類分析」） |
+| `Saturn V` | 「俯瞰図分析」 |
+| `MEGA` | 「動態分析」 |
+| `Explorer` | 「キーワード分析」（個別の図は §2-B の呼称） |
+| `CREW` | 「出願人・発明者ネットワーク」 |
+| `NEBULA` | 「環境分析」（学術ランドスケープ・ハイプサイクル・マクロイベントの総称） |
+| `EAGLE` | 「探索的クラスタリング」（旧版セッションの互換用） |
+| `VOYAGER` / `CAPCOM` | 執筆プロセス用語 — 本文に書かない（§1-4） |
+
+APOLLO の UI コードネーム（Port / Survey / Flag / Terra / Tide / Sonar / Fleet / Horizon / Logbook）も同様に本文には書かず、機能名のみを使う。プラットフォーム名に言及する必要がある場合（表紙・出所注記等のテンプレートが指定する箇所のみ）は「APOLLO」と書き、本文の分析記述では製品名でなく「本分析」を主語にする。
 
 ### 2-D. 内部プロセス用語の言い換え ／ 2-E. 削除すべき内部参照
 
@@ -131,7 +140,7 @@ JSON スキーマ内のフィールド名はレポート本文に **書いては
 ### 3-1. NG → OK（内部フィールド名・ファイル名の露出）
 
 > ❌ `Saturn Vのspatial_contextによると、クラスタ0とクラスタ3は近接している。`
-> ✅ `Saturn V TELESCOPE 分析の空間配置によると、クラスタ 0「タイヤ用ゴム」とクラスタ 3「薄膜・コーティング」は UMAP 空間上で近接している。`
+> ✅ `俯瞰図分析の空間配置によると、クラスタ 0「タイヤ用ゴム」とクラスタ 3「薄膜・コーティング」は UMAP 空間上で近接している。`
 
 ### 3-2. NG → OK（ガイドファイル参照）
 
@@ -141,7 +150,7 @@ JSON スキーマ内のフィールド名はレポート本文に **書いては
 ### 3-3. NG → OK（内部プロセス用語: deep_dive / Phase 名）
 
 > ❌ `Saturn V deep_dive の分析によれば、クラスタ 0 が最大である。`／`Phase D の統合レポートでは、...`
-> ✅ `Saturn V TELESCOPE 分析によれば、クラスタ 0 が最大である。`（プロセス段階は本文に書かない）
+> ✅ `俯瞰図分析によれば、クラスタ 0 が最大である。`（プロセス段階もコードネームも本文に書かない）
 
 ### 3-4. NG（工程ナレーション）
 
@@ -171,7 +180,7 @@ JSON スキーマ内のフィールド名はレポート本文に **書いては
 |---|---|
 | `query_intent`（母集団論理式の設計意図） | **執筆者が咀嚼した上で「本分析の前提」章に自然な日本語として書き下す**（ベタ貼り禁止）。さらに Phase B 以降の**全 deep_dive・クロスモジュール分析・結論章で「分析の視座」として内在化**させ、各章で最低1箇所は意図に照らした解釈を織り込む |
 | `query_logic`（母集団論理式） | **付録 D（母集団検索式）に `#raw` ブロックで全文掲載**。検索式は DB 検索のコマンド文字列なので、そのまま原文で掲載して構わない（設計意図のような「咀嚼して書き下す」ルールは適用されない）。本文では「付録に示す検索式で抽出された母集団」と言及する。**さらに Phase A で STOP-GATE A（構造化読解）を経由し、DB 別構文を踏まえた論理構造の把握をユーザーと合意する**（詳細: `analysis/query_logic_reading.md`） |
-| `coverage_years`（収録年情報） | **付録 A の「対象期間」欄** に反映する。また時系列分析（ATLAS・ハイプサイクル等）の解釈で「本母集団は {coverage_years} の範囲で収録されており...」と明示する |
+| `coverage_years`（収録年情報） | **付録 A の「対象期間」欄** に反映する。また時系列分析（基本統計・ハイプサイクル等）の解釈で「本母集団は {coverage_years} の範囲で収録されており...」と明示する |
 | `database_name`（使用した特許データベース名） | **付録 A の「特許データベース」欄** に記載する。また `data_notes.md` のカバレッジ制約注記では、かつての「J-PlatPat 等」に代えて「{database_name} から抽出された特許データ」と表記する。**Phase A では `query_logic_reading.md` §2 の DB 別構文リファレンスを参照して検索式を読解する際の DB 識別に使う** |
 
 ### 5-A. `query_intent` の取り扱い — 絶対遵守の 3 原則
@@ -340,7 +349,7 @@ APOLLO の分析対象は常に **ユーザーが検索式で絞り込んだ特�
 | 「競合として、メモリシステム領域には参入の隙がある」 | 「キオクシアが手薄なAI向けストレージ制御は、NAND微細化に強みを持つサムスンにとって既存資産を活かせる参入好機である」 |
 
 - 自社の強み/弱み/空白は **Web 調査で裏付け**、脚注（サイト名・URL・取得日）を付す（→ `data_notes.md` §3「自社（分析を行う側）の調査」）。自社は本母集団に十分現れないことが多く、Web が主な情報源になる。
-- **集中度（HHI）を交渉力シグナルとして読む — 母集団が業界/技術ドメイン（タイプ A/A'/B）の時だけ**: ATLAS 出願人 HHI・上位集中度は、`buyer` 視点で「供給側の集中＝自社（買い手）の依存リスク・交渉力の弱さ」、`supplier` 視点で「需要側の集中＝自社（供給側）の交渉力の弱さ」のシグナルとして読める（Porter の買い手/売り手交渉力に対応）。⚠️ **対象が単一企業（タイプ C）の buyer/supplier 分析では出願人 HHI は無意味**（HHI≈1 で市場構造を表さない）＝算出せず、自社の依存・交渉力は Web 調査（対象企業の市場シェア・供給/顧客の集中・取引構造）から読む（→ `population_type_metrics.md`「タイプ C は出願人 HHI 算出無意味・そもそも算出しない」）。いずれにせよ**特許出願の集中 ≠ 市場・取引額の集中**なので断定せず、Web で裏付けて出所を付す。
+- **集中度（HHI）を交渉力シグナルとして読む — 母集団が業界/技術ドメイン（タイプ A/A'/B）の時だけ**: 基本統計の出願人 HHI・上位集中度は、`buyer` 視点で「供給側の集中＝自社（買い手）の依存リスク・交渉力の弱さ」、`supplier` 視点で「需要側の集中＝自社（供給側）の交渉力の弱さ」のシグナルとして読める（Porter の買い手/売り手交渉力に対応）。⚠️ **対象が単一企業（タイプ C）の buyer/supplier 分析では出願人 HHI は無意味**（HHI≈1 で市場構造を表さない）＝算出せず、自社の依存・交渉力は Web 調査（対象企業の市場シェア・供給/顧客の集中・取引構造）から読む（→ `population_type_metrics.md`「タイプ C は出願人 HHI 算出無意味・そもそも算出しない」）。いずれにせよ**特許出願の集中 ≠ 市場・取引額の集中**なので断定せず、Web で裏付けて出所を付す。
 - `own_company` が空（自社名を伏せる選択）の場合は、従来どおり主語を「（競合／買い手／供給側として）〜」とする一般的な関係性視点で書いてよい。
 - `phase_d_gate.sh` Check 11s' が、関係性立場（`competitor` / `buyer` / `supplier`）かつ `own_company` 設定時に自社名がレポート本文へ登場するかを検査する（WARN）。
 - **ミラーイメージング点検（関係性立場では必須・v9）**: 対象企業の合理性を**自社の理屈で測らない**。「自社から見て不合理な行動」を不合理と断定する前に、対象企業の置かれた文脈——**補助金／サプライチェーン／既存顧客／規制・認証／地域戦略／既存事業との接点**——の中では合理的な戦略でないかを点検し、**最低1点「自社から見ると不合理でも、対象から見ると合理的な戦略」を本文の一段落として書く**（置き場所は対象企業を論じる章・ミクロ分析B・提言章のいずれか）。例:「A社の低収益セグメントへの継続出願は、当社の採算基準では不合理に見える。しかしA社から見ると、同セグメントは主力製品の認証要件と共通する規格必須特許群であり、撤退はライセンス収入と交渉力の喪失を意味する——合理的な防衛である」。`phase_d_gate.sh` Check 32 が記述の有無を検査する（WARN。妥当性は判定しない＝人間が監査する）。詳細: `analysis/structured_techniques.md` §4。
@@ -454,8 +463,8 @@ Phase D の品質ゲートスクリプトは、以下の条件で自動検出す
 
 ## 8. まとめ（執筆前に必ず確認）
 
-1. レポート本文は「人間の読者」向け。APOLLO 内部の JSON 構造を一切見せず、内部ファイル名・フィールド名・ガイドファイル名は全て本表の正式呼称に置換する
-2. モジュール名（Saturn V, MEGA, ATLAS, Explorer, CREW, EAGLE, NEBULA, CORE）とブランド機能名（TELESCOPE, PROBE, PULSE）は、初出時の補足を伴って使用可能
+1. レポート本文は「人間の読者」向け。内部の JSON 構造を一切見せず、内部ファイル名・フィールド名・ガイドファイル名は全て本表の正式呼称に置換する
+2. モジュールコードネーム（Saturn V, MEGA, ATLAS, Explorer, CREW, EAGLE, NEBULA, CORE, TELESCOPE, PROBE, PULSE, APOLLO）は本文に書かず、§2-B / §2-C の機能名（俯瞰図分析・動態分析・基本統計 等）に読み替える。分類コードの表記（IPC/FI）は `classification_code_label` に従う
 3. J-PlatPat 等の固有データベース名は、ユーザー入力がない限り「提供された特許データセット」と一般化する。`population_meta` の 4 フィールドは §5 の指定通りにレポートへ組み込む
 4. **スコープ限定ルール（§6）を絶対遵守**: 段落を書く前に「本母集団の観察」か「業界全体への一般化」かを明確にし、観察なら「本母集団では〜」等の限定修飾を段落冒頭または主文に必ず置く
 5. 一般化は、Web 調査の外部データを `#footnote` で引用するか、母集団のカバレッジ論証を行った場合のみ可。どちらでもないなら書かない（推測の一般化は品質不合格）

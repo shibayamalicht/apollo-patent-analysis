@@ -1,5 +1,5 @@
 // ==================================================================
-// report.typ — APOLLO CAPCOM レポートテンプレート
+// report.typ — APOLLO レポートテンプレート
 // Claude Code がこのファイルをコピーし、内容を展開して使用する
 // コンパイル: typst compile --root ".." reports/report.typ reports/report.pdf
 // ==================================================================
@@ -9,9 +9,9 @@
 // --- テンプレート適用（フォント・ページ・見出し一括設定） ---
 #show: apollo-report.with(
   title: "特許分析レポート",          // ← タイトルを変更
-  subtitle: "APOLLO CAPCOM Analysis", // ← サブタイトルを変更
+  subtitle: "APOLLO Analysis", // ← サブタイトルを変更
   date: "2026年XX月",                 // ← 日付を変更
-  author: "APOLLO CAPCOM Analysis",
+  author: "APOLLO Analysis",
 )
 
 // --- 目次 ---
@@ -37,7 +37,7 @@
 // --- KPIダッシュボード（ページまたぎ防止）---
 #kpi-dashboard(cols: 3,
   kpi-card("総特許数", "1,234", note: "2018-2024年"),
-  kpi-card("クラスタ数", "12", note: "Saturn V TELESCOPE"),
+  kpi-card("クラスタ数", "12", note: "俯瞰図分析"),
   kpi-card("主要出願人", "15社", note: "HHI = 0.18"),
 )
 
@@ -47,7 +47,7 @@
 
 // 本文テキストをここに記述...
 
-#evidence-box(1, "ATLASマクロ統計")[
+#evidence-box(1, "基本統計マクロ統計")[
   // Evidence 1 の説明・分析
 
   // スナップショット画像を挿入する場合:

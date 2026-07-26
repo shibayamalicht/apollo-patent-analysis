@@ -363,7 +363,7 @@ def add_title_shape(slide, text, x=0.5, y=0.15, w=12.3, eyebrow=None):
     アクセント短下線（2.25pt ACCENT）。
 
     eyebrow（任意）: タイトル直上に小さな「アイブロウ」（章/モジュール名。例
-        "NEBULA / 環境分析"）を添える。Noto Sans JP Medium・10pt・ミュート色・
+        "環境分析"）を添える。Noto Sans JP Medium・10pt・ミュート色・
         字間を広げて、編集的な見出し階層（アイブロウ→主張見出し→リード文→
         根拠→締め文・§0.9-A0）を再現する。明朝/等幅は使わずゴシックで統一。
     Returns:
@@ -870,7 +870,7 @@ def add_chart_text_slide(prs, title, sub_message, image_path, annotations, blank
                      文字列リスト → 従来互換の■箇条書き一覧表示。
                      dict リスト（[{"title","body","color"},...]）→ 注釈カードレール
                      （add_annotation_cards）で白カード表示。
-        eyebrow: タイトル直上のアイブロウ（章/モジュール名。例 "NEBULA / 環境分析"）
+        eyebrow: タイトル直上のアイブロウ（章/モジュール名。例 "環境分析"）
         text_side: "right" or "left"
         chart_ratio: チャート側の幅比率（0.55-0.65）
     """

@@ -99,6 +99,8 @@ VOYAGER はスナップショット収集とCAPCOM Export を行うモジュー�
 | `total_patents` | int | データセット全体の特許件数 | `2847` |
 | `period` | string | データセットの対象期間。`"開始年-終了年"` 形式 | `"2018-2024"` |
 | `column_mapping` | object | `col_map` の内容。カラム名のマッピング辞書 | `{"title": "発明の名称", "abstract": "要約", ...}` |
+| `abstract_available` | bool | 要約テキストの有無（旧セッションではフィールド自体が無い場合あり＝有りとみなす）。**`false` のとき、テキスト分析（クラスタ・キーワード・代表特許の技術的意義）は発明の名称のみに基づく。** レポートの信頼性注記に明記し、ミクロ分析で要約由来の記述を捏造しない（`data_notes.md` の要約なしデータ節を参照） | `false` |
+| `classification_code_label` | string | 分析に使っている分類コードの実効表記（`"IPC"` または `"FI"`。旧セッションではフィールド自体が無い場合あり＝IPC とみなす）。**レポート本文で分類コードに言及するときは必ずこの表記を使う**（例: FI のとき「IPC別」ではなく「FI別」と書く。内部データのフィールド名 `ipc_main_group` 等は FI でも不変） | `"FI"` |
 | `preprocessing` | string | 適用された前処理パイプラインの概要（SBERTモデルは選択式。実値は metadata.json の `analysis_environment.sbert_model` を参照） | `"Janome + SBERT(intfloat/multilingual-e5-base)"` |
 | `tfidf_vocab_size` | int | TF-IDF語彙サイズ（特徴語数） | `5200` |
 | `stopwords_count` | int | 適用されたストップワードの総数 | `380` |
@@ -124,7 +126,7 @@ CAPCOM Export パッケージを受け取った場合、以下の順序で読み
 1. **mission.json を読み込む** -- `mission_objective` でレポートの主題（分析の問い）を確認する。これがレポート全体の方向性を決定する。
 2. **evidence_list を走査する** -- 各 Evidence の `module` と `title` から、どのモジュールのどの分析結果が収集されているかを把握する。`file` フィールドで個別ファイルのパスを取得する。
 3. **個別 Evidence ファイルを読み込む** -- `evidence/ev{N}_{module}.json` を開き、`data_summary` でモジュール固有の分析データを確認する。`description` にはスナップショットの文脈情報が含まれる。
-4. **context.json を読み込む** -- `dataset` でデータセット全体のメタ情報（件数、期間、前処理方法等）を把握する。`column_mapping` により、各フィールドの元のカラム名を確認できる。
+4. **context.json を読み込む** -- `dataset` でデータセット全体のメタ情報（件数、期間、前処理方法等）を把握する。`column_mapping` により、各フィールドの元のカラム名を確認できる。**`abstract_available`（要約の有無）と `classification_code_label`（IPC/FI の実効表記）は分析の前提条件なので必ず確認**し、要約なしなら信頼性注記へ、FI なら本文の分類コード表記へ反映する。
 5. **available_data_files を確認する** -- Evidence の `data_summary` だけでは不足する場合、`data/` 内の補足ファイル（`patents.csv`, 各モジュールのJSON等）を選択的に読み込む。`context.json` の `available_data_files` にファイル名と説明の対応が記載されている。
 6. **report_directives を確認する** -- `image_slide_instruction` に値があれば、レポートの図の選定・配置、およびスライドの画像選択に **ユーザー指示として最優先で従う**（例:「表紙にクラスタ動態マップ」「権利化率マップはスライド必須」）。空ならAIが最適な画像を選ぶ。なお**レポート本文の図キャプションは常にAIが執筆**し、ユーザーの要点記入は不要。**スライドは各スライドに要点（■サブメッセージ）が必須**で、本指示があればそれに沿って作成する。
 
@@ -165,18 +167,18 @@ CAPCOM Export パッケージを受け取った場合、以下の順序で読み
 - 「{module}モジュールの分析結果（Evidence #{id}）は、{mission_objective への回答の一部} を示唆している」
 
 ### モジュール横断的な考察
-- 「ATLASの出願トレンド（Evidence #{id_a}）とSaturn Vのクラスタ分布（Evidence #{id_b}）を対比すると、{統合的な知見}」
-- 「MEGAの4象限分析（Evidence #{id_c}）で特定されたホットプレイヤーは、CREWのネットワーク分析（Evidence #{id_d}）における高媒介中心性ノードと一致しており、{示唆}」
+- 「基本統計の出願トレンド（Evidence #{id_a}）と俯瞰図分析のクラスタ分布（Evidence #{id_b}）を対比すると、{統合的な知見}」
+- 「動態分析の4象限分析（Evidence #{id_c}）で特定されたホットプレイヤーは、出願人・発明者ネットワークのネットワーク分析（Evidence #{id_d}）における高媒介中心性ノードと一致しており、{示唆}」
 
 ### データセット文脈の補足
 - 「分析対象は {total_patents}件（{period}）であり、前処理には{preprocessing}を使用した」
 - 「TF-IDF語彙サイズ{tfidf_vocab_size}語、ストップワード{stopwords_count}語の条件下での結果である」
 
-### NEBULA環境分析の位置づけ（v1.1）
-NEBULAデータ（`nebula_hype_cycle.json`, `nebula_macro_events.json`）が `available_data_files` に含まれる場合、レポートの冒頭（エグゼクティブサマリー直後）に環境分析を配置する。環境分析で導出された主要仮説は、後続の各モジュール分析の文脈として参照される。詳細は `SKILL.md` Phase 5a Step 0 を参照。
+### 環境分析環境分析の位置づけ（v1.1）
+環境分析データ（`nebula_hype_cycle.json`, `nebula_macro_events.json`）が `available_data_files` に含まれる場合、レポートの冒頭（エグゼクティブサマリー直後）に環境分析を配置する。環境分析で導出された主要仮説は、後続の各モジュール分析の文脈として参照される。詳細は `SKILL.md` Phase 5a Step 0 を参照。
 
 ### AIインサイト（prompts/）の活用
-`prompts/` ディレクトリにはATLASの各タブのAIインサイトプロンプト結果が格納される。命名規則:
+`prompts/` ディレクトリには基本統計の各タブのAIインサイトプロンプト結果が格納される。命名規則:
 - `atlas_trend_insight.md` — 出願トレンド分析
 - `atlas_line_insight.md` — 折れ線推移分析
 - `atlas_ranking_insight.md` — 出願人ランキング分析
@@ -191,6 +193,6 @@ NEBULAデータ（`nebula_hype_cycle.json`, `nebula_macro_events.json`）が `av
 VOYAGER のレポート構成は Mission Objective に応じて自由に設計できる。以下は典型的なパターンだが、これに限定されない。
 
 - **テーマ別構成**: Mission Objective を複数のサブテーマに分解し、各テーマに関連する Evidence を集約して論じる
-- **モジュール順構成**: NEBULA（環境分析）→ ATLAS（全体像） → Saturn V（技術領域） → MEGA（動態） → CREW（ネットワーク）の順に段階的に深掘りする
+- **モジュール順構成**: 環境分析（環境分析）→ 基本統計（全体像） → 俯瞰図分析（技術領域） → 動態分析（動態） → 出願人・発明者ネットワーク（ネットワーク）の順に段階的に深掘りする
 - **仮説検証型構成**: Mission Objective から仮説を立て、Evidence で検証し、結論を導く
 - **比較分析型構成**: 出願人間、技術領域間、期間間の比較を軸に Evidence を配置する

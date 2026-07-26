@@ -160,16 +160,16 @@ def render_ai_insight_button(prompt_text, unique_key):
     プロンプトを表示・コピーするためのUIレンダラー。
     CAPCOMアクティブ時はファイル出力も行う。
     """
-    with st.expander("✨ AI Insight (プロンプト生成)", expanded=False):
+    with st.expander("AI Insight (プロンプト生成)", expanded=False):
         st.markdown("以下のプロンプトをコピーして、ChatGPT / Claude 等に貼り付けてください。\n(可能であればマップ画像も添付するとより正確な分析が可能です)")
         st.code(prompt_text, language="markdown")
 
-        # CAPCOM出力フック
+        # 記録セッション出力フック（内部ファイル名は画面に出さない）
         try:
             import capcom
             if capcom.is_active():
                 capcom.save_prompt(unique_key, prompt_text)
-                st.caption(f"📡 CAPCOM: `prompts/{unique_key}.md` に出力済み")
+                st.caption("記録セッションに分析メモとして保存済み — レポート生成の材料に自動で使われます")
         except Exception as e:
             pass
 
@@ -265,9 +265,13 @@ def build_status_breakdown_summary(df, status_col, axis_col, axis_label,
     """
     try:
         import pandas as pd
+        import utils
         if df is None or status_col not in df.columns or axis_col not in df.columns:
             return ""
-        sub = df[[axis_col, status_col]].dropna()
+        # 欠損ステータスは「(ステータス不明)」として集計に含める（チャート側の表示と一致させる）
+        sub = df[[axis_col, status_col]].copy()
+        sub[status_col] = sub[status_col].fillna(utils.STATUS_UNKNOWN_LABEL)
+        sub = sub.dropna()
         if sub.empty:
             return ""
         if top_axis:

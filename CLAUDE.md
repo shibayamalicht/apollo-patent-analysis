@@ -1,4 +1,6 @@
-# APOLLO v9.1.0 — 特許分析プラットフォーム
+# APOLLO v10.0.0 — 特許分析プラットフォーム
+
+正式名称: **Advanced Patent & Overall Landscape-analytics Logic Orbiter**
 
 ## 言語設定
 - 常に日本語で会話する
@@ -7,34 +9,53 @@
 - ドキュメントも日本語で生成する
 
 ## プロジェクト概要
-APOLLO v9.1.0 は、Streamlitベースの特許分析プラットフォーム。
-patirohaライブラリをコアエンジンとし、SBERT・UMAP・HDBSCANによる分析、
-Gemini APIによるアプリ内レポート生成（VOYAGER）、
-Claude Code / Codex CLI / Antigravity IDE による Deep Diveレポート生成（CAPCOM・マルチツール対応）を統合した次世代版。
-v9.1 で CAPCOM に第二の進行様式「対話型レポート作成モード（KATHERINE）」を追加。
+APOLLO v10.0.0 は、Streamlitベースの特許分析プラットフォーム。**本格的な分析者の操縦席**として、
+判断とその根拠を残しながら深く掘ることを支援する。patirohaライブラリをコアエンジンとし、
+SBERT・UMAP・HDBSCANによる分析、チャットAI向けレポートキット生成（APIキー不要）、
+Claude Code / Codex CLI / Antigravity IDE による Deep Diveレポート生成（CAPCOM・マルチツール対応）を統合。
+CAPCOM の進行様式は自律生成と「対話型レポート作成モード（KATHERINE）」の2つ。
+
+v9.1.0 からの主な変更:
+- **UI 全面刷新** — `st.navigation` によるグループナビ（① 母集団 → ② 分析 → ③ レポート）、
+  グラファイトのシェル + 白基調のコンテンツ、軌道ロゴマーク、線アイコン（絵文字を全廃）
+- **フライトレコーダー新設** — 分析条件を自動記録し、画面・ZIP・レポート付録の3か所へ出す（下記）
+- **母集団設計を入口に** — 検索式・収録年・データベース名の記録を Mission Control の先頭タブへ
+- **VOYAGER（Gemini API 自動生成）を廃止** — チャットキットに一本化（保守フリー原則: LLM API 依存を持たない）。
+  レポート生成は CAPCOM ページに統合。ZIP 内部の `voyager/` パス名・キー名は互換のため不変
+- **J-PlatPat CSV 対応・俯瞰図の統一デザイン・多数のバグ修正**（姉妹製品 MERCATOR で実証した成果を取り込み）
+
+### 姉妹製品 MERCATOR との関係
+MERCATOR は同じエンジンを共有する**初心者向け**の製品。差別化は UI シェル（`apollo_ui.py` ↔
+`mercator_ui.py`）・既定値・ページ構成・出力の有無だけに置き、共通コア（`utils.py` / `patiroha` /
+`capcom.py` / `capcom_schema`）は分岐させない。**分析ロジックを分岐させるとバグ修正が二重になる。**
 
 ## 主な機能
-1. **母集団設計の文書化**: CAPCOM ページで以下4項目を任意入力可能にし、分析レポートに反映
+1. **母集団設計の文書化**: Mission Control の「0. 母集団設計」タブで以下4項目を任意入力可能にし、分析レポートに反映
    - 母集団論理式の設計意図 → CAPCOM に送信し分析で考慮
    - 母集団論理式 → 分析反映 + レポート付録に掲載
    - 収録年情報 → CAPCOM に送信し分析で考慮
    - 使用した特許データベース名 → 分析注記と付録で反映
-2. **CAPCOM マルチツール対応**: Claude Code / Codex CLI / Antigravity IDE を複数選択可能（選択したツール用パッチがZIPに展開済みで同梱）
-3. **OpenALEX 拡張**: 論文種別（article / review / book-chapter など10種）の複数選択、検索結果のCSVダウンロード
-4. **レポート用語統一**: 内部ファイル名・フィールド名の露出を禁止し、正式な日本語呼称に統一（`capcom_schema/analysis/terminology.md`）
-5. **経営層向け要約版（別冊）の任意同時生成**: Phase A で STOP-GATE 確認 → 8-12 ページに凝縮した別冊を `reports/report_executive.typ` として出力。各要点に「別解釈と決め手」、提言末尾に「見直しのサイン」ボックスを必須化（`capcom_schema/analysis/executive_summary_guide.md`、gate Check 18/18b）
-6. **構造化分析技法による結論検証（v9）**: 主要結論に「結論の検証（別解釈＋決め手）」「結論の前提と見直しのサイン」、関係性立場では「相手の立場から見た合理性」点検を課す（`capcom_schema/analysis/structured_techniques.md`）。本文では読者向け呼称を使い、技法名（ACH 等）の露出は禁止（`terminology.md §2-F`・Check 8f）
-7. **代表特許の決定的選定（v9）**: Phase C 冒頭で `capcom_schema/scripts/select_representatives.py` を 1 回実行し、ミクロ分析 A は `reports/representative_patents.json` の番号のみ引用（つまみ食い防止・Check 35）
-8. **品質ゲート Check 1〜37（v9）**: `capcom_schema/scripts/phase_d_gate.sh` 1 本で内容量・引用・用語・スコープ・母集団タイプ・立場・水増し・マップ掲載・構造化分析・裏付けを統合判定
-9. **分析の立場（narrative_stance）の確定**: Phase A STOP-GATE C で self / competitor / buyer / supplier / neutral の 5 分類をユーザー確認し、呼称・分析の力点・提言の型を全編で一貫させる（Check 11s）
-10. **対話型レポート作成モード（KATHERINE）（v9.1）**: CAPCOM の第二の進行様式。AI が判断案を「提案・根拠・別の見方・確認したいこと」の4部構成で提示し、分析者が選択・修正・確定しながらレポートを作る（正本: `capcom_schema/interactive/SKILL_INTERACTIVE.md` + `interactive/dialogue_points.md`）。品質ゲート・成果物形式・トークン効率制約は自律生成モードと完全に同一。CAPCOM ページのモード選択が `voyager/context.json` の `report_mode` に記録される
+2. **フライトレコーダー（v10 新設）**: 分析条件を自動記録し、画面カード・ZIP 内 `flight_recorder.json`・
+   レポート付録の3か所へ出す。**記録は全パラメータ・レポートへの出し方は3層**（`flight_recorder.py`）:
+   - 層1 `lineage`（母集団の来歴: ファイル・件数・結合・重複除去・除外ワード・要約の有無・分類コード）→ **本文で使える**
+   - 層2 `judgment`（粒度・クラスタ数・未分類率・DBCV 等）→ **「結論の前提と見直しのサイン」の材料**。数値でなく条件文に変換して書く
+   - 層3 `repro`（近傍数・最小距離・乱数シード・モデル名・所要秒数）→ **付録の表にだけ**。本文への数値記載は禁止
+3. **CAPCOM マルチツール対応**: Claude Code / Codex CLI / Antigravity IDE を複数選択可能（選択したツール用パッチがZIPに展開済みで同梱）
+4. **OpenALEX 拡張**: 論文種別（article / review / book-chapter など10種）の複数選択、検索結果のCSVダウンロード
+5. **レポート用語統一**: 内部ファイル名・フィールド名の露出を禁止し、正式な日本語呼称に統一（`capcom_schema/analysis/terminology.md`）
+6. **経営層向け要約版（別冊）の任意同時生成**: Phase A で STOP-GATE 確認 → 8-12 ページに凝縮した別冊を `reports/report_executive.typ` として出力。各要点に「別解釈と決め手」、提言末尾に「見直しのサイン」ボックスを必須化（`capcom_schema/analysis/executive_summary_guide.md`、gate Check 18/18b）
+7. **構造化分析技法による結論検証（v9）**: 主要結論に「結論の検証（別解釈＋決め手）」「結論の前提と見直しのサイン」、関係性立場では「相手の立場から見た合理性」点検を課す（`capcom_schema/analysis/structured_techniques.md`）。本文では読者向け呼称を使い、技法名（ACH 等）の露出は禁止（`terminology.md §2-F`・Check 8f）
+8. **代表特許の決定的選定（v9）**: Phase C 冒頭で `capcom_schema/scripts/select_representatives.py` を 1 回実行し、ミクロ分析 A は `reports/representative_patents.json` の番号のみ引用（つまみ食い防止・Check 35）
+9. **品質ゲート Check 1〜37（v9）**: `capcom_schema/scripts/phase_d_gate.sh` 1 本で内容量・引用・用語・スコープ・母集団タイプ・立場・水増し・マップ掲載・構造化分析・裏付けを統合判定
+10. **分析の立場（narrative_stance）の確定**: Phase A STOP-GATE C で self / competitor / buyer / supplier / neutral の 5 分類をユーザー確認し、呼称・分析の力点・提言の型を全編で一貫させる（Check 11s）
+11. **対話型レポート作成モード（KATHERINE）（v9.1）**: CAPCOM の第二の進行様式。AI が判断案を「提案・根拠・別の見方・確認したいこと」の4部構成で提示し、分析者が選択・修正・確定しながらレポートを作る（正本: `capcom_schema/interactive/SKILL_INTERACTIVE.md` + `interactive/dialogue_points.md`）。品質ゲート・成果物形式・トークン効率制約は自律生成モードと完全に同一。CAPCOM ページのモード選択が `voyager/context.json` の `report_mode` に記録される
 
 > 📌 **CAPCOM セッション（ZIP 展開後のレポート生成）でこのファイルを読んでいる場合**: 「起動方法」「ファイル構成」「コアライブラリ」「技術スタック」「開発上の注意点」の各節は APOLLO 本体の開発者向け情報であり、レポート生成では参照不要。レポート生成の指示は「レポート生成」「CAPCOM 〜」各節と `capcom_schema/` を正とし、本ファイルと `capcom_schema/` が食い違う場合は `capcom_schema/SKILL.md §0` と各 analysis/ 正本が優先する。`voyager/context.json` の `report_mode` が `interactive` の場合（またはユーザーが対話型を明示した場合）は、`capcom_schema/interactive/SKILL_INTERACTIVE.md` を進行の正本として読む。
 
 ## 起動方法
 ```bash
 pip install -r requirements.txt
-streamlit run Home.py
+streamlit run app.py
 # http://localhost:8501 でアクセス
 ```
 
@@ -43,28 +64,34 @@ streamlit run Home.py
 ### エントリーポイント・ユーティリティ
 | ファイル | 役割 |
 |---------|------|
-| `Home.py` | Mission Control — データ取込、カラムマッピング、前処理、OpenALEX統合 |
-| `utils.py` | 共通ユーティリティ — フォント、サイドバー、テーマ、描画、スナップショット |
+| `app.py` | エントリポイント — st.navigation（グループナビ）、セッション初期化、カスタムサイドバー、ビューの遅延import |
+| `apollo_ui.py` | 共通UIシェル — テーマCSS（グラファイトのシェル+白基調のコンテンツ）、軌道ロゴマーク、ページヘッダー、データガード(require_data)、読み方カード(howto)、ステッパー、状態カード |
+| `flight_recorder.py` | フライトレコーダー — 分析条件の自動記録（層1 来歴 / 層2 判断 / 層3 再現）・画面カード・ZIP 書き出し |
+| `utils.py` | 共通ユーティリティ — フォント、描画、スナップショット、ラベル編集 |
 | `utils_ai.py` | AIプロンプト生成 — 外部LLM向けプロンプト構築・コピーUI |
 | `utils_spatial.py` | 空間分析 — patiroha.generate_spatial_summary への委譲 |
 | `capcom.py` | CAPCOM通信 — In-Memory セッション管理(`session_state['capcom_store']`)、ZIPエクスポート時にメモリ上で動的構築 |
 | `openalex.py` | OpenALEX API — 学術論文検索・取得モジュール |
 | `openalex_query.py` | OpenALEX 検索式エンジン — コマンドライン構文（TI=/AB=/TA=/TX=/FT= + AND/OR/NOT + near/adj + ワイルドカード）の AST 解析・候補クエリ構築・ローカル厳密照合 |
 | `apollo_kw_worker.py` | キーワード抽出のプロセス並列ワーカー（streamlit 非依存・utils.extract_keywords_batch から参照） |
+| `sample_data/` | 同梱サンプル（合成・全固体電池960件）+ 生成スクリプト |
 
-### 分析モジュール (`pages/`)
-| # | ファイル | モジュール名 | 機能 |
-|---|---------|------------|------|
-| 1 | `1_🌍_ATLAS.py` | ATLAS | 基本統計 + 多様性指標（HHI/Entropy/Gini） |
-| 2 | `2_💡_CORE.py` | CORE | ルールベース分類（AND/OR/NEAR/ADJ） |
-| 3 | `3_🚀_Saturn_V.py` | Saturn V | 俯瞰図分析 + ノイズ分析 + クラスタ動態マップ |
-| 4 | `4_📈_MEGA.py` | MEGA | 動態分析（CAGR×活動量 4象限） |
-| 5 | `5_🧭_Explorer.py` | Explorer | キーワード戦略（共起ネットワーク） |
-| 6 | `6_🔗_CREW.py` | CREW | ネットワーク分析（媒介中心性） |
-| 7 | `7_🦅_EAGLE.py` | EAGLE | 探索的ランドスケープ + クラスタ動態マップ |
-| 8 | `8_📝_VOYAGER.py` | VOYAGER | Gemini APIレポート生成 + CAPCOM Export |
-| 9 | `9_🌌_NEBULA.py` | NEBULA | 環境分析 + 学術クラスタ分析 + クラスタ動態マップ |
-| 10 | `10_📡_CAPCOM.py` | CAPCOM | セッション管理 + ZIPエクスポート + Claude Code連携ガイド |
+### 分析ビュー (`views/` — 各ファイルが `render()` を公開)
+| ファイル | 表示名（機能名主・コードネーム従） | 機能 | 内部モジュール名（スキーマ・スナップショット用・不変） |
+|---------|--------|------|------------------------------------|
+| `mission_control.py` | Mission Control / 母集団設計・データ準備 | 母集団設計・取込・カラム紐付け・除外ワード・前処理・外部データ(NPL)取込・記録セッション自動開始 | Mission Control |
+| `atlas.py` | ATLAS / 基本統計 | 基本統計 + 多様性指標（HHI/Entropy/Gini） | ATLAS |
+| `core.py` | CORE / ルール分類 | ルールベース分類（AND/OR/NEAR/ADJ） | CORE |
+| `saturnv.py` | Saturn V / 俯瞰図分析 | 俯瞰図 + ノイズ分析 + クラスタ動態マップ + ドリルダウン | Saturn V |
+| `eagle.py` | EAGLE / 探索的クラスタリング | 投げ縄による手動クラスタリング + クラスタ動態マップ | EAGLE |
+| `mega.py` | MEGA / 動態分析 | 動態分析（CAGR×活動量 4象限） | MEGA |
+| `explorer.py` | Explorer / キーワード分析 | 共起ネットワーク・トレンド・文脈検索(KWIC) | Explorer |
+| `crew.py` | CREW / 出願人・発明者ネットワーク | ネットワーク分析（媒介中心性） | CREW |
+
+| `nebula.py` | NEBULA / 環境分析 | 環境分析 + 学術クラスタ分析 + クラスタ動態マップ | NEBULA |
+| `capcom_page.py` | CAPCOM / レポート生成 | チャットキット（経路A）+ CAPCOMセッション管理・ZIPエクスポート（経路B） | VOYAGER / CAPCOM |
+
+**UI改修時の不変条件**: session_state キー名・CAPCOM保存ファイル名・スナップショットの `module` 値（'ATLAS', 'Saturn V' 等の旧名）・`voyager/context.json` 等のZIP内部構造は capcom_schema 互換のため変更しない。共通UIは `apollo_ui.py` に集約し、ビューには分析ロジックとページ固有UIのみを置く。
 
 ## コアライブラリ: patiroha
 テキスト処理・統計・クラスタリング等のコアロジックは `patiroha` ライブラリに委譲する。
@@ -111,19 +138,20 @@ hubs = patiroha.get_hub_keywords(G, centrality="pagerank")
 summary = patiroha.generate_spatial_summary(df, "cluster", "umap_x", "umap_y")
 ```
 
-## レポート生成: 二系統
+## レポート生成: 二系統（CAPCOM ページに統合）
 
-### VOYAGER（アプリ内・Gemini API）
-- 片道通信: スナップショット + Mission Objective → Gemini API → Markdown/PDF
-- 2Phase: Analyst（モジュール別分析） → Strategist（統合レポート）
+### 経路A: チャットキット（アプリ内生成・APIキー不要）
+- 片道通信: スナップショット + Mission Objective → プロンプト+画像キット（.md / ZIP）→ ユーザーが任意のチャットAI（ChatGPT / Claude / Gemini 等）に貼付 → Markdown骨格
+- 2Phase構成のプロンプト: Analyst（モジュール別分析） → Strategist（統合レポート）を1本に束ねて出力
 - レポート深度: 骨格（最初の10%）
+- VOYAGER の Gemini API 自動実行は v10.0.0 で廃止（保守フリー原則: LLM API依存を持たない）。ZIP内部の `voyager/` パス名・キー名は互換のため不変
 
-### CAPCOM（外部・Claude Code / Codex CLI / Antigravity IDE）
+### 経路B: CAPCOM（外部・Claude Code / Codex CLI / Antigravity IDE）
 - 双方向通信: **In-Memoryセッション → ZIPダウンロード → ローカル展開 → 選択した AI ツール → Typst/PDF**
 - 4フェーズ（ツァーリ・ボンバ対策版）: ミッション+データ → エビデンス+クロス → Deep Dive → 統合+品質検証
 - レポート深度: 本格レポート（残り90%）
 - **進行様式は2つ（v9.1）**: **自律生成モード**（従来・4フェーズ自動進行）と**対話型レポート作成モード（KATHERINE）**（AI が根拠付きで案を提示し、分析者が確定しながら進行。正本: `capcom_schema/interactive/SKILL_INTERACTIVE.md`）。どちらも品質ゲート・成果物形式・トークン効率制約・Web調査ルール・絶対ルールは同一（下記「CAPCOM 〜」各節はモード共通で適用）
-- **重要**: Web版(HF Spaces / Streamlit Cloud)対応のため、データは `st.session_state['capcom_store']` に保持されブラウザを閉じると消失する。ユーザーは必ず CAPCOM ページから ZIP をダウンロードし、ローカルで選択した AI ツール（Claude Code 等）を起動して使用する
+- **重要**: Web版(HF Spaces / Streamlit Cloud)対応のため、データは `st.session_state['capcom_store']` に保持されブラウザを閉じると消失する。ユーザーは必ずCAPCOM ページから ZIP をダウンロードし、ローカルで選択した AI ツール（Claude Code 等）を起動して使用する。記録セッションは前処理完了時に自動開始される
 
 ## CAPCOM トークン効率の制約（ツァーリ・ボンバ対策）
 - サブエージェント（Agent tool）を起動しないこと。全処理をメインコンテキスト内で完結させる
@@ -151,7 +179,7 @@ summary = patiroha.generate_spatial_summary(df, "cluster", "umap_x", "umap_y")
 | フレームワーク | Streamlit 1.41.1 |
 | コアライブラリ | patiroha[all]（pandas, janome, sklearn, SBERT, UMAP, HDBSCAN, NetworkX） |
 | 可視化 | plotly, matplotlib, japanize-matplotlib, wordcloud |
-| レポート生成 | google-generativeai (VOYAGER), Typst (CAPCOM) |
+| レポート生成 | チャットキット（標準ライブラリのみ・APIキー不要）, Typst (CAPCOM・外部) |
 | AI連携 | CAPCOM (Claude Code / Codex CLI / Antigravity IDE), python-pptx |
 | データ取得 | requests (OpenALEX API) |
 

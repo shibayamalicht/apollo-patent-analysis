@@ -1,7 +1,16 @@
 # APOLLO Streamlit 設定
+[theme]
+# アクセントはイグニッション（点火）。シェル（サイドバー）だけを暗い計器盤にし、
+# 操作するコンテンツ領域は白基調のまま保つ。図の描画領域を白に保つのは、
+# 俯瞰図の12色パレットが白地で色覚検証されているため（apollo_ui.py 参照）。
+primaryColor = "#C2461A"
+backgroundColor = "#F7F9FB"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#141C24"
+font = "sans serif"
+
 [server]
 # 大規模ラベル編集（数十〜百クラスタの data_editor）と大きなランドスケープ図/
 # クラスタ動態マップを同一ページで再描画する際、WebSocket メッセージが既定上限
-# (200MB) 付近で破損し "Bad message format / Tried to use SessionInfo before it
-# was initialized" が出ることがある。上限を引き上げて緩和する。
+# (200MB) 付近で破損することがあるため上限を引き上げる。
 maxMessageSize = 500
