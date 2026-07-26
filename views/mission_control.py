@@ -1047,37 +1047,44 @@ def render():
         _n_acc = len(_acc)
         _n_cur = 0 if _cur is None else len(_cur)
         _TYPE_JP = {'Academic': '論文', 'Business': 'ニュース', 'Policy': '政策・規制', 'Market': '市場レポート'}
-        if _n_acc > 0:
-            with st.container(border=True):
-                _stats = _acc['data_sub_type'].value_counts()
-                _breakdown = "・".join(f"{_TYPE_JP.get(str(_k), str(_k))} {_v:,}件" for _k, _v in _stats.items())
-                _c_l, _c_r = st.columns([3, 1], vertical_alignment="center")
-                with _c_l:
-                    st.markdown(f"**:material/download: 取込済みの外部データ: 合計 {_n_acc:,} 件**（{_breakdown}）")
-                    if not st.session_state.get('preprocess_done', False):
-                        st.caption("「5. 前処理」を実行すると、まとめて分析に反映されます。")
-                    elif _n_acc != _n_cur:
-                        st.caption(
-                            f":material/warning: まだ分析に反映されていないデータが {abs(_n_acc - _n_cur)} 件あります。"
-                            "右の「いますぐ反映」で反映できます（特許側の重い計算はやり直さないので、すぐ終わります）。")
-                    else:
-                        st.caption(":material/check_circle: 分析に反映済みです。環境分析のページで使えます。")
-                with _c_r:
-                    if st.session_state.get('preprocess_done', False) and _n_acc != _n_cur:
-                        if st.button("↻ いますぐ反映", type="primary", key="apply_npl_now",
-                                     use_container_width=True):
-                            with st.spinner("外部データを整理しています..."):
-                                st.session_state.df_npl = st.session_state.df_npl_accumulated.copy()
-                                _process_npl_data(st.session_state.col_map)
-                            st.toast(f"外部データ {len(st.session_state.df_npl)} 件を分析に反映しました。環境分析で使えます", icon=":material/check_circle:")
+        # ⚠️ この状態カードは **必ず1要素を確保**したうえで中身を出し入れする。
+        # 条件付きで要素そのものを出し入れすると、下の st.tabs の要素位置が変わって
+        # タブが作り直され、**選択が先頭（論文）に戻る**。外部データの初回取込のときだけ
+        # 「政策・規制で取り込んだのに論文タブへ飛ぶ」が起きていたのはこれが原因。
+        # 空の st.container() は見た目には何も出ないので、常設しても表示は変わらない。
+        _npl_status_area = st.container()
+        with _npl_status_area:
+            if _n_acc > 0:
+                with st.container(border=True):
+                    _stats = _acc['data_sub_type'].value_counts()
+                    _breakdown = "・".join(f"{_TYPE_JP.get(str(_k), str(_k))} {_v:,}件" for _k, _v in _stats.items())
+                    _c_l, _c_r = st.columns([3, 1], vertical_alignment="center")
+                    with _c_l:
+                        st.markdown(f"**:material/download: 取込済みの外部データ: 合計 {_n_acc:,} 件**（{_breakdown}）")
+                        if not st.session_state.get('preprocess_done', False):
+                            st.caption("「5. 前処理」を実行すると、まとめて分析に反映されます。")
+                        elif _n_acc != _n_cur:
+                            st.caption(
+                                f":material/warning: まだ分析に反映されていないデータが {abs(_n_acc - _n_cur)} 件あります。"
+                                "右の「いますぐ反映」で反映できます（特許側の重い計算はやり直さないので、すぐ終わります）。")
+                        else:
+                            st.caption(":material/check_circle: 分析に反映済みです。環境分析のページで使えます。")
+                    with _c_r:
+                        if st.session_state.get('preprocess_done', False) and _n_acc != _n_cur:
+                            if st.button("↻ いますぐ反映", type="primary", key="apply_npl_now",
+                                         use_container_width=True):
+                                with st.spinner("外部データを整理しています..."):
+                                    st.session_state.df_npl = st.session_state.df_npl_accumulated.copy()
+                                    _process_npl_data(st.session_state.col_map)
+                                st.toast(f"外部データ {len(st.session_state.df_npl)} 件を分析に反映しました。環境分析で使えます", icon=":material/check_circle:")
+                                st.rerun()
+                        if st.button(":material/delete: すべてクリア", key="reset_npl_btn", use_container_width=True):
+                            st.session_state.df_npl_accumulated = pd.DataFrame()
+                            if 'df_npl' in st.session_state:
+                                del st.session_state.df_npl
                             st.rerun()
-                    if st.button(":material/delete: すべてクリア", key="reset_npl_btn", use_container_width=True):
-                        st.session_state.df_npl_accumulated = pd.DataFrame()
-                        if 'df_npl' in st.session_state:
-                            del st.session_state.df_npl
-                        st.rerun()
-                with st.expander("取込済みデータのプレビュー（先頭3件）", expanded=False):
-                    st.dataframe(_acc.head(3))
+                    with st.expander("取込済みデータのプレビュー（先頭3件）", expanded=False):
+                        st.dataframe(_acc.head(3))
 
         # 注: Streamlit は expander の入れ子を禁止しているため、ここは expander ではなく
         # 枠付きコンテナにする（内側の「API キー設定」「検索式の書き方」expander を有効にするため）。
