@@ -528,19 +528,25 @@ def landscape_bin_edges(bins):
     return np.arange(bins['start'], bins['end'] + bins['size'] * 0.5, bins['size'])
 
 
-def add_landscape_density(fig, x_values, y_values, color, zmax=None, xbins=None, ybins=None):
+def add_landscape_density(fig, x_values, y_values, color, zmax=None, xbins=None, ybins=None,
+                          line_width=0, line_color=None):
     """クラスタ1つ分のソフト密度（等高線風5段・地形図スタイル）を追加する。
 
     zmax を指定すると絶対スケール（全クラスタ/全表示で共通の濃さ基準）になり、
     未指定なら各クラスタ独立の自動スケールになる。
     xbins/ybins（dict(start, end, size)）を指定すると全クラスタ共通のメッシュで
     集計する（未指定は各クラスタのデータ範囲による自動ビン）。
+
+    line_width > 0 で等高線の輪郭線を描く（既定は塗りだけ）。点が多い図では塗りが
+    点に覆われて地形が読めなくなるため、線を出して等高線図として成立させたいときに使う。
+    line_color 未指定時は色をそのまま薄めた線になる。
     """
     params = dict(
         x=x_values, y=y_values, ncontours=5,
         colorscale=[[0, "rgba(255,255,255,0)"], [1, hex_to_rgba(color, 0.38)]],
-        showscale=False, line=dict(width=0), hoverinfo="skip",
-        contours=dict(coloring="fill"), showlegend=False,
+        showscale=False, hoverinfo="skip",
+        line=dict(width=line_width, color=line_color or hex_to_rgba(color, 0.45)),
+        contours=dict(coloring="fill", showlines=bool(line_width)), showlegend=False,
     )
     if zmax:
         params.update(dict(zauto=False, zmin=0, zmax=zmax))

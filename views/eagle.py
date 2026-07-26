@@ -46,6 +46,13 @@ warnings.filterwarnings('ignore')
 EAGLE_TERRAIN_COLOR = "#8C93A6"                                      # 未割り当て点の地形（密度）
 EAGLE_UNASSIGNED_STYLE = dict(color="#7C8798", size=5, opacity=0.7)  # 未割り当て点
 
+# 等高線の輪郭線。俯瞰図ファミリーの既定は塗りだけだが、EAGLE は点が密なので
+# 塗りが点に隠れて「等高線図」に見えなくなる。線を出して地形の段差を読めるようにする。
+EAGLE_CONTOUR_LINE_WIDTH = 0.6
+EAGLE_CONTOUR_LINE_COLOR = "rgba(60,70,90,0.35)"
+# この件数を超えたら「密な図」とみなして点を小さく薄くする（地形を透かすため）
+EAGLE_DENSE_VIEW_THRESHOLD = 3000
+
 # フォント設定
 FONT_PATH = utils.get_japanese_font_path()
 if FONT_PATH:
@@ -347,11 +354,22 @@ def render():
 
     # ヘルパー: ラベル生成（単一クラスタ用、投げ縄選択時に使用）
     def generate_label_for_cluster(df_sub, tfidf_mat, feat_names, top_n=3):
-        """単一クラスタのラベルを生成する。patiroha.auto_labelのc-TF-IDFと同等。"""
+        """単一クラスタのラベルを生成する。patiroha.auto_labelのc-TF-IDFと同等。
+
+        要約カラムは任意（README で「推奨」・J-PlatPat の要約なし形式も受け入れる）なので、
+        col_map に無い列・データに無い列は黙って飛ばす。以前は df_sub[None] で KeyError に
+        なり、**クラスタは作られたのにラベルだけ付かない**状態（マップに数字だけが出て、
+        ラベル編集にも行が出ない）を生んでいた。
+        """
         if df_sub.empty:
             return "Empty"
-        texts = (df_sub[col_map.get('title', '')].fillna('') + ' ' +
-                 df_sub[col_map.get('abstract', '')].fillna(''))
+        _text_cols = [col_map.get(k) for k in ('title', 'abstract')]
+        _text_cols = [c for c in _text_cols if c and c in df_sub.columns]
+        if not _text_cols:
+            return "(テキスト列なし)"
+        texts = df_sub[_text_cols[0]].fillna('').astype(str)
+        for _tc in _text_cols[1:]:
+            texts = texts + ' ' + df_sub[_tc].fillna('').astype(str)
         # 全件を同一クラスタ(0)として扱い、c-TF-IDFでラベル生成
         dummy_labels = np.zeros(len(df_sub), dtype=int)
         label_map = utils.safe_auto_label(texts, dummy_labels, method='c-tfidf', top_n=top_n)
@@ -367,6 +385,27 @@ def render():
         if not show_legend:
             fig.update_layout(showlegend=False) # Hide legend box if not requested
         return fig
+
+    # ラベルが欠けているクラスタを描画前に補う（自己修復）。
+    # 欠けると ①マップのラベルが数字だけになる ②ラベル編集は labels_map を元に行を作るため
+    # 手で直すこともできない、という二重の詰みになる。欠ける経路は上の (a)(b) で塞いだが、
+    # 既に壊れたセッションや、クラスタ削除と再作成の組み合わせでも起こり得るため、
+    # 原因側の対処とは別に毎回突き合わせる。
+    _label_ids_now = [int(c) for c in st.session_state.df_eagle['eagle_cluster'].dropna().unique()]
+    _missing_labels = sorted({c for c in _label_ids_now
+                              if c != -1 and c not in st.session_state.eagle_labels_map})
+    if _missing_labels:
+        for _mid in _missing_labels:
+            _sub = st.session_state.df_eagle[st.session_state.df_eagle['eagle_cluster'] == _mid]
+            try:
+                _lbl = generate_label_for_cluster(_sub, tfidf_matrix, feature_names)
+            except Exception:
+                _lbl = "(ラベル未設定)"
+            st.session_state.eagle_labels_map[_mid] = f"[{_mid}] {_lbl}"
+        st.caption(
+            f":material/build: ラベルが未設定だったクラスタ {len(_missing_labels)} 件"
+            f"（ID: {', '.join(str(i) for i in _missing_labels)}）に特徴語から名前を付けました。"
+            "下の「クラスタ・ラベル編集」で変更できます。")
 
     # --- 共通設定 ---
     col_common, _ = st.columns([1, 2])
@@ -385,7 +424,10 @@ def render():
     # 期間や出願人で絞っても格子と濃さの基準が動かないので、絞り込みどうしを比べられる。
     # メッシュ範囲に余白ビンを持たせるのは、データ範囲ちょうどで切ると端の等高線が
     # 四角く途切れて見えるため（utils.landscape_density_bins）。
-    # 絶対密度スケール用の全体ZMax は、描画と同じメッシュで数えた最大ビン件数にする。
+    # 絶対密度スケール用の全体ZMax。描画と同じメッシュで数えたビン件数から決める。
+    # ⚠️ 最大ビンを基準にすると、極端に密なクラスタが1つあるだけで他が全部薄くなる
+    #    （実データ7,789件で最大166件・非ゼロビンの中央値6件＝大半が最大値の4%で描かれていた）。
+    #    非ゼロビンの95パーセンタイルを基準にし、それより密な場所は飽和させる。
     # 失敗時はメッシュ未指定（自動ビン）に落とし、密度自体は描けるようにする。
     try:
         _eagle_bx, _eagle_by = utils.landscape_density_bins(
@@ -393,7 +435,8 @@ def render():
         _H, _, _ = np.histogram2d(df_universe['umap_x'], df_universe['umap_y'],
                                   bins=[utils.landscape_bin_edges(_eagle_bx),
                                         utils.landscape_bin_edges(_eagle_by)])
-        eagle_global_zmax = _H.max()
+        _H_nz = _H[_H > 0]
+        eagle_global_zmax = float(np.percentile(_H_nz, 95)) if _H_nz.size else None
     except Exception:
         _eagle_bx = _eagle_by = None
         eagle_global_zmax = None
@@ -515,7 +558,8 @@ def render():
                 utils.add_landscape_density(
                     fig_lasso, _grp['umap_x'], _grp['umap_y'],
                     EAGLE_TERRAIN_COLOR if _cid == -1 else _land_cmap.get(_cid, '#8C93A6'),
-                    zmax=_zmax, xbins=_eagle_bx, ybins=_eagle_by)
+                    zmax=_zmax, xbins=_eagle_bx, ybins=_eagle_by,
+                    line_width=EAGLE_CONTOUR_LINE_WIDTH, line_color=EAGLE_CONTOUR_LINE_COLOR)
 
         # 2. ゴーストポイント (除外データ)
         if not df_ghost.empty:
@@ -541,6 +585,16 @@ def render():
         # 白フチにする（点が重なっても粒が読める）。
         marker_border = dict(width=1, color='#333333') if is_editing else dict(width=0.8, color='white')
 
+        # 件数が多いと点が地形を覆い隠し、等高線が見えなくなる（実データ7,789件で発覚。
+        # 濃さや色の問題ではなく、点の面積で潰れていた）。密な図では点を小さく薄くして
+        # 下の地形を透かす。件数が少ない図では従来どおり粒をしっかり見せる。
+        _dense_view = len(df_focus) > EAGLE_DENSE_VIEW_THRESHOLD
+        _pt_size = 5 if _dense_view else utils.LANDSCAPE_POINT_SIZE
+        _pt_opacity = 0.85 if _dense_view else utils.LANDSCAPE_POINT_OPACITY
+        _un_style = dict(EAGLE_UNASSIGNED_STYLE)
+        if _dense_view:
+            _un_style.update(size=4, opacity=0.45)
+
         if is_applicant_filtered:
             # 出願人着色モード（企業識別色も俯瞰図パレットで統一）
             for i, app_name in enumerate(selected_apps):
@@ -555,8 +609,8 @@ def render():
 
                     fig_lasso.add_trace(go.Scatter(
                         x=d_app['umap_x'], y=d_app['umap_y'], mode='markers',
-                        marker=dict(color=utils.landscape_color(i), size=max(utils.LANDSCAPE_POINT_SIZE, 6),
-                                    opacity=0.9, line=marker_border),
+                        marker=dict(color=utils.landscape_color(i), size=max(_pt_size, 5),
+                                    opacity=_pt_opacity, line=marker_border),
                         name=app_name,
                         customdata=d_app.index,
                         hoverinfo='text',
@@ -571,10 +625,10 @@ def render():
                 name = st.session_state.eagle_labels_map.get(c, str(c))
                 if c == -1:
                     # 未割り当ては投げ縄で掴む対象。Saturn V のノイズのようには沈めない（冒頭の定数参照）
-                    marker = dict(line=dict(width=0), **EAGLE_UNASSIGNED_STYLE)
+                    marker = dict(line=dict(width=0), **_un_style)
                 else:
-                    marker = dict(color=_land_cmap.get(c, '#8C93A6'), size=utils.LANDSCAPE_POINT_SIZE,
-                                  opacity=utils.LANDSCAPE_POINT_OPACITY, line=marker_border)
+                    marker = dict(color=_land_cmap.get(c, '#8C93A6'), size=_pt_size,
+                                  opacity=_pt_opacity, line=marker_border)
 
                 # クラスタモードの場合、d内の全点はクラスタc(name)に属する
                 dynamic_hover_c = d['hover_text'] + (f"<b>クラスタ:</b> {name}" if c != -1 else "")
@@ -711,7 +765,13 @@ def render():
                     if st.button("選択範囲を新規クラスタにする"):
                         st.session_state.df_eagle.loc[selected_indices, 'eagle_cluster'] = new_id
                         sub_df = st.session_state.df_eagle.loc[selected_indices]
-                        lbl = generate_label_for_cluster(sub_df, tfidf_matrix, feature_names)
+                        # ラベル生成が失敗しても、直前のクラスタ割り当ては済んでいる。
+                        # ここで例外を通すと「点はあるのにラベルが無いクラスタ」が残るので、
+                        # 必ず何らかの名前を入れる（あとからラベル編集で直せる）。
+                        try:
+                            lbl = generate_label_for_cluster(sub_df, tfidf_matrix, feature_names)
+                        except Exception:
+                            lbl = "(ラベル未設定)"
                         st.session_state.eagle_labels_map[new_id] = f"[{new_id}] {lbl}"
                         # CAPCOM: patents.csvにeagle_cluster列を更新
                         try:
@@ -1219,7 +1279,8 @@ def render():
                         utils.add_landscape_density(
                             fig_drill, _grp['drill_x'], _grp['drill_y'],
                             EAGLE_TERRAIN_COLOR if _cid == -1 else _land_cmap_d.get(_cid, '#8C93A6'),
-                            xbins=_dbx, ybins=_dby)
+                            xbins=_dbx, ybins=_dby,
+                            line_width=EAGLE_CONTOUR_LINE_WIDTH, line_color=EAGLE_CONTOUR_LINE_COLOR)
 
                 if drill_map_mode == "クラスタ領域 (Clusters)":
                     # 平滑化した勢力圏（生の凸包から差し替え・点とラベルと同じ固定色）
@@ -1229,9 +1290,11 @@ def render():
                             _land_cmap_d.get(_cid, '#8C93A6'))
 
                 # 点は常時白フチ（重なっても粒が読める）。密度モードは地形が主役なので小さく薄く。
-                marker_line_d = dict(width=0.6 if _is_density_d else 0.8, color='white')
-                _pt_size_d = 4 if _is_density_d else utils.LANDSCAPE_POINT_SIZE
-                _pt_opacity_d = 0.65 if _is_density_d else utils.LANDSCAPE_POINT_OPACITY
+                # 件数が多い図でも点で地形が潰れるため、同じように軽くする（メインマップと同基準）。
+                _dense_d = _is_density_d or len(df_drill_plot) > EAGLE_DENSE_VIEW_THRESHOLD
+                marker_line_d = dict(width=0.6 if _dense_d else 0.8, color='white')
+                _pt_size_d = 4 if _dense_d else utils.LANDSCAPE_POINT_SIZE
+                _pt_opacity_d = 0.65 if _dense_d else utils.LANDSCAPE_POINT_OPACITY
 
                 # --- Drill-down Scatter with Manual Selection Support ---
                 # 勢力圏（go.Scatter=SVG）と座標系を揃えるため点も Scatter を使う（Scattergl=WebGL
@@ -1242,7 +1305,10 @@ def render():
 
                     if cid == -1:
                         # 未割り当ては投げ縄で掴む対象なので沈めない（冒頭の定数参照）
-                        marker_d = dict(line=dict(width=0), **EAGLE_UNASSIGNED_STYLE)
+                        _un_d = dict(EAGLE_UNASSIGNED_STYLE)
+                        if _dense_d:
+                            _un_d.update(size=4, opacity=0.45)
+                        marker_d = dict(line=dict(width=0), **_un_d)
                     else:
                         marker_d = dict(color=_land_cmap_d.get(cid, '#8C93A6'), size=_pt_size_d,
                                         opacity=_pt_opacity_d, line=marker_line_d)
@@ -1370,7 +1436,10 @@ def render():
                         
                             # c-TF-IDF でサブクラスタのラベルを生成
                             sub_df_d = st.session_state.eagle_drilldown_result.loc[s_indices_d]
-                            lbl = generate_label_for_cluster(sub_df_d, tfidf_matrix, feature_names, top_n=3)
+                            try:
+                                lbl = generate_label_for_cluster(sub_df_d, tfidf_matrix, feature_names, top_n=3)
+                            except Exception:
+                                lbl = "(ラベル未設定)"
                             st.session_state.eagle_drill_labels_map[new_id_d] = f"[{new_id_d}] {lbl}"
                         
                             # Update labels map and column
