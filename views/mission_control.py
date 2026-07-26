@@ -252,9 +252,10 @@ def render():
             value=st.session_state.get('capcom_query_intent', ''),
             height=100,
             placeholder=(
-                "例: 本母集団はCNF（セルロースナノファイバー）関連技術のうち、"
-                "食品・化粧品用途を除外し、構造材料・複合材料用途に焦点を絞って抽出した。"
-                "IPC C08L, C08K を主軸に、B29, B32 のコーティング関連を補助的に含めている。"
+                "例: 太陽光発電と蓄電を組み合わせた技術の母集団。"
+                "「太陽光発電」「蓄電」の概念ごとに、同じことを指すキーワードと分類コードを"
+                "ひとまとめの集合として定義し（語で書かれていない出願を分類で拾うため）、"
+                "その2つの集合を掛け合わせて抽出した。"
             ),
             key="capcom_query_intent_input",
             help="分析レポートの冒頭・前提条件欄・付録に反映されます。",
@@ -265,10 +266,18 @@ def render():
             ":material/search: 母集団論理式",
             value=st.session_state.get('capcom_query_logic', ''),
             height=100,
+            # 概念ブロック法をそのまま見せる。1つの概念を指すものは キーワードも分類コードも
+            # まとめて + (OR) で1つの集合にし、異なる概念の集合どうしを * (AND) で掛け合わせる。
+            # 分類を「別概念」として AND で足すと、語で書かれていない出願を拾えなくなる。
+            # 書式は J-PlatPat の論理式入力（* = AND / + = OR、検索項目は語末の / タグ。
+            # /(ab+ti+cl) のように複数項目をまとめて指定できる）。特許庁が公表している
+            # GXTI（GX技術区分表）の検索式が同じ形式なので、実例はそちらを参照するとよい。
+            # DB 名を冒頭に置くのは、CORE のルール分類も + と * を使うため、
+            # 利用者がこの欄を APOLLO 独自文法だと誤解しないようにするため。
             placeholder=(
-                "例: (TI=(CNF OR セルロースナノファイバー OR nanocellulose) "
-                "AND IPC=(C08L* OR C08K* OR B29*)) "
-                "AND PD=(20150101:20260131)"
+                "例（J-PlatPat 形式）: "
+                "[(太陽光発電+太陽電池)/(ab+ti+cl)+H01L31/ip+H02S/ip]"
+                "*[(蓄電池+二次電池+蓄電システム)/(ab+ti+cl)+H01M10/ip+H02J7/ip]"
             ),
             key="capcom_query_logic_input",
             help="**レポート付録に全文掲載**されます。機密情報は含めないでください。",
@@ -280,9 +289,11 @@ def render():
             _cov = st.text_input(
                 ":material/calendar_month: 収録年情報",
                 value=st.session_state.get('capcom_coverage_years', ''),
-                placeholder="例: 2015-01-01〜2026-01-31（出願日ベース）",
+                placeholder="例: 収録開始〜2026-07-26（検索日）",
                 key="capcom_coverage_years_input",
-                help="分析の時系列解釈に反映されます。",
+                help=(
+                    "**検索日（データを取得した日）を必ず入れてください。** 直近の出願は公開まで最大18ヶ月かかるため、検索日が分かると「どの年から未公開で少なく見えるのか」をレポートが特定できます。開始を絞っていなければ「収録開始〜」で構いません。開始も指定した場合は「2015-01-01〜2026-07-26（出願日ベース）」のように書きます。"
+                ),
             )
             st.session_state['capcom_coverage_years'] = _cov
         with _c_db:
@@ -972,7 +983,6 @@ def render():
 
                 except Exception as e:
                     st.error(f"前処理中にエラーが発生しました: {e}")
-                    import traceback
                     st.exception(traceback.format_exc())
 
         # --- 分析の記録セッション(CAPCOM)の詳細 ---

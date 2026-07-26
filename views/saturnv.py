@@ -181,7 +181,6 @@ def generate_wordcloud_and_list(words, title, top_n=20, font_path=None, capcom_k
             try:
                 import capcom
                 if capcom.is_active():
-                    import io
                     wc_data = {
                         "metadata": {"module": "Saturn V", "title": title, "top_n": top_n},
                         "word_frequencies": {w: c for w, c in word_freq.most_common(100)}

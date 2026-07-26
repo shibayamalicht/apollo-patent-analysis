@@ -321,7 +321,6 @@ def render():
                     hub_keywords = patiroha.get_hub_keywords(G_global, centrality="degree")
                     deg_centrality = {kw: score for kw, score in hub_keywords}
                     # community_map (dict[str,int]) からコミュニティ構造を再構築
-                    from collections import defaultdict
                     _comm_groups = defaultdict(list)
                     for node, cid in community_map.items():
                         _comm_groups[cid].append(node)

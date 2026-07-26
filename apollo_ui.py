@@ -25,10 +25,13 @@ SHELL_INK3 = "#5E7086"
 INK = "#141C24"
 INK2 = "#57687A"
 LINE = "#DFE6EC"
+FIELD_LINE = "#C9D5E0"        # 入力欄の枠（カード枠より一段濃く＝操作対象）
+FIELD_LINE_HOVER = "#A9BACB"  # 入力欄 hover
 PAGE_BG = "#F7F9FB"
 
 # --- アクセント: イグニッション ---
 IGNITION = "#C2461A"          # 白地の上で使う
+IGNITION_RING = "rgba(194, 70, 26, .13)"  # focus リング
 IGNITION_ON_DARK = "#E2582A"  # 暗いシェルの上で使う
 
 GOOD = "#12734B"
@@ -132,6 +135,69 @@ h3 {{ font-weight: 700 !important; letter-spacing: .01em; font-size: 1.25rem !im
   box-shadow: 0 1px 3px rgba(16, 24, 40, .06); }}
 [data-testid="stExpander"] details {{ border-radius: 12px; }}
 
+/* ==================================================================
+   入力欄（テキスト・数値・選択・日付）
+   Streamlit は入力欄の枠色を secondaryBackgroundColor から作る。APOLLO は
+   それが #FFFFFF のため、白いカードの上では枠が白＝不可視になってしまう。
+   ここで明示的に枠と状態（hover / focus）を与え、押せる場所を見えるようにする。
+   ================================================================== */
+[data-testid="stMain"] div[data-baseweb="input"],
+[data-testid="stMain"] div[data-baseweb="textarea"],
+[data-testid="stMain"] div[data-baseweb="select"] > div {{
+  background: #FFFFFF !important;
+  border: 1px solid {FIELD_LINE} !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  transition: border-color .12s ease, box-shadow .12s ease; }}
+[data-testid="stMain"] div[data-baseweb="input"]:hover,
+[data-testid="stMain"] div[data-baseweb="textarea"]:hover,
+[data-testid="stMain"] div[data-baseweb="select"] > div:hover {{
+  border-color: {FIELD_LINE_HOVER} !important; }}
+/* 入力中はイグニッションの枠と淡いリングで、いまどこを編集しているかを示す */
+[data-testid="stMain"] div[data-baseweb="input"]:focus-within,
+[data-testid="stMain"] div[data-baseweb="textarea"]:focus-within,
+[data-testid="stMain"] div[data-baseweb="select"] > div:focus-within {{
+  border-color: {IGNITION} !important;
+  box-shadow: 0 0 0 3px {IGNITION_RING} !important; }}
+/* 内側の素の input/textarea は透明にして、枠は外側のラッパーだけが持つ */
+[data-testid="stMain"] div[data-baseweb="base-input"] {{ background: transparent !important; }}
+[data-testid="stMain"] input, [data-testid="stMain"] textarea {{
+  color: {INK} !important; }}
+[data-testid="stMain"] input::placeholder,
+[data-testid="stMain"] textarea::placeholder {{ color: #9AA9B8 !important; }}
+/* 無効時は「触れない」ことが分かる地色にする */
+[data-testid="stMain"] div[data-baseweb="input"]:has(input:disabled),
+[data-testid="stMain"] div[data-baseweb="textarea"]:has(textarea:disabled) {{
+  background: {PAGE_BG} !important; border-color: {LINE} !important; }}
+
+/* ---- 数値入力: 増減ボタンまで含めて1つの部品に見せる ----
+   Streamlit は入力欄と +/- ボタンを兄弟要素として置くため、内側だけに枠を付けると
+   ボタンが枠の外にはみ出して見える。枠は両者を包む Container 側に移す。 */
+[data-testid="stMain"] [data-testid="stNumberInputContainer"] {{
+  background: #FFFFFF; border: 1px solid {FIELD_LINE}; border-radius: 8px;
+  overflow: hidden; transition: border-color .12s ease, box-shadow .12s ease; }}
+[data-testid="stMain"] [data-testid="stNumberInputContainer"]:hover {{
+  border-color: {FIELD_LINE_HOVER}; }}
+[data-testid="stMain"] [data-testid="stNumberInputContainer"]:focus-within {{
+  border-color: {IGNITION}; box-shadow: 0 0 0 3px {IGNITION_RING}; }}
+[data-testid="stMain"] [data-testid="stNumberInputContainer"]:has(input:disabled) {{
+  background: {PAGE_BG}; border-color: {LINE}; }}
+/* 内側の入力ラッパーは枠を持たない（枠は Container が受け持つ） */
+[data-testid="stMain"] [data-testid="stNumberInputContainer"] div[data-baseweb="input"] {{
+  border: none !important; border-radius: 0 !important;
+  background: transparent !important; box-shadow: none !important; }}
+
+/* ---- ラベル: 入力欄の見出しとして少し強める ---- */
+[data-testid="stMain"] [data-testid="stWidgetLabel"] p {{
+  font-weight: 600; color: {INK}; font-size: .88rem; }}
+
+/* ---- ファイルアップローダ: 破線の受け皿として見せる ---- */
+[data-testid="stMain"] [data-testid="stFileUploaderDropzone"] {{
+  background: {PAGE_BG}; border: 1.5px dashed {FIELD_LINE_HOVER};
+  border-radius: 10px; transition: border-color .12s ease, background .12s ease; }}
+[data-testid="stMain"] [data-testid="stFileUploaderDropzone"]:hover {{
+  border-color: {IGNITION}; background: #FFFFFF; }}
+
 /* ---- 要素間の縦の間隔を少し広げて呼吸させる ---- */
 [data-testid="stVerticalBlock"] {{ gap: 1.15rem; }}
 
@@ -143,7 +209,7 @@ h3 {{ font-weight: 700 !important; letter-spacing: .01em; font-size: 1.25rem !im
    サイドバー = 計器盤。ここだけ暗く、操作するコンテンツは白のまま。
    ================================================================== */
 [data-testid="stSidebar"] {{ background: {SHELL}; border-right: 1px solid #0A0F14;
-  min-width: 292px; max-width: 292px; }}
+  min-width: 300px; max-width: 300px; }}
 [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {{ gap: .42rem; }}
 [data-testid="stSidebar"] p,
 [data-testid="stSidebar"] span,
@@ -160,13 +226,13 @@ h3 {{ font-weight: 700 !important; letter-spacing: .01em; font-size: 1.25rem !im
   border-radius: 7px; padding: 7px 11px; position: relative;
   transition: background .12s ease; }}
 [data-testid="stSidebar"] [data-testid="stPageLink"] p {{
-  color: {SHELL_INK}; font-size: 14px; font-weight: 600; margin: 0;
-  letter-spacing: .01em; white-space: normal; }}
+  color: {SHELL_INK}; font-size: 16px; font-weight: 600; margin: 0;
+  letter-spacing: .01em; line-height: 1.5; white-space: normal; }}
 [data-testid="stSidebar"] [data-testid="stPageLink"] p strong {{
   color: {SHELL_INK}; font-size: 14px; font-weight: 700; letter-spacing: .04em;
   margin-right: 4px; }}
 [data-testid="stSidebar"] [data-testid="stIconMaterial"] {{
-  color: {SHELL_INK2} !important; font-size: 19px !important; }}
+  color: {SHELL_INK2} !important; font-size: 20px !important; }}
 [data-testid="stSidebar"] [data-testid="stPageLink"] a:hover {{ background: {SHELL_HOVER}; }}
 [data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"][href=""] {{ background: {SHELL_HOVER}; }}
 [data-testid="stSidebar"] a[data-testid="stPageLink-NavLink"][href=""]::before {{
@@ -205,8 +271,8 @@ h3 {{ font-weight: 700 !important; letter-spacing: .01em; font-size: 1.25rem !im
   padding: 13px 0 0 4px; line-height: 1.4; }}
 
 /* ---- フッター ---- */
-.ap-foot {{ font-size: 11px; color: {SHELL_INK3}; letter-spacing: .02em;
-  line-height: 1.7; padding-top: 16px; }}
+.ap-foot {{ font-size: 14px; color: {SHELL_INK3}; letter-spacing: .02em;
+  line-height: 1.6; padding-top: 16px; }}
 
 /* ---- ページヘッダー: ロゴ + 機能名（主）+ コードネーム（従）---- */
 .ap-head {{ display: flex; align-items: center; gap: 12px; margin-bottom: 2px; }}
