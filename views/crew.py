@@ -1,6 +1,6 @@
 # ==================================================================
 # APOLLO — CREW（出願人・発明者ネットワーク）
-# 旧 APOLLO pages/6_:material/link:_CREW.py の移植。
+# 旧 APOLLO pages/6_🔗_CREW.py の移植。
 # session_state キー・CAPCOM 保存スキーマ
 # (crew_network.json / crew_wordcloud.json / スナップショット key) は無改変。
 # PatentAnalyzer は発明者/出願人の区切り文字を分離指定できるよう拡張し、
@@ -447,7 +447,7 @@ def render():
     # --- 共通データガード ---
     apollo_ui.require_data()
 
-    # --- FLEET固有の追加前提（旧CREWの分岐ロジックを維持）: 共有DFとAI意味解析ベクトル ---
+    # --- CREW 固有の追加前提: 共有DFとAI意味解析ベクトル ---
     df = None
     if st.session_state.get('shared_df') is not None:
         df = st.session_state['shared_df']

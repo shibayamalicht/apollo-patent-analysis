@@ -1,7 +1,7 @@
 # ==================================================================
 # APOLLO — ATLAS（基本統計）
 # 出願推移・出願人ランキング・IPC分布・市場集中度から母集団の全体像を掴む。
-# 旧 APOLLO: pages/1_:material/public:_ATLAS.py の移植（分析ロジック・session_state キーは不変）。
+# 旧 APOLLO: pages/1_🌍_ATLAS.py の移植（分析ロジック・session_state キーは不変）。
 # ==================================================================
 import streamlit as st
 import pandas as pd

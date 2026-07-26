@@ -1,6 +1,6 @@
 # ==================================================================
 # APOLLO — NEBULA（環境分析）
-# 旧 APOLLO pages/9_:material/blur_on:_NEBULA.py の移植版。
+# 旧 APOLLO pages/9_🌌_NEBULA.py の移植版。
 # 論文・ニュース・政策文書と特許を統合した環境分析
 # （ハイプ・サイクル / マクロ環境 / 急上昇キーワード&ネットワーク / 学術ランドスケープ）。
 # 分析ロジック・session_state キー・CAPCOM 出力スキーマは元ページのまま維持する。
@@ -32,7 +32,7 @@ import apollo_ui
 def _npl_missing_notice(need="論文・ニュース・政策のデータ"):
     """NPL（外部データ）未投入時の共通の空状態案内。
 
-    HORIZON の外部データは任意機能なので、その旨を明記したうえで
+    NEBULA の外部データは任意機能なので、その旨を明記したうえで
     Mission Control の「外部データ取込」への導線を添える。
     """
     st.info(

@@ -1,6 +1,6 @@
 # ==================================================================
 # APOLLO — CORE（ルール分類）
-# 旧 APOLLO pages/2_:material/lightbulb:_CORE.py の移植版。
+# 旧 APOLLO pages/2_💡_CORE.py の移植版。
 # 自分で定めた論理式（AND/OR/NEAR/ADJ）で特許を仕分け、
 # 2軸クロス集計の特許マップを描く。分析ロジック・session_state キー・
 # CAPCOM 連携は旧版から無改変（変更はUI構造と文言のみ）。

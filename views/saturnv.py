@@ -1,6 +1,6 @@
 # ==================================================================
 # APOLLO — Saturn V（俯瞰図分析）
-# 旧 APOLLO pages/3_:material/rocket_launch:_Saturn_V.py の移植版。
+# 旧 APOLLO pages/3_🚀_Saturn_V.py の移植版。
 # 特許テキストの意味的類似性から技術マップ（俯瞰図）を自動生成し、
 # クラスタ構造・ノイズ（萌芽技術の芽）・成長動態を一望する。
 # 分析ロジック・session_state キー・CAPCOM 出力スキーマは旧版から不変。

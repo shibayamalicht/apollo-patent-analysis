@@ -1,7 +1,7 @@
 # ==================================================================
-# views/logbook.py — レポート生成 (LOGBOOK)
+# views/capcom_page.py — レポート生成 (CAPCOM)
 #
-# 旧 pages/8_:material/edit_note:_VOYAGER.py + 旧 pages/10_:material/settings_input_antenna:_CAPCOM.py の統合ビュー。
+# v9.1.0 の pages/8_📝_VOYAGER.py + pages/10_📡_CAPCOM.py の統合ビュー。
 # 1ページに2つのレポート経路を並べる:
 #   経路A: :material/bolt: チャットキット — プロンプトを生成して手元のチャットAIに貼るだけ（APIキー不要）
 #   経路B: :material/school: 本格レポート — セッションZIPを Claude Code 等の AI エージェントに渡す
@@ -834,7 +834,7 @@ ZIP ダウンロード（選択した AI ツール用の資材が同梱済み）
     ↓ ユーザーが展開
 Claude Code / Codex CLI / Antigravity IDE（レポート執筆）
     ↓ 自律生成（4フェーズ自動進行）または対話型（KATHERINE）
-Typst で PDF 完成 :material/celebration:
+Typst で PDF 完成
 ```
 
 **流れ**
@@ -857,8 +857,8 @@ def _render_capcom_route(snapshots):
             "の2つから選べます。"
         )
         st.info(
-            "レポートの生成エンジンには、前身 **APOLLO で実績のあるレポートスキーマ（品質ゲート含む）**を"
-            "使っています。レポート本文の分析名は、このアプリの機能名（俯瞰図分析・動態分析 など）で出力されます。",
+            "レポートの生成エンジンは **v9.1.0 から実績のあるレポートスキーマ（品質ゲート Check 1〜37 を含む）**を"
+            "そのまま使っています。レポート本文の分析名は機能名（俯瞰図分析・動態分析 など）で出力されます。",
             icon=":material/info:",
         )
 
