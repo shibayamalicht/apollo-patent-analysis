@@ -1,3 +1,11 @@
+# Linux では通常の torch が CUDA 一式（nvidia-cudnn / nccl / cusparselt / nvshmem / triton・
+# 合計数GB）を引き込む。GPU の無いホスティング（Streamlit Cloud 等）ではこのダウンロードで
+# 資源を使い切り、pip の進捗が出る前に容器が作り直されて起動が終わらない。
+# `+cpu` の版は PyTorch の CPU 専用インデックスにしか無いので、必ずそこから入る。
+# Mac / Windows は影響しない（torch の CUDA 依存は platform_system == "Linux" 限定のマーカー）。
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.6.0+cpu ; sys_platform == "linux"
+
 streamlit==1.41.1
 patiroha[all]>=1.0.1
 numpy<2.0.0
