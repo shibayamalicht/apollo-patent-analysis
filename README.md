@@ -5,6 +5,7 @@ colorFrom: gray
 colorTo: red
 sdk: streamlit
 sdk_version: 1.41.1
+python_version: "3.12"
 app_file: app.py
 pinned: false
 short_description: Patent analysis flight deck — from population design to strategic reports
