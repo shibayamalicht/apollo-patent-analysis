@@ -207,12 +207,18 @@ LLM API 依存がないため、特定モデルの提供終了や世代交代に
 ## 🖥️ ローカル実行
 
 ```bash
+python3.12 -m venv .venv && source .venv/bin/activate   # Windows: py -3.12 -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
 streamlit run app.py
 # → http://localhost:8501
 ```
 
-Python 3.10 以上が必要です。初回起動時に文埋め込みモデル（SBERT）のダウンロードが走ります。
+⚠️ **Python は 3.10 〜 3.12 を使ってください。3.13 以降では動きません。** 数値計算の土台に
+`numpy` 1.x 系を使っており、その最終版（1.26.4）のビルド済みパッケージが Python 3.12 までしか
+提供されていないためです。**最新版の Python を入れると失敗します**（https://www.python.org/downloads/
+の一覧から `3.12.x` を選んでください。既存の版と共存できます）。
+
+初回起動時に文埋め込みモデル（SBERT）のダウンロードが走ります。
 
 ## 📋 データ形式
 
