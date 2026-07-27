@@ -763,7 +763,7 @@ def _render_chatkit(snapshots, mission_objective):
             st.download_button(
                 ":material/download: プロンプトを .md で保存（ライト版）",
                 data=kit_md,
-                file_name=f"mercator_chatkit_prompt_{_ts}.md",
+                file_name=f"apollo_chatkit_prompt_{_ts}.md",
                 mime="text/markdown",
                 key="logbook_kit_light_dl",
                 use_container_width=True,
@@ -773,7 +773,7 @@ def _render_chatkit(snapshots, mission_objective):
             st.download_button(
                 f":material/inventory_2: フル版キットを ZIP で保存（{len(kit_zip) / (1024 * 1024):.1f} MB）",
                 data=kit_zip,
-                file_name=f"mercator_chatkit_{_ts}.zip",
+                file_name=f"apollo_chatkit_{_ts}.zip",
                 mime="application/zip",
                 key="logbook_kit_full_dl",
                 use_container_width=True,
@@ -804,7 +804,7 @@ def _render_chatkit(snapshots, mission_objective):
                 st.download_button(
                     ":material/download: このレポートを .md で保存",
                     data=pasted_md,
-                    file_name=f"mercator_report_{_ts}.md",
+                    file_name=f"apollo_report_{_ts}.md",
                     mime="text/markdown",
                     key="logbook_pasteback_dl",
                 )

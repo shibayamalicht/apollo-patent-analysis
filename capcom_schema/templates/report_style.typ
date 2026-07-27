@@ -168,11 +168,10 @@
           #v(0.15cm)
           #block(width: 100%, breakable: false)[
             #align(center)[
-              // APOLLO の正式名称。長いため意味の切れ目（カンマ）で3行に分ける
+              // APOLLO の正式名称（バクロニム）。正本は apollo_ui.py の FULL_NAME。
+              // ⚠️ MERCATOR のテンプレートとはここだけ意図的に異なる（ブランド名は分岐してよい）
               #text(size: 8pt, fill: rgb("#7788AA"), tracking: 0.3pt)[
-                Mapping Engine for Research, \
-                Clustering and Analytics of Technology, \
-                from Overview to Report
+                Advanced Patent & Overall Landscape-analytics Logic Orbiter
               ]
             ]
           ]
