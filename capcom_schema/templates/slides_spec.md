@@ -10,7 +10,7 @@ python-pptx + Pillow で産業調査レポート品質のスライドを生成�
 > **`capcom_schema/templates/apollo_slides.py`** に抽出済み（import 可・全 `add_*_slide` と
 > コア関数を内蔵）。生成スクリプトは**このモジュールを import して使う**（→ Section 2「import 運用」）。
 > 本仕様書はコードをコピーするためのものではなく、**いつ・どのヘルパーを・どんな主張骨格で使うか**を
-> 規定する。承認済みデザインの参照実装は `design_preview/generate_design_sample.py`。
+> 規定する。
 
 **必要パッケージ:** `pip install python-pptx Pillow`
 

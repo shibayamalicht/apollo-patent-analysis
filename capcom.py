@@ -665,10 +665,10 @@ def _mirror_skill_path(rel):
     ツール固有のスキル/ワークフロー配置を、現行ツールのスキル自動探索パス
     `.agents/`(複数形) にも複製するためのミラー相対パスを返す。該当しなければ None。
 
-    背景: Codex CLI / Antigravity IDE の現行スキル自動探索対象は
-    プロジェクト直下の `.agents/skills`(複数形) であり、従来 APOLLO が同梱してきた
+    背景: Codex CLI / Antigravity IDE のスキル自動探索対象は
+    プロジェクト直下の `.agents/skills`(複数形) であり、同梱している
     `.codex/skills` / `.agent/skills`(単数) は自動探索対象に含まれない公算が高い。
-    リポジトリ構造は従来のまま維持しつつ、ZIP には正規パスにも複製しておくことで、
+    リポジトリ構造は維持しつつ、ZIP には正規パスにも複製しておくことで、
     ツールがどちらを探索しても `apollo-capcom` スキルが発見される（dual-emit）。
 
       .codex/skills/...    → .agents/skills/...

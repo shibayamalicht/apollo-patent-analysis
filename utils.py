@@ -43,7 +43,8 @@ _logging.getLogger("streamlit.dataframe_util").setLevel(_logging.WARNING)
 # ==================================================================
 # --- 0z. 文埋め込みモデル (SBERT) の選択設定 ---
 # ==================================================================
-# Mission Control「フェーズ4」のラジオボタンで切り替え可能な文埋め込みモデル。
+# Mission Control の「5. 前処理」タブ内 expander「詳細設定（通常は変更不要）」の
+# ラジオボタンで切り替え可能な文埋め込みモデル。
 #   fast   : 軽量で速い（前バージョンのモデル）。重さで処理が止まる場合の回避用。
 #   quality: 多言語 E5。日本語特許＋英語論文を高品質に埋め込むが重く時間がかかる。
 # prefix が設定されたモデル（E5）は接頭辞 "passage: " が必須なので、
@@ -82,7 +83,7 @@ def _sbert_cfg_by_name(model_name):
 def current_sbert_model_name():
     """解析に使われた（または選択中の）文埋め込みモデル名を返す。
 
-    優先順: 前処理で実際に使用したモデル(sbert_model_used) > フェーズ4の現在の選択
+    優先順: 前処理で実際に使用したモデル(sbert_model_used) > 「詳細設定」の現在の選択
     (sbert_model_name) > 既定。前処理後にラジオだけ変えても、レポート/インサイトには
     実際に解析へ使ったモデルが記録される。
     """
@@ -354,7 +355,7 @@ APOLLO_ACCENT = "#003366"                      # アクセント色 (H1タイト
 APOLLO_TEMPLATE = "plotly_white"               # Plotly テンプレート
 
 # ==================================================================
-# --- 0b. ステータス パステルカラー (参考_AIS 準拠。低彩度で資料に載せやすい配色) ---
+# --- 0b. ステータス パステルカラー (低彩度で資料に載せやすい配色) ---
 # ==================================================================
 APOLLO_STATUS_PASTEL = {
     'granted':   "#AFCBEA",  # 登録/有効
@@ -1277,7 +1278,7 @@ def get_keyword_centric_representatives(df_target, top_keywords, n_reps=10):
     Args:
         df_target: 対象DataFrame
         top_keywords: ネットワークの中心性/頻度が高いキーワードリスト (list of str)
-        n_reps: 抽出件数 (User request: significantly increase)
+        n_reps: 抽出件数
     Returns:
         list of dict: [{'title':..., 'applicant':..., 'abstract':..., 'score':...}]
     """
@@ -3214,7 +3215,7 @@ def extract_keywords_batch(texts, stopwords=None, clean_html=False, n_jobs=None,
 
 # ==================================================================
 # --- 特許詳細ポップアップ (チャート/マップのクリック → st.dialog) ---
-# 参考_AIS の Patent Detail Viewer 相当。個別特許点のクリックで詳細をモーダル表示。
+# 個別特許点のクリックで詳細をモーダル表示する。
 # ==================================================================
 def disable_selection_fade(fig):
     """選択時に非選択点が薄くなる Plotly の既定挙動を無効化する（クリック後もハイライトが残らない）。

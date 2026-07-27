@@ -226,13 +226,13 @@ if TECH in df.columns and ISSUE in df.columns:
 # --- CREW: 媒介中心性上位ノードの関与特許 ---
 if os.path.isfile("data/crew_network.json"):
     crew = json.load(open("data/crew_network.json", encoding="utf-8"))
-    nodes = crew.get("nodes", [])
-    bkey = next((k for k in ("betweenness", "betweenness_centrality") if nodes and k in nodes[0]), None)
+    nodes = (crew.get("top_by_metric") or {}).get("媒介中心性") or crew.get("top_nodes") or []
+    bkey = next((k for k in ("媒介中心性", "betweenness", "betweenness_centrality") if nodes and k in nodes[0]), None)
     if bkey:
-        tops = sorted(nodes, key=lambda n: (-n.get(bkey, 0), str(n.get("name", n.get("id", "")))))[:N_HUBS]
+        tops = sorted(nodes, key=lambda n: (-n.get(bkey, 0), str(n.get("ノード", n.get("name", n.get("id", ""))))))[:N_HUBS]
         cw = {}
         for n in tops:
-            name = str(n.get("name", n.get("id", "")))
+            name = str(n.get("ノード", n.get("name", n.get("id", "")))).strip()
             if not name:
                 continue
             mask = pd.Series([False] * len(df))

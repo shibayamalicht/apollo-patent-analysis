@@ -264,7 +264,6 @@ def build_status_breakdown_summary(df, status_col, axis_col, axis_label,
         str: "[ステータス内訳] ..." 形式の文字列。集計不能なら空文字。
     """
     try:
-        import pandas as pd
         import utils
         if df is None or status_col not in df.columns or axis_col not in df.columns:
             return ""
@@ -345,7 +344,7 @@ def build_map_dynamics_noise_addon(dynamics_data=None, noise_count=None,
         return "", ""
     extra = "\n".join(parts) + "\n"
     inst = (
-        "\n\n# 追加分析（必須・v8新機能）\n"
+        "\n\n# 追加分析（必須）\n"
         "- **クラスタ動態**: 上記[クラスタ動態]をもとに、新興/成長リーダー/成熟/ニッチ・衰退の"
         "各クラスタを名指しし、技術領域のライフサイクル局面と注力・撤退の戦略示唆を述べること。\n"
         "- **萌芽技術（ノイズ）**: [ノイズ（萌芽技術候補）]に触れ、ノイズ率の高低が示す"

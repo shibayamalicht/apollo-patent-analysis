@@ -231,7 +231,7 @@ def render():
     # --- ステータスの配色設定 (公式パレット — CAPCOMレポートと統一) ---
     # ステータスの意味からセマンティックに色を割り当てる。
     # 全タブで色が統一されるように、ステータスごとの色を固定する。
-    # ステータス色はパステル配色（utils.build_status_color_map に集約。参考_AIS 準拠で全タブ統一）
+    # ステータス色はパステル配色（utils.build_status_color_map に集約して全タブ統一）
     status_color_map = {}
     status_col = st.session_state.col_map.get('status')
     if status_col:

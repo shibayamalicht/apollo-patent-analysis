@@ -1,5 +1,5 @@
 # ==================================================================
-# openalex.py -- APOLLO v9.0.0 OpenALEX API通信モジュール
+# openalex.py -- APOLLO v10.0.0 OpenALEX API通信モジュール
 # OpenALEX Collector 互換の検索・取得ロジック（Python 実装）
 # ==================================================================
 
@@ -740,9 +740,7 @@ class OpenAlexCollector:
     def calculate_cagr(papers: list[dict]) -> dict:
         """年別件数からCAGRとトレンドを計算する
 
-        OpenALEX_Collector.html の SearchController.calculateCAGR と
-        同一ロジック。線形回帰の傾きでトレンドを判定し、複利成長率
-        (CAGR) を算出する。
+        線形回帰の傾きでトレンドを判定し、複利成長率 (CAGR) を算出する。
 
         Parameters
         ----------

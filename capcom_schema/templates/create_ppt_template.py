@@ -5,7 +5,9 @@ APOLLO CAPCOM テンプレートPPTX生成スクリプト
 テーマカラー・デフォルトフォントを設定したテンプレートPPTXを生成する。
 python-pptxではスライドレイアウトの新規作成は不可のため、
 テーマ/色/フォント設定のみをテンプレートに含め、
-実際のレイアウトはgenerate_ppt.pyでプログラマティックに構築する。
+実際のレイアウトは、PPTX生成スクリプト（reports/build_pptx.py）が
+capcom_schema/templates/apollo_slides.py のヘルパーを import して
+プログラマティックに構築する。
 
 使い方:
     python create_ppt_template.py

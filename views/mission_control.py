@@ -1384,7 +1384,7 @@ T=(#01 AND #02)"""
                         )
 
                     # --- 論文種別フィルタ（複数選択可、未選択＝全種別） ---
-                    # OpenALEX_Collector.html と同等の10種類
+                    # OpenALEX が返す主要な論文種別10種
                     OALEX_PUB_TYPE_OPTIONS = {
                         "Article（学術論文）": "article",
                         "Review（総説）": "review",
