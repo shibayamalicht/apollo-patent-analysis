@@ -376,6 +376,10 @@ def render():
                         st.error(_merge_info['error'])
                         st.session_state.df_main = None
                         st.session_state.shared_df = None
+                        # 「preprocess_done=True なのに df が無い」矛盾状態を残さない
+                        # （残すと各ビューのデータガードを素通りして的外れな警告で止まる）
+                        st.session_state.preprocess_done = False
+                        st.session_state.pop('analyzer', None)
                     else:
                         # J-PlatPat形式の自動認識 → 正規化+カラム紐付け・区切り文字のプリセット
                         _is_jplat = utils.is_jplatpat_columns(df.columns)
@@ -414,6 +418,9 @@ def render():
                         st.session_state.preprocess_done = False
                         st.session_state['shared_df'] = df
                         st.session_state['filename'] = _display_name
+                        # 前データで構築した出願人ネットワークの analyzer を無効化
+                        # （旧 df・旧ベクトルを抱えたまま CREW に旧結果が表示されるのを防ぐ）
+                        st.session_state.pop('analyzer', None)
 
                         if _merge_info:
                             st.success(
@@ -449,6 +456,9 @@ def render():
                     st.error(f"ファイルインポートエラー: {e}")
                     st.session_state.df_main = None
                     st.session_state.shared_df = None
+                    # 「preprocess_done=True なのに df が無い」矛盾状態を残さない
+                    st.session_state.preprocess_done = False
+                    st.session_state.pop('analyzer', None)
             else:
                 # 前処理済みデータが存在する場合はスキップし、既存データ情報を表示
                 st.success(f"ファイル '{_display_name}' はインポート・前処理済みです ({len(st.session_state.df_main)}行)。")
@@ -475,6 +485,8 @@ def render():
                         st.session_state['shared_df'] = _df_sample
                         st.session_state['filename'] = "架空サンプル（全固体電池）"
                         st.session_state.preprocess_done = False
+                        # 前データで構築した出願人ネットワークの analyzer を無効化
+                        st.session_state.pop('analyzer', None)
                         st.session_state.col_map = {
                             'title': '発明の名称', 'abstract': '要約', 'claim': '請求の範囲',
                             'app_num': '出願番号', 'date': '出願日', 'applicant': '出願人',
@@ -841,6 +853,8 @@ def render():
                         progress_callback=sbert_progress,
                     )
                     st.session_state.sbert_embeddings = sbert_embeddings
+                    # 旧ベクトルを参照している出願人ネットワークの analyzer を無効化
+                    st.session_state.pop('analyzer', None)
                     _phase_secs['Phase4 AI意味解析（SBERT）'] = time.time() - _t0
 
                     # 5. TF-IDF & Keyword (Patent ONLY) — patiroha

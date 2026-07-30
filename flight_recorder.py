@@ -19,7 +19,7 @@ import datetime
 import streamlit as st
 
 SCHEMA_VERSION = 1
-APP_VERSION = "10.0.0"
+APP_VERSION = "10.0.1"
 
 LAYER_LINEAGE = 1
 LAYER_JUDGMENT = 2

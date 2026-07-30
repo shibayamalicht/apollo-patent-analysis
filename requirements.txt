@@ -9,6 +9,9 @@ torch==2.6.0+cpu ; sys_platform == "linux"
 streamlit==1.41.1
 patiroha[all]>=1.0.1
 numpy<2.0.0
+# Streamlit 1.41 の st.dataframe（Arrow 直列化）が、ホスティング環境によっては
+# 新しい pyarrow でプロセスごとクラッシュする（segfault）ため、実績のある版に固定する
+pyarrow<20
 setuptools
 sentence-transformers>=3.0,<4
 transformers>=4.44,<5

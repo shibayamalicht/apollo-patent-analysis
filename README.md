@@ -12,7 +12,7 @@ short_description: "Patent analysis flight deck: population design to reports"
 license: apache-2.0
 ---
 
-# APOLLO v10.0.0
+# APOLLO v10.0.1
 
 **A**dvanced **P**atent & **O**verall **L**andscape-analytics **L**ogic **O**rbiter
 
@@ -151,7 +151,9 @@ LLM API 依存がないため、特定モデルの提供終了や世代交代に
 
 ## 🧭 v9.1.0 からの進化
 
-詳細は [RELEASE_NOTES.md](RELEASE_NOTES.md) を参照してください。
+v10.0.1 では出願人・発明者ネットワーク（CREW）を安定化しました — 大規模データ（発明者数千名規模）で
+数分固まって見える問題の解消（媒介中心性のサンプリング近似ほか）、発明者名の空白ゆれの名寄せ、
+タイムラインの軸表示改善、サンプルデータへの共同出願の追加。詳細は [RELEASE_NOTES.md](RELEASE_NOTES.md) を参照してください。
 
 **新機能**
 

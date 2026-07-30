@@ -1,4 +1,4 @@
-# APOLLO v10.0.0 — 特許分析プラットフォーム
+# APOLLO v10.0.1 — 特許分析プラットフォーム
 
 正式名称: **Advanced Patent & Overall Landscape-analytics Logic Orbiter**
 
@@ -9,7 +9,7 @@
 - ドキュメントも日本語で生成する
 
 ## プロジェクト概要
-APOLLO v10.0.0 は、Streamlitベースの特許分析プラットフォーム。**本格的な分析者の操縦席**として、
+APOLLO v10.0.1 は、Streamlitベースの特許分析プラットフォーム。**本格的な分析者の操縦席**として、
 判断とその根拠を残しながら深く掘ることを支援する。patirohaライブラリをコアエンジンとし、
 SBERT・UMAP・HDBSCANによる分析、チャットAI向けレポートキット生成（APIキー不要）、
 Claude Code / Codex CLI / Antigravity IDE による Deep Diveレポート生成（CAPCOM・マルチツール対応）を統合。

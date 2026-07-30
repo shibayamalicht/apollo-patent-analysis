@@ -76,6 +76,26 @@ APPLICANTS = [
     ("桔梗精密", 1), ("葵テクノロジーズ", 1),
 ]
 
+# 共同出願の提携構図（筆頭出願人, 相手方リスト, 件数）。すべて架空の団体。
+# 完成車×電池・電池×材料・企業×大学/国研という現実の特許ランドスケープに
+# ありがちな組み合わせだけを模す。出願人ネットワーク（企業アライアンス）が
+# サンプルデータでも成立するよう、全960件のうち約12%を共同出願にする。
+ALLIANCES = [
+    ("蒼海自動車", ["遠州電池"], 22),
+    ("蒼海自動車", ["白鳳電機産業"], 10),
+    ("蒼海自動車", ["遠州電池", "東都工業大学"], 3),  # 3社共願（産学連携）
+    ("蒼海自動車", ["東都工業大学"], 7),
+    ("白鳳電機産業", ["みなと化学工業"], 16),
+    ("白鳳電機産業", ["東都工業大学"], 5),
+    ("北斗モータース", ["ハンビット電池"], 12),
+    ("みなと化学工業", ["燕岳鉱業"], 10),
+    ("みなと化学工業", ["中央先端科学研究所"], 6),
+    ("九曜電子", ["若草セラミックス"], 8),
+    ("常盤田精機", ["桔梗精密"], 6),
+    ("遠州電池", ["中央先端科学研究所"], 4),
+    ("蓬莱新能源", ["ソルグリーンエナジー"], 5),
+]
+
 SURNAMES = ["佐藤", "鈴木", "高橋", "田中", "伊藤", "渡辺", "山本", "中村", "小林", "加藤",
             "吉田", "山田", "松本", "井上", "木村", "林", "斎藤", "清水", "山口", "森"]
 GIVEN = ["太郎", "健一", "裕子", "直樹", "恵", "浩二", "美咲", "隆", "花子", "誠",
@@ -118,7 +138,9 @@ def main():
         day = int(rng.integers(1, 29))
         applicant = names[int(rng.choice(len(names), p=w))]
         n_inv = int(rng.integers(1, 4))
-        inventors = ";".join({_person(rng) for _ in range(n_inv)})
+        # set だと文字列ハッシュの乱数化で並び順が実行ごとに変わりCSVが再現しないため、
+        # dict.fromkeys で重複除去しつつ挿入順（rng の生成順）を保持する
+        inventors = ";".join(dict.fromkeys(_person(rng) for _ in range(n_inv)))
 
         mat = _pick(rng, vocab["material"])
         prob = _pick(rng, vocab["problem"])
@@ -158,6 +180,15 @@ def main():
         a = THEMES[int(rng.integers(len(THEMES)))]
         b = THEMES[int(rng.integers(len(THEMES)))]
         add_row(a[0], a[3], a[4], 2023, cross_vocab=b[4])
+
+    # 共同出願の付与（出願人ネットワーク=企業アライアンス分析用）。
+    # 単独出願の行の出願人へ相手方を「;」区切りで追記するだけなので、
+    # 他カラムの生成結果・行数・出現順は変えない。
+    for lead, partners, k in ALLIANCES:
+        idx = np.array([i for i, r in enumerate(rows) if r["出願人"] == lead])
+        rng.shuffle(idx)
+        for i in idx[:k]:
+            rows[i]["出願人"] = ";".join([lead] + partners)
 
     df = pd.DataFrame(rows).sample(frac=1.0, random_state=SEED).reset_index(drop=True)
     df.to_csv("sample_patents.csv", index=False, encoding="utf-8-sig")

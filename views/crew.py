@@ -87,7 +87,10 @@ class PatentAnalyzer:
         def clean(name):
             if not isinstance(name, str): return ""
             for char in self.remove_chars: name = name.replace(char, "")
-            return name.strip().replace("　", "")
+            # 表記ゆれの名寄せ: NFKC 正規化（全角英数・記号のゆれを統一）のうえ空白を全て除去し、
+            # 「山田 太郎」「山 田 太 郎」「山田　太郎」を同一人物として扱う
+            name = unicodedata.normalize('NFKC', name)
+            return re.sub(r'\s+', '', name)
 
         # リスト化処理（発明者カラムが無いデータでは空リストにし、企業アライアンスのみ利用可能）
         if self.col_inv:
@@ -104,7 +107,12 @@ class PatentAnalyzer:
             )
 
         if self.col_date and self.col_date != '(なし)':
-            self.df['dt'] = pd.to_datetime(self.df[self.col_date], errors='coerce')
+            # 整数 YYYYMMDD を pd.to_datetime に直接渡すとエポック ns 扱いで全行 1970 年になるため、
+            # patiroha.parse_date を正とし、解釈できなかった行のみ文字列化して pd.to_datetime で補完する
+            self.df['dt'] = patiroha.parse_date(self.df[self.col_date])
+            if self.df['dt'].isna().any():
+                fallback = pd.to_datetime(self.df[self.col_date].astype(str), errors='coerce')
+                self.df['dt'] = self.df['dt'].fillna(fallback)
             self.df['year'] = self.df['dt'].dt.year
         else:
             self.df['year'] = 2024
@@ -154,6 +162,11 @@ class PatentAnalyzer:
         # 2. グルーピング
         grouped = exploded.groupby(target_col)['__orig_idx'].apply(list)
         names = grouped.index.tolist()
+
+        # 有効な名前が1件も無い場合（全セルが空欄・記号のみ等）、空配列の normalize が
+        # ValueError になるためベクトル無し（TF-IDFトピック等は非表示）として扱う
+        if not names:
+            return False
 
         # テキストも結合 (TF-IDF用)
         text_grouped = exploded.groupby(target_col)[text_col].apply(lambda x: ' '.join(x.astype(str)))
@@ -217,6 +230,10 @@ class PatentAnalyzer:
             if texts.empty:
                 topic_names[i] = f"Topic {i}"
                 continue
+            # 命名は代表テキストのサンプルで十分。全メンバー分を形態素解析すると
+            # 大規模データ（数千名の発明者等）でこの命名だけに数分かかる
+            if len(texts) > 40:
+                texts = texts.sample(40, random_state=42)
             try:
                 # 日本語を形態素解析し、ストップワード・定型句(【選択図】【課題】【解決手段】等)を
                 # 除去してからTF-IDFにかける。生テキスト直接 + \b\w+\b では日本語を分割できず、
@@ -314,6 +331,11 @@ class PatentAnalyzer:
         df_subset = self._get_filtered_df(year_range, applicants)
         target_col = 'inventors_list' if self.current_mode == 'inventor' else 'applicants_list'
 
+        # build_graph_at_year と同じガード: 対象カラムを持たない analyzer（出願人=(なし)で
+        # 構築後にモードだけ切り替わった等）では explode が KeyError になるため空グラフを返す
+        if target_col not in df_subset.columns:
+            return G.subgraph([]).copy()
+
         exploded = df_subset.explode(target_col)
         app_counts = exploded[target_col].value_counts().to_dict()
 
@@ -333,7 +355,13 @@ class PatentAnalyzer:
     def calculate_all_metrics(self, G, year_range=None, n_topics=5, applicants=None, recent_years=3):
         if len(G.nodes) == 0: return pd.DataFrame()
 
-        betweenness = nx.betweenness_centrality(G)
+        # 大規模グラフでは厳密計算が O(V·E) で数分〜数十分かかり「表示されない」ように見えるため、
+        # ノード数が多い場合はサンプリング近似（k 源の最短路のみで推定・上位の順位はほぼ保存）に切り替える
+        _n_bc = len(G.nodes)
+        if _n_bc > 1500:
+            betweenness = nx.betweenness_centrality(G, k=min(500, _n_bc), seed=42)
+        else:
+            betweenness = nx.betweenness_centrality(G)
         degree = dict(G.degree())
 
         try:
@@ -458,7 +486,9 @@ def render():
     embeddings = st.session_state.get('sbert_embeddings')
     df_main = df  # AI Insight用の変数名統一
 
-    if df is None or embeddings is None:
+    # 行数不一致は、データ再読込・除外ワード適用後などに旧ベクトルが残留した状態
+    # （そのまま進むと位置番号でのベクトル参照がずれる）。CORE と同じく前処理のやり直しへ誘導する
+    if df is None or embeddings is None or len(embeddings) != len(df):
         st.warning("このモジュールには AI意味解析（SBERT）のベクトルが必要ですが、まだ用意されていません。", icon=":material/rocket_launch:")
         st.markdown("「Mission Control」で **前処理を実行** すると使えるようになります。")
         pages = st.session_state.get("ap_pages", {})
@@ -556,8 +586,14 @@ def render():
                 years = sorted(analyzer.df['year'].dropna().unique())
                 year_range = None
                 if years:
-                    year_range = st.slider("対象期間", int(min(years)), int(max(years)), (int(min(years)), int(max(years))),
-                                           help="分析対象とする出願年の範囲です。")
+                    _y_min, _y_max = int(min(years)), int(max(years))
+                    if _y_min == _y_max:
+                        # st.slider は min==max を許さない（StreamlitAPIException でページ全体が落ちる）
+                        st.caption(f"対象期間: {_y_min}年（単一年のデータのため範囲指定はありません）")
+                        year_range = (_y_min, _y_max)
+                    else:
+                        year_range = st.slider("対象期間", _y_min, _y_max, (_y_min, _y_max),
+                                               help="分析対象とする出願年の範囲です。")
 
                 app_opts, app_counts = analyzer.get_applicant_info()
                 sel_apps = st.multiselect(
@@ -567,9 +603,9 @@ def render():
                 )
 
             with c_f2:
-                min_node = st.number_input("最小出願件数 (ノード)", 1, 100, 1,
+                min_node = st.number_input("最小出願件数 (ノード)", 1, 100, 2,
                                            help="ネットワークに含める最小の出願件数です。これ未満の小規模なノード（人/企業）を除外し、主要プレイヤーに絞ります。")
-                min_edge = st.number_input("最小共願回数 (エッジ)", 1, 20, 1,
+                min_edge = st.number_input("最小共願回数 (エッジ)", 1, 20, 2,
                                            help="2者を線（エッジ）で結ぶ最小の共同出願回数です。大きくすると強い協働関係だけが残り、小さくすると弱いつながりも線になり密になります。")
                 recent_years_win = st.number_input("急上昇判定期間 (年)", 1, 10, 3,
                                                    help="「急上昇」プレイヤーを判定する直近の期間（年数）です。この期間での活動の伸びを評価します。")
@@ -594,15 +630,44 @@ def render():
         G_filtered = analyzer.apply_filters(G, min_node, min_edge, True, year_range, applicants=sel_apps)
 
         if len(G_filtered.nodes) == 0:
-            st.warning("条件に合致するデータがありません。フィルタを緩めてください。")
+            if G.number_of_edges() == 0:
+                # 共同関係が1件も無い場合はフィルタの問題ではないので、原因と確認先を具体的に示す
+                # （孤立ノードは常に除去されるため、エッジ0件ではフィルタを緩めても何も表示されない）
+                if analyzer.current_mode == 'corporate':
+                    st.warning(
+                        "この条件では共同出願（複数の出願人による同一出願）が1件も見つからないため、"
+                        "企業アライアンスのネットワークを描画できません。", icon=":material/hub:")
+                    st.markdown(
+                        "- 単独出願が中心の母集団では、企業アライアンスは分析できません（データの性質によるもので、設定の誤りではありません）。\n"
+                        "- 出願人カラムに複数の出願人が入っているのに表示されない場合は、上の詳細設定の出願人カラムと、"
+                        "Mission Control「カラム紐付け」タブの出願人区切り文字をご確認ください。")
+                else:
+                    st.warning(
+                        "この条件では共同発明（複数の発明者による同一出願）が1件も見つからないため、"
+                        "発明者ネットワークを描画できません。", icon=":material/hub:")
+                    st.markdown(
+                        "- 発明者が1名ずつのデータでは、発明者ネットワークは分析できません。\n"
+                        "- 発明者カラムに複数の発明者が入っているのに表示されない場合は、上の詳細設定の発明者カラムと、"
+                        "Mission Control「カラム紐付け」タブの発明者区切り文字をご確認ください。")
+            else:
+                st.warning("条件に合致するデータがありません。フィルタを緩めてください。")
         else:
-            metrics_df = analyzer.calculate_all_metrics(G_filtered, year_range, n_topics, applicants=sel_apps, recent_years=recent_years_win)
+            _n_nodes = len(G_filtered.nodes)
+            if _n_nodes > 5000:
+                st.info(f"ノード数が {_n_nodes:,} 件と大きいため、計算と描画に時間がかかります。"
+                        "「最小出願件数」「最小共願回数」を上げると主要プレイヤーに絞り込めます。")
+            # 計算中であることを常に見せる（無表示のまま数十秒固まると「表示されない」ように見える）
+            with st.spinner(f"ネットワーク指標を計算中...（ノード {_n_nodes:,} 件）"):
+                metrics_df = analyzer.calculate_all_metrics(G_filtered, year_range, n_topics, applicants=sel_apps, recent_years=recent_years_win)
 
             tab1, tab2, tab3, tab4, tab5 = st.tabs(["ネットワーク図", "指標ランキング", "派閥×技術トピック", "推移・タイムライン", "個別詳細"])
 
             with tab1:
                 st.markdown("**共起ネットワーク図**")
-                pos = nx.spring_layout(G_filtered, k=0.8, seed=42)
+                # 配置計算は O(V²)×反復回数で伸びる。大規模グラフは反復を減らして数十秒→数秒に抑える
+                _iters = 50 if _n_nodes <= 1000 else (30 if _n_nodes <= 3000 else 15)
+                with st.spinner(f"ネットワーク配置を計算中...（ノード {_n_nodes:,} 件）"):
+                    pos = nx.spring_layout(G_filtered, k=0.8, seed=42, iterations=_iters)
                 edge_x, edge_y = [], []
                 for edge in G_filtered.edges():
                     x0, y0 = pos[edge[0]]; x1, y1 = pos[edge[1]]
@@ -610,12 +675,20 @@ def render():
 
                 edge_trace = go.Scatter(x=edge_x, y=edge_y, line=dict(width=0.5, color='#ccc'), hoverinfo='none', mode='lines')
 
+                # ラベルは主要ノードのみ描く（数千ノード全員分のテキスト描画はブラウザが固まる主因。
+                # ラベルの無いノードもマウスオーバーで名前と指標を確認できる）
+                _LABEL_TOP = 120
+                if _n_nodes > _LABEL_TOP:
+                    _label_set = set(metrics_df['出願数'].sort_values(ascending=False).head(_LABEL_TOP).index)
+                else:
+                    _label_set = set(G_filtered.nodes())
+
                 node_x, node_y, node_txt, node_col, node_sz, node_custom = [], [], [], [], [], []
                 for node in G_filtered.nodes():
                     x, y = pos[node]
                     node_x.append(x); node_y.append(y)
                     rec = metrics_df.loc[node]
-                    node_txt.append(node)
+                    node_txt.append(node if node in _label_set else '')
                     node_custom.append([node, int(rec['出願数']), rec['コミュニティ'], rec['PrimaryTopic']])
 
                     if color_mode == 'コミュニティ (派閥)': val = rec['コミュニティ']
@@ -642,6 +715,8 @@ def render():
                 # アスペクト比制限を解除 (隠された軸設定による制限を回避)
                 fig_net.update_yaxes(scaleanchor=None, scaleratio=None)
                 st.plotly_chart(fig_net, use_container_width=True, config={'editable': False})
+                if _n_nodes > _LABEL_TOP:
+                    st.caption(f"ノード名ラベルは出願数上位 {_LABEL_TOP} 件のみ表示しています（他のノードはマウスオーバーで確認できます）。")
 
                 # --- 読み方カード ---
                 _hw_node = '発明者（個人）' if mode == "発明者ネットワーク" else '出願人（企業）'
@@ -827,7 +902,10 @@ def render():
                         st.plotly_chart(fig_tr, use_container_width=True, config={'editable': False})
                         apollo_ui.howto(
                             "<b>棒の高さ＝その年に出願した発明者の人数</b>で、<b>赤＝その年に初めて登場した新規人材</b>、"
-                            "青＝以前から活動する継続人材です。<b>新規が細り続ける</b>場合は人材流入の停滞、"
+                            "<b>青＝それより前の年に1件でも出願したことがある継続人材</b>です。"
+                            "継続かどうかは前年だけでなく<b>対象期間内の過去すべての年</b>で判定します"
+                            "（数年ぶりに再登場した人も継続に数えます。期間開始前の実績は判定に入らないため、期間最初の年は全員が新規になります）。"
+                            "<b>新規が細り続ける</b>場合は人材流入の停滞、"
                             "新規の急増は研究体制の拡大や新規参入のサインです。"
                         )
 
@@ -847,6 +925,14 @@ def render():
                         )
                         fig_time.update_layout(showlegend=False, height=max(400, top_n_tl * 25))
                         utils.update_fig_layout(fig_time, "タイムライン", height=max(400, top_n_tl * 25), show_axes=True)
+                        # カテゴリ軸の自動間引きで発明者名が1人おきにしか出ないことがあるため、全行に目盛りを強制する
+                        fig_time.update_yaxes(tickmode='linear', tick0=0, dtick=1)
+                        # 出願年の目盛りも自動間引きで5年おきになり、縦の補助線も無いと何年の出願か
+                        # 読み取れないため、年目盛り＋縦グリッドを明示する（期間25年超は2年おき）
+                        _yr_min, _yr_max = int(df_time['出願年'].min()), int(df_time['出願年'].max())
+                        _x_dtick = 1 if (_yr_max - _yr_min) <= 25 else 2
+                        fig_time.update_xaxes(tickmode='linear', tick0=_yr_min, dtick=_x_dtick,
+                                              showgrid=True, gridcolor='#eee', gridwidth=1)
                         st.plotly_chart(fig_time, use_container_width=True, config={'editable': False})
                         apollo_ui.howto(
                             "<b>横軸＝出願年、縦＝発明者（出願数の多い順）</b>で、<b>丸の大きさ＝その年の出願数</b>です。"

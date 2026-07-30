@@ -114,7 +114,7 @@ with st.sidebar:
         for _pg, _code, _func, _icon in _items:
             st.page_link(_pg, label=_func, icon=_icon)
 
-    st.markdown('<div class="ap-foot">APOLLO v10.0.0<br>© 2026 しばやま</div>',
+    st.markdown('<div class="ap-foot">APOLLO v10.0.1<br>© 2026 しばやま</div>',
                 unsafe_allow_html=True)
 
 nav.run()

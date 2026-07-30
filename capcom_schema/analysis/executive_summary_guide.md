@@ -165,7 +165,7 @@
   [対象件数], [{total_patents}件],
   [対象期間], [{coverage_years or period}],
   [分析実施日], [{date}],
-  [分析ツール], [APOLLO v10.0.0],
+  [分析ツール], [APOLLO v10.0.1],
 )
 
 #text(size: 10pt, style: "italic")[

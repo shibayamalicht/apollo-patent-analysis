@@ -432,7 +432,7 @@ X 社の 2024 年出願件数が前年比 +180% と急増しているが、こ�
   [出願年範囲], [{period}（出願年基準）],
   // --- 分析技術条件（固定）
   [分析実施日], [{date}],
-  [分析ツール], [APOLLO v10.0.0],
+  [分析ツール], [APOLLO v10.0.1],
   [レポート生成AIツール], [{context.capcom_tools.selected の連結、例: "Claude Code（Anthropic）, Codex CLI（OpenAI）"}],
   [テキスト埋め込み], [SBERT（{metadata.json の analysis_environment.sbert_model を記載。例: intfloat/multilingual-e5-base または paraphrase-multilingual-MiniLM-L12-v2}、{analysis_environment.embedding_dim}次元）],
   [次元削減], [UMAP（{flight_recorder の Saturn V「俯瞰図の生成」repro から n_neighbors / min_dist / 乱数シード。未記録なら n_neighbors=15, min_dist=0.1}）],
